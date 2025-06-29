@@ -102,11 +102,11 @@ quickly.
 
 The SDK uses PEP 420 namespace packages, allowing multiple wheels to share the `mcs.drivers` namespace.
 
-| Element           | Convention                            | Example                 |
-| ----------------- |---------------------------------------| ----------------------- |
-| Python Namespace  | `mcs.drivers.<name>`                  | `mcs.drivers.rest_http` |
-| Source File       | `<protocoal>_<transport>_driver.py`   | `rest_http_driver.py`   |
-| PyPI Package Name | `mcs-driver-<protocoal>_<transport>`  | `mcs-driver-rest-http`  |
+| Element           | Convention                                     | Example                 |
+| ----------------- |------------------------------------------------| ----------------------- |
+| Python Namespace  | `mcs.drivers.<name>`                           | `mcs.drivers.rest_http` |
+| Source File       | `<protocoal>_<transport>_driver.py`            | `rest_http_driver.py`   |
+| PyPI Package Name | `mcs-driver-<protocol>_<transport>-<postfix?>` | `mcs-driver-rest-http`  |
 
  This scheme allows `pip search mcs-driver-` to discover compatible drivers without needing a central registry.
 
