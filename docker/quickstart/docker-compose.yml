@@ -1,0 +1,26 @@
+
+services:
+  # HTML-Work-around (Browser-Modus von ChatGPT)
+  mcs-html:
+    build:
+      context: ../../      # Repo-Root, damit Dockerfile gefunden wird
+      dockerfile: docker/quickstart/Dockerfile
+    image: mcs-quickstart:latest
+    command: ["uvicorn", "fastapi_server_mcs_quickstart:app",
+              "--host", "0.0.0.0", "--port", "8000"]
+    container_name: mcs-quickstart-html
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # Pure JSON/REST-Variante
+  mcs-rest:
+    image: mcs-quickstart:latest   # nutzt dasselbe Image, kein Rebuild nötig
+    command: ["uvicorn", "fastapi_rest_quickstart:app",
+              "--host", "0.0.0.0", "--port", "8001"]
+    container_name: mcs-quickstart-rest
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+
+

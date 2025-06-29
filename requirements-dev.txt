@@ -1,0 +1,7 @@
+-e mcs-drivers-core
+-e mcs-driver-rest-http
+-e mcs-examples
+pytest
+ruff
+pre-commit
+twine
