@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "mcs-drivers-core"
-version         = "0.1.1"
+version         = "0.2"
 description     = "Core driver contract for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"
 license         = "Apache-2.0"
 license-files = ["LICEN[CS]E.*"]
-keywords = ["mcs", "modelcontextstandard", "mcs-driver", "mcs-drivers", "python-sdk", "python", "function-calling", "llms", "integration", "driver"]
+keywords = ["mcs", "modelcontextstandard", "mcs-driver", "mcs-drivers", "mcs-tools", "mcs-orchestrator", "python-sdk", "python", "function-calling", "llms", "integration", "driver"]
 authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
 
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}

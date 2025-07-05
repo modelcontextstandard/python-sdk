@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """MCS core driver interface.
 
 Based on MCS driver Contract v0.1
@@ -14,57 +12,79 @@ keeps the integration surface minimal and self‑contained.
 
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from typing import Any
 
 
 @dataclass(frozen=True)
+class DriverBinding:
+    """Describes a single supported interface binding.
+
+    A binding links a high-level protocol, its transport mechanism,
+    and the format used to describe its callable functions.
+
+    Attributes
+    ----------
+    protocol :
+        Logical protocol layer, e.g. "REST", "GraphQL", "EDI"
+    transport :
+        Transport channel, e.g. "HTTP", "MQTT", "AS2"
+    spec_format :
+        Description format, e.g. "OpenAPI", "JSON-Schema", "WSDL", "Custom"
+
+    Example
+    -------
+    >>> DriverBinding(protocol="REST", transport="HTTP", spec_format="OpenAPI")
+    """
+    protocol: str
+    transport: str
+    spec_format: str
+
+
+@dataclass(frozen=True)
 class DriverMeta:
-    """Static metadata that classifies a driver.
+    """Static metadata that describes the capabilities of a driver.
 
-        The fields allow an orchestrator (or any other component) to decide
-        whether a given driver is suitable for a particular function-calling
-        scenario.
+    The metadata can be inspected by orchestrators or clients to determine
+    compatibility, supported models, and runtime features.
 
-        Attributes
-        ----------
-        protocol :
-            High-level protocol the driver speaks on the *logical* layer,
-            e.g. ``"REST"``, ``"EDI"``, ``"GraphQL"``.
-        transport :
-            Physical or network transport used to reach the target system,
-            e.g. ``"HTTP"``, ``"AS2"``, ``"CAN"``, ``"MQTT"``.
-        spec_format :
-            Format of the machine-readable function description understood
-            by this driver, e.g. ``"OpenAPI"``, ``"JSON-Schema"``,
-            ``"WSDL"``, or ``"Custom"``.
-        supported_models :
-            Tuple of model identifiers that the driver’s prompt template is
-            explicitly tuned for.  Use a wildcard like ``"*"``
-            to indicate a generic prompt that should work for *any* LLM.
+    Attributes
+    ----------
+    id :
+        Globally unique identifier (e.g. UUID)
+    name :
+        Human-readable name of the driver
+    version :
+        Semantic version string (e.g. "1.0.0")
+    bindings :
+        One or more supported interface definitions.
+    supported_llms :
+        Tuple of supported model identifiers. Use "*" to match all models. None if the driver is a MCS Tool Driver.
+    capabilities :
+        Optional list of runtime features like "healthcheck", "streaming", etc.
 
-        Example
-        -------
-        >>> DriverMeta(
-        ...     id="c0c24b2f-0d18-425b-8135-2155e0289e00"
-        ...     name="HTTP REST Driver",
-        ...     version="1.0.0",
-        ...     protocol="REST",
-        ...     transport="HTTP",
-        ...     spec_format="OpenAPI",
-        ...     target_llms=("*", "claude-3")
-        ...     capabilities=("healthcheck"),
-        ... )
-        """
+    Example
+    -------
+    >>> DriverMeta(
+    ...     id="c0c24b2f-0d18-425b-8135-2155e0289e00",
+    ...     name="HTTP REST Driver",
+    ...     version="1.0.0",
+    ...     bindings=(
+    ...         DriverBinding(protocol="REST", transport="HTTP", spec_format="OpenAPI"),
+    ...     ),
+    ...     supported_llms=("*", "claude-3"),
+    ...     capabilities=("healthcheck",)
+    ... )
+    """
     id: str
     name: str
     version: str
-    protocol: str
-    transport: str
-    spec_format: str  # e.g. "OpenAPI", "JSON-Schema", "Custom"
-    target_llms: tuple[str]  # e.g. ["*", "claude-3"]
-    capabilities: tuple[str]  # e.g. ["healthcheck", "status"]
+    bindings: tuple[DriverBinding, ...]
+    supported_llms: tuple[str, ...] | None
+    capabilities: tuple[str, ...]
 
 
 class MCSDriver(ABC):
@@ -133,6 +153,11 @@ class MCSDriver(ABC):
         The driver must parse *llm_response*, route the call via its
         transport layer, collect the result, and return it in raw form
         (string, dict, binary blob – whatever is appropriate).
+
+        It is important to return the raw llm_response exactly as it was, when
+        not executing was made, so that a client can determine whether the
+        response was processed by the driver or not. This is necessary if
+        multiple drivers were chained together.
 
         Parameters
         ----------
