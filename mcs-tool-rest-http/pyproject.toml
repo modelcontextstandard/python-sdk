@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=63", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name            = "mcs-tooldriver-rest-http"
+version         = "0.1.0"
+description     = "REST-over-HTTP tooldriver for MCS (OpenAPI)."
+readme          = "README.md"
+requires-python = ">=3.9"
+license         = { text = "Apache-2.0" }
+dependencies    = [
+  "mcs-drivers-core>=0.2",
+  "requests>=2.32"
+]
+
+[tool.setuptools.packages.find]
+where    = ["src"]
