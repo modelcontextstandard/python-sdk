@@ -34,7 +34,7 @@ from mcs.drivers.core import MCSDriver, DriverMeta  # noqa: F401
 class _RestHttpMeta(DriverMeta):
     """Static metadata so an orchestrator can pick this driver."""
     id: str = "42144fa5-ed09-4c63-be1f-48122847835a"
-    name: str = "REST HTTP Driver"
+    name: str = "REST HTTP MCS Driver"
     version: str = "0.1.0"
     protocol: str = "REST"
     transport: str = "HTTP"
