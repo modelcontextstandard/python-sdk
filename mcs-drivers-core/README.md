@@ -100,15 +100,26 @@ quickly.
 
 ## Architecture & Naming
 
-The SDK uses PEP 420 namespace packages, allowing multiple wheels to share the `mcs.drivers` namespace.
+The SDK follows a consistent naming convention based on PEP 420 namespace packages. This allows multiple independently packaged 
+drivers to coexist under shared namespaces like `mcs.drivers`, `mcs.tooldrivers`, and `mcs.orchestrators`.
 
-| Element           | Convention                                     | Example                 |
-| ----------------- |------------------------------------------------| ----------------------- |
-| Python Namespace  | `mcs.drivers.<name>`                           | `mcs.drivers.rest_http` |
-| Source File       | `<protocoal>_<transport>_driver.py`            | `rest_http_driver.py`   |
-| PyPI Package Name | `mcs-driver-<protocol>_<transport>-<postfix?>` | `mcs-driver-rest-http`  |
+| Component Type  | PyPI Package Name Format            | Python Namespace                     | Example                          |
+| --------------- | ----------------------------------- | ------------------------------------ |----------------------------------|
+| MCS Driver      | `mcs-driver-<protocol>-<transport>` | `mcs.drivers.<protocol>_<transport>` | `mcs-driver-rest-http`           |
+| MCS Tool Driver | `mcs-tool-<domain>-<name>`          | `mcs.tooldrivers.<domain>_<name>`    | `mcs-tool-erp-odoo`              |
+| Orchestrator    | `mcs-orchestrator-<target>`         | `mcs.orchestrators.<target>`         | `mcs-orchestrator-openai-chatml` |
 
- This scheme allows `pip search mcs-driver-` to discover compatible drivers without needing a central registry.
+If a name is already taken or the implementation is organization-specific, a custom prefix can be added 
+using an underscore, for example: `mcs-driver-rest-http-<org>`.
+
+This structure makes it easy to discover relevant packages using standard tools:
+
+> pip search mcs-driver- <br>
+> pip search mcs-tool- <br>
+> pip search mcs-orchestrator-
+
+The format ensures that new drivers can be published without requiring a central registry. At the same time, the namespace 
+layout supports modular development, semantic clarity, and direct support for dependency injection in orchestrators.
 
 ---
 
