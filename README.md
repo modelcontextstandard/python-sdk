@@ -87,6 +87,34 @@ everyone can use it directly, without even knowing how it looks like.
 With this interface using projects like DSPy to optimize prompts for different LLMs will make the effort pay off really
 quickly.
 
+### 3. Development
+
+git clone https://github.com/modelcontextstandard/python-sdk.git
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+
+
+#### 3.1. Development of a new driver
+
+Create a project with the name mcs-driver-<protocol>-<transport>
+
+Like this: 
+mcs-driver-filesystem-localfs - For LLM to access the local filesystem
+mcs-tool-filesystem-localfs - For a driver that must be used with an orchestrator
+mcs-tool-driver-filesystem-localfs - For a driver that is dual use
+
+Execute python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install mcs-drivers-core # Or create a requirements.txt file with the dependencies or a pyproject.toml file with the dependencies
+Create a README.md file with the information about the driver
+Create a LICENSE file with the license of the driver
+
+Create the folder structure:
+src/mcs/drivers/<protocol>_<transport>/__init__.py
+src/mcs/drivers/<protocol>_<transport>/protocol>_<transport>_driver.py
+
+Because of Dank PEP 420 (Namespace Packages) we can't put an __init__.py file in src or src/mcs or src/mcs/drivers.
+
+
 ---
 
 ## Benefits
@@ -100,26 +128,33 @@ quickly.
 
 ## Architecture & Naming
 
-The SDK follows a consistent naming convention based on PEP 420 namespace packages. This allows multiple independently packaged 
-drivers to coexist under shared namespaces like `mcs.drivers`, `mcs.tooldrivers`, and `mcs.orchestrators`.
+The SDK follows a consistent naming convention using PEP 420 namespace packages. 
+This enables modular packaging and seamless discovery of drivers, tool drivers, and orchestrators.
 
-| Component Type  | PyPI Package Name Format            | Python Namespace                     | Example                          |
-| --------------- | ----------------------------------- | ------------------------------------ |----------------------------------|
-| MCS Driver      | `mcs-driver-<protocol>-<transport>` | `mcs.drivers.<protocol>_<transport>` | `mcs-driver-rest-http`           |
-| MCS Tool Driver | `mcs-tool-<domain>-<name>`          | `mcs.tooldrivers.<domain>_<name>`    | `mcs-tool-erp-odoo`              |
-| Orchestrator    | `mcs-orchestrator-<target>`         | `mcs.orchestrators.<target>`         | `mcs-orchestrator-openai-chatml` |
+| Component Type  | PyPI Package Name Format                             | Python Namespace                         | Example                          |
+| --------------- | ---------------------------------------------------- | ---------------------------------------- | -------------------------------- |
+| MCS Driver      | `mcs-driver-<protocol>-<transport>[-<variant>]`      | `mcs.drivers.<protocol>_<transport>`     | `mcs-driver-rest-http`           |
+| MCS Tool Driver | `mcs-tool-<protocol>-<transport>[-<variant>]`        | `mcs.tooldrivers.<protocol>_<transport>` | `mcs-tool-rest-http`             |
+| Hybrid Driver   | `mcs-tool-driver-<protocol>-<transport>[-<variant>]` | `mcs.tooldrivers.<protocol>_<transport>` | `mcs-tool-driver-rest-http`      |
+| Orchestrator    | `mcs-orchestrator-<target>`                          | `mcs.orchestrators.<target>`             | `mcs-orchestrator-openai-chatml` |
 
-If a name is already taken or the implementation is organization-specific, a custom prefix can be added 
-using an underscore, for example: `mcs-driver-rest-http-<org>`.
 
-This structure makes it easy to discover relevant packages using standard tools:
+If a name is already taken or the implementation is organization-specific, a custom prefix can be added, for example: `mcs-driver-rest-http-<variant>`.
 
-> pip search mcs-driver- <br>
-> pip search mcs-tool- <br>
-> pip search mcs-orchestrator-
+This structure makes it easy to discover relevant packages using standard tools, like [https://pypi.org/search](https://pypi.org/search).
 
-The format ensures that new drivers can be published without requiring a central registry. At the same time, the namespace 
-layout supports modular development, semantic clarity, and direct support for dependency injection in orchestrators.
+There you can search for available drivers and orchestrators with the prefix
+
+> mcs-driver- <br>
+> mcs-tool- <br>
+> mcs-tool-driver- (if you need a dedicated hybrid driver) <br>
+> mcs-orchestrator-
+
+This naming scheme avoids the need for a central registry while maintaining clarity, searchability, and future extensibility. 
+Tool drivers are expected to become the default in more complex setups due to their structured interface and better separation 
+of concerns. The hybrid variant ensures backward compatibility and gradual transition.
+
+Later it might be an interesting option to have a central registry for drivers and orchestrators, also to have a better control over the delopyment, security and versioning.
 
 ---
 

@@ -17,7 +17,7 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
 class ChatSession:
     def __init__(self, driver: MCSDriver) -> None:
-        self.mcs_driver: MCSDriver = driver
+        self.mcs_driver: MCSDriver = driver    
 
     async def _extract_llm_response(self, model: str = "gpt-4o", messages: List[Dict[str, str]] = None,
                                     response_format: Dict[str, str] = None) \
@@ -67,6 +67,13 @@ class ChatSession:
             print(f"An error occurred: {e}")
             # Handle the exception as needed, e.g., logging or retrying
 
+def invoke_capability(driver, capability: str):        
+        if capability in driver.meta.capabilities:
+            method = getattr(driver, capability, None)
+            if callable(method):
+                return method()
+        return None
+
 
 async def main() -> None:
     load_dotenv()
@@ -74,8 +81,20 @@ async def main() -> None:
     # Optional Autostart and getting the URLs
 
     # Only one url is implemented right now, need to do some magic if we want to support multiple urls
+    # Support for only one driver is implemented
     function_spec_urls = ['https://mcs-quickstart.coolify.alsdienst.de/openapi.json']
     http_driver = RestHttpDriver(function_spec_urls)
+
+    drivers = [http_driver]
+
+    for driver in drivers:
+        result = invoke_capability(driver, "healthcheck")
+        binding = driver.meta.bindings[0]
+        if result:
+            details = {k: v for k, v in result.items() if k != 'status'}
+            print(f"{driver.meta.name} for {binding.protocol} over {binding.transport} - Status: {result['status'].value} - (Details: {details})")
+        else:
+            print(f"{driver.meta.name} for {binding.protocol} over {binding.transport} - capability not supported")
 
     chat_session = ChatSession(http_driver)
     await chat_session.start()

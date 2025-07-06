@@ -1,0 +1,13 @@
+{
+  "include": [
+    "mcs-drivers-core/src",
+    "mcs-driver-rest-http/src",
+    "mcs-tool-rest-http/src",
+    "mcs-examples"
+  ],
+  "extraPaths": [
+    "mcs-drivers-core/src",
+    "mcs-driver-rest-http/src",
+    "mcs-tool-rest-http/src"
+  ]
+} 
