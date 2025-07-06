@@ -25,7 +25,8 @@ import requests
 # ──────────────────────────────────────────────────────────────
 #  MCS base classes (adapt import path to your project layout)
 # ──────────────────────────────────────────────────────────────
-from mcs.drivers.core import MCSDriver, DriverMeta  # noqa: F401
+from mcs.drivers.core import MCSDriver, DriverMeta, DriverBinding  # noqa: F401
+from mcs.drivers.core.mixins import SupportsHealthcheck, HealthCheckResult, HealthStatus
 
 # --------------------------------------------------------------------------- #
 #                               Metadata                                      #
@@ -36,17 +37,17 @@ class _RestHttpMeta(DriverMeta):
     id: str = "42144fa5-ed09-4c63-be1f-48122847835a"
     name: str = "REST HTTP MCS Driver"
     version: str = "0.1.0"
-    protocol: str = "REST"
-    transport: str = "HTTP"
-    spec_format: str = "OpenAPI"
-    target_llms: tuple[str, ...] = ("*",)  # generic prompt works everywhere
+    bindings: tuple[DriverBinding, ...] = (
+        DriverBinding(protocol="REST", transport="HTTP", spec_format="OpenAPI"),
+    )
+    supported_llms: tuple[str, ...] = ("*",)  # generic prompt works everywhere
     capabilities: tuple[str, ...] = ("healthcheck")
 
 
 # --------------------------------------------------------------------------- #
 #                               Driver                                        #
 # --------------------------------------------------------------------------- #
-class RestHttpDriver(MCSDriver):
+class RestHttpDriver(MCSDriver, SupportsHealthcheck):
     """Reference driver: REST over HTTP with OpenAPI discovery."""
 
     meta: DriverMeta = _RestHttpMeta()
@@ -91,6 +92,34 @@ class RestHttpDriver(MCSDriver):
         if basic_user and basic_password:
             token = base64.b64encode(f"{basic_user}:{basic_password}".encode()).decode()
             self.default_headers.setdefault("Authorization", f"Basic {token}")
+
+    def healthcheck(self) -> HealthCheckResult:
+        """Perform a health check on the driver by testing URL connectivity.
+
+        Returns
+        -------
+        HealthCheckResult
+            Health status information with connectivity check results.
+        """
+        results = {}
+        for url in self.function_desc_urls:
+            try:
+                requests.head(
+                    url,
+                    headers=self.default_headers,
+                    timeout=5,
+                    verify=self.verify_ssl,
+                    proxies=self.proxies
+                )
+                results[url] = "reachable"
+            except Exception as e:
+                results[url] = f"unreachable: {str(e)}"
+
+        return {
+            "status": HealthStatus.OK if all(v == "reachable" for v in results.values()) else HealthStatus.ERROR,
+            "urls": results
+        }
+        
 
     # --------------------------- helpers ---------------------------------- #
     def _do_request(
