@@ -1,7 +1,5 @@
 -e mcs-drivers-core
--e mcs-driver-rest-http
 -e mcs-examples
--e mcs-tool-rest-http
 pytest
 ruff
 pre-commit
