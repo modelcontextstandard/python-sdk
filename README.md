@@ -81,8 +81,8 @@ final_answer = driver.process_llm_response(llm_out)
 Once perfect prompts exist for a protocol and transport, they are encapsulated inside the driver. 
 This avoids the burden to come up with prompts across apps again and again, this makes the logic reusable.
 
-First time in history of function call it makes sense to get the perfect prompt for a use case, because once developed
-everyone can use it directly, without even knowing how it looks like.
+For the first time, investing in the perfect prompt for a use case pays off directly -- once developed,
+everyone can reuse it without even seeing the prompt itself.
 
 With this interface using projects like DSPy to optimize prompts for different LLMs will make the effort pay off really
 quickly.
@@ -112,7 +112,7 @@ Create the folder structure:
 src/mcs/drivers/<protocol>_<transport>/__init__.py
 src/mcs/drivers/<protocol>_<transport>/protocol>_<transport>_driver.py
 
-Because of Dank PEP 420 (Namespace Packages) we can't put an __init__.py file in src or src/mcs or src/mcs/drivers.
+Because of implicit namespace packages (Python 3.3+) we can't put an __init__.py file in src or src/mcs or src/mcs/drivers.
 
 
 ---
@@ -128,7 +128,7 @@ Because of Dank PEP 420 (Namespace Packages) we can't put an __init__.py file in
 
 ## Architecture & Naming
 
-The SDK follows a consistent naming convention using PEP 420 namespace packages. 
+The SDK follows a consistent naming convention using implicit namespace packages. 
 This enables modular packaging and seamless discovery of drivers, tool drivers, and orchestrators.
 
 | Component Type  | PyPI Package Name Format                             | Python Namespace                         | Example                          |
@@ -154,7 +154,7 @@ This naming scheme avoids the need for a central registry while maintaining clar
 Tool drivers are expected to become the default in more complex setups due to their structured interface and better separation 
 of concerns. The hybrid variant ensures backward compatibility and gradual transition.
 
-Later it might be an interesting option to have a central registry for drivers and orchestrators, also to have a better control over the delopyment, security and versioning.
+Later it might be an interesting option to have a central registry for drivers and orchestrators, also to have a better control over the deployment, security and versioning.
 
 ---
 
@@ -163,7 +163,7 @@ Later it might be an interesting option to have a central registry for drivers a
 We welcome new drivers and improvements:
 
 1. pip install mcs-driver-core
-2. Implement the MCSDriver Interace and follow the naming conventions above
+2. Implement the MCSDriver Interface and follow the naming conventions above
 3. Implement your driver under `mcs/drivers/<protocol>_<transport>_driver.py`.
 4. Publish to PyPI (using the naming scheme) or open a PR in this repo.
 
