@@ -59,23 +59,32 @@ pip install mcs-drivers-core mcs-driver-rest-http
 
 The interaction always follows this pattern:
 
-1. **Get system prompt**: Provided by the driver, tailored for your LLM.
-2. **Run LLM**: Send prompt + input to the LLM.
-3. **Process response**: The driver parses the LLM response and executes commands.
+1. **Get system prompt**: The driver provides a complete system message for the LLM.
+2. **Run LLM**: Send the system prompt + user input to the LLM.
+3. **Process response**: The driver checks if the LLM wants to call a tool.
+4. **Loop**: If a tool was called, feed the result back to the LLM and repeat from step 2.
 
 ```python
 from mcs.drivers.rest_http import RestHttpDriver
 
 driver = RestHttpDriver(urls=["https://example.com/openapi.json"])
-
-# 1) Get the system prompt for the LLM
 system_prompt = driver.get_driver_system_message()
 
-# 2) Let the LLM use that system message (pseudo code)
-llm_out = get_llm_response(system_prompt, "Find the email for Danny")
+messages = [
+    {"role": "system", "content": system_prompt},
+    {"role": "user",   "content": "Find the email for Danny"},
+]
 
-# 3) The driver executes any structured command in the LLM output
-final_answer = driver.process_llm_response(llm_out)
+while True:
+    llm_out = call_llm(messages)                    # your LLM call (pseudo code)
+    result  = driver.process_llm_response(llm_out)
+
+    if result == llm_out:                            # no tool was called
+        print(result)                                # final answer for the user
+        break
+
+    messages.append({"role": "assistant", "content": llm_out})
+    messages.append({"role": "tool",      "content": str(result)})
 ```
 
 Once perfect prompts exist for a protocol and transport, they are encapsulated inside the driver. 
