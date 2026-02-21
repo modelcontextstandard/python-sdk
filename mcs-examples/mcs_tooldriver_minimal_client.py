@@ -46,17 +46,20 @@ class ChatSession:
                     llm_response = await self._extract_llm_response(messages=messages)
                     logging.info("\nAssistant: %s", llm_response)
 
-                    result = self.mcs_driver.process_llm_response(llm_response)
+                    response = self.mcs_driver.process_llm_response(llm_response)
 
-                    if result != llm_response:
+                    if response.call_executed:
                         messages.append({"role": "assistant", "content": llm_response})
-                        messages.append({"role": "system", "content": result})
+                        messages.append({"role": "system", "content": str(response.result)})
 
                         final_response = await self._extract_llm_response(messages=messages)
                         logging.info("\nFinal response: %s", final_response)
                         messages.append(
                             {"role": "assistant", "content": final_response}
                         )
+                    elif response.call_failed:
+                        messages.append({"role": "assistant", "content": llm_response})
+                        messages.append({"role": "system", "content": response.retry_prompt})
                     else:
                         messages.append({"role": "assistant", "content": llm_response})
 
@@ -65,7 +68,6 @@ class ChatSession:
                     break
         except Exception as e:
             print(f"An error occurred: {e}")
-            # Handle the exception as needed, e.g., logging or retrying
 
 
 async def main() -> None:

@@ -1,6 +1,6 @@
 """MCS core driver interface.
 
-Based on MCS driver Contract v0.3
+Based on MCS Driver Contract v0.4
 
 A driver encapsulates two mandatory responsibilities:
 1. **get_function_description** – fetch a machine‑readable function spec
@@ -87,23 +87,83 @@ class DriverMeta:
     capabilities: tuple[str, ...]
 
 
+@dataclass
+class DriverResponse:
+    """Self-contained result of a single ``process_llm_response`` call.
+
+    Every call to ``process_llm_response`` returns a ``DriverResponse``
+    that carries both the result and status information.  This keeps the
+    driver itself stateless and thread-safe.
+
+    Attributes
+    ----------
+    result :
+        Raw output of the executed operation, or the unchanged LLM
+        response when no call was detected / execution failed.
+    call_executed :
+        ``True`` when a tool call was found and successfully executed.
+    call_failed :
+        ``True`` when a tool-call signature was found but could not be
+        parsed or executed.
+    call_detail :
+        Optional human-readable string explaining why the call failed
+        (for debugging / logging).
+    retry_prompt :
+        Driver-authored prompt hint that the client can append to the
+        conversation so the LLM can correct its output and retry.
+    """
+    result: Any
+    call_executed: bool = False
+    call_failed: bool = False
+    call_detail: Optional[str] = None
+    retry_prompt: Optional[str] = None
+
+    @staticmethod
+    def executed(result: Any) -> DriverResponse:
+        """Convenience factory for a successful execution."""
+        return DriverResponse(result=result, call_executed=True)
+
+    @staticmethod
+    def failed(
+        llm_response: Any,
+        detail: str | None = None,
+        retry_prompt: str | None = None,
+    ) -> DriverResponse:
+        """Convenience factory for a detected-but-failed call."""
+        return DriverResponse(
+            result=llm_response,
+            call_failed=True,
+            call_detail=detail,
+            retry_prompt=retry_prompt or (
+                "Your previous response looked like a tool call but could "
+                "not be parsed. Please try again using the exact format "
+                "described in the system instructions."
+            ),
+        )
+
+    @staticmethod
+    def no_match(llm_response: Any) -> DriverResponse:
+        """Convenience factory when no tool call was detected."""
+        return DriverResponse(result=llm_response)
+
+
 class MCSDriver(ABC):
     """Abstract base class for all MCS drivers.
 
     A driver is responsible for two core tasks:
 
-    1.  Provide a **llm-readable function description** so an LLM can discover the available tools.
+    1.  Provide a **llm-readable function description** so an LLM can
+        discover the available tools.
     2.  **Execute** the structured call emitted by the LLM and return the
-        raw result.
+        result inside a :class:`DriverResponse`.
 
     The combination of these two tasks allows any language model that
     supports function-calling to interact with the underlying system
     without knowing implementation details or transport specifics.
 
-    The driver maintains per-call state (``call_executed``, ``call_failed``,
-    ``last_call_detail``) that is reset at the start of every
-    ``process_llm_response`` invocation.  Conversation history is *not*
-    tracked -- that remains the client's responsibility.
+    The driver is **stateless** -- all per-call outcome information is
+    returned inside the :class:`DriverResponse` object.  Conversation
+    history is the client's responsibility.
 
     Attributes
     ----------
@@ -111,23 +171,8 @@ class MCSDriver(ABC):
         :class:`DriverMeta` instance that declares protocol, transport,
         spec format and supported models.  It acts like a device-ID so an
         orchestrator can pick the right driver at runtime.
-    call_executed :
-        ``True`` after ``process_llm_response`` successfully executed a
-        tool call.  Reset to ``False`` at the start of each invocation.
-    call_failed :
-        ``True`` when a tool-call signature was found in the LLM output
-        but could not be parsed or executed.  Together with
-        ``call_executed`` this gives three states: *executed*,
-        *failed*, and *no match*.
-    last_call_detail :
-        Optional human-readable string explaining why the call failed
-        (for debugging / logging).  ``None`` when not applicable.
     """
     meta: DriverMeta
-
-    call_executed: bool = False
-    call_failed: bool = False
-    last_call_detail: Optional[str] = None
 
     @abstractmethod
     def get_function_description(self, model_name: str | None = None) -> str:  # noqa: D401
@@ -167,24 +212,23 @@ class MCSDriver(ABC):
         """
 
     @abstractmethod
-    def process_llm_response(self, llm_response: str) -> Any:  # noqa: D401
+    def process_llm_response(self, llm_response: str) -> DriverResponse:  # noqa: D401
         """Execute the structured call emitted by the LLM.
 
-        Implementations **must** reset ``call_executed``, ``call_failed``
-        and ``last_call_detail`` at the start of every invocation, then set
-        them according to the outcome:
+        Returns a :class:`DriverResponse` that carries the result and
+        status flags:
 
-        * **Executed** -- ``call_executed = True``
-        * **Failed** -- ``call_failed = True``, optionally set
-          ``last_call_detail``
-        * **No match** -- both ``False``
+        * **Executed** -- ``DriverResponse.executed(result)``
+        * **Failed** -- ``DriverResponse.failed(llm_response, detail, retry_prompt)``
+        * **No match** -- ``DriverResponse.no_match(llm_response)``
 
         Before signalling *detected but failed* the driver should attempt
         any configured self-healing patterns (e.g. fixing known
         model-specific formatting errors).
 
-        When no call is detected the driver must return *llm_response*
-        unchanged so that chaining across multiple drivers works correctly.
+        When no call is detected the driver must return the input
+        unchanged (via ``DriverResponse.no_match``) so that chaining
+        across multiple drivers works correctly.
 
         Parameters
         ----------
@@ -195,26 +239,7 @@ class MCSDriver(ABC):
 
         Returns
         -------
-        Any
-            Raw output of the executed operation.  The conversation
-            orchestrator is responsible for post-processing or converting
-            it into a user-friendly reply.
+        DriverResponse
+            Self-contained result with status flags, detail, and
+            optional retry prompt.
         """
-
-    def get_retry_prompt(self) -> str | None:  # noqa: D401
-        """Return a prompt hint when a call was detected but not executed.
-
-        The client can append this to the conversation so the LLM can
-        correct its output and retry.  Returns ``None`` when there is
-        nothing to retry (i.e. ``call_failed`` is ``False``).
-
-        The default implementation returns a generic message.  Drivers
-        may override this to provide model- or protocol-specific guidance.
-        """
-        if self.call_failed:
-            return (
-                "Your previous response looked like a tool call but could "
-                "not be parsed. Please try again using the exact format "
-                "described in the system instructions."
-            )
-        return None
