@@ -20,8 +20,8 @@ Your application no longer needs to know the API specifics. Instead:
 
 > This makes the driver swappable and reusable. Prompt tuning and structured execution are handled in one place, not scattered across codebases.
 
-Unlike MCP, no new protocol is required. At the end of the day, function calling connects a LLM with its environment. 
-That makes this primarily a driver challenge, not a protocol stack challenge.
+Unlike MCP, no new protocol stack is required. At the end of the day, function calling connects a LLM with its environment. 
+MCS standardizes the driver contract, not the wire format. That makes this primarily a driver challenge, not a protocol stack challenge.
 
 If you really need features provided by MCP (Model Context Protocol), MCS complements that by providing possible drivers
 or MCP using MCS compatible drivers.
