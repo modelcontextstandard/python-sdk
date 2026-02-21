@@ -79,12 +79,17 @@ while True:
     llm_out = call_llm(messages)                    # your LLM call (pseudo code)
     result  = driver.process_llm_response(llm_out)
 
-    if result == llm_out:                            # no tool was called
-        print(result)                                # final answer for the user
-        break
+    if driver.call_executed:                         # tool was called successfully
+        messages.append({"role": "assistant", "content": llm_out})
+        messages.append({"role": "tool",      "content": str(result)})
 
-    messages.append({"role": "assistant", "content": llm_out})
-    messages.append({"role": "tool",      "content": str(result)})
+    elif driver.call_failed:                         # tool call found but could not be parsed/executed
+        messages.append({"role": "assistant", "content": llm_out})
+        messages.append({"role": "system",    "content": driver.get_retry_prompt()})
+
+    else:                                            # no tool call -- final answer
+        print(result)
+        break
 ```
 
 Once perfect prompts exist for a protocol and transport, they are encapsulated inside the driver. 
