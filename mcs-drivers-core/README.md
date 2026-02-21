@@ -112,28 +112,26 @@ quickly.
 
 ---
 
-## Architecture & Naming
+## Architecture & Naming (PyPI Convention)
 
-The SDK follows a consistent naming convention based on implicit namespace packages. This allows multiple independently packaged 
-drivers to coexist under shared namespaces like `mcs.drivers`, `mcs.tooldrivers`, and `mcs.orchestrators`.
+The Python SDK uses **two prefixes** for package discovery via PyPI. Other language SDKs may define their own conventions.
 
-| Component Type  | PyPI Package Name Format            | Python Namespace                     | Example                          |
-| --------------- | ----------------------------------- | ------------------------------------ |----------------------------------|
-| MCS Driver      | `mcs-driver-<protocol>-<transport>` | `mcs.drivers.<protocol>_<transport>` | `mcs-driver-rest-http`           |
-| MCS Tool Driver | `mcs-tool-<domain>-<name>`          | `mcs.tooldrivers.<domain>_<name>`    | `mcs-tool-erp-odoo`              |
-| Orchestrator    | `mcs-orchestrator-<target>`         | `mcs.orchestrators.<target>`         | `mcs-orchestrator-openai-chatml` |
+| Component | PyPI Package Format | Python Namespace | Example |
+| --- | --- | --- | --- |
+| Driver | `mcs-driver-<protocol>-<transport>[-<variant>]` | `mcs.drivers.<protocol>_<transport>` | `mcs-driver-rest-http` |
+| Orchestrator | `mcs-orchestrator-<strategy>[-<variant>]` | `mcs.orchestrators.<strategy>` | `mcs-orchestrator-basic` |
 
-If a name is already taken or the implementation is organization-specific, a custom prefix can be added 
-using an underscore, for example: `mcs-driver-rest-http-<org>`.
+Drivers default to **hybrid** (implementing both `MCSDriver` and `MCSToolDriver`). Use suffix `-standalone` or `-toolonly` when a driver explicitly supports only one mode. Author/vendor variants use a free suffix, e.g. `-acme`.
 
-This structure makes it easy to discover relevant packages using standard tools:
+Discovery with just two prefixes:
 
-> pip search mcs-driver- <br>
-> pip search mcs-tool- <br>
-> pip search mcs-orchestrator-
+```
+pip search mcs-driver-              # all drivers
+pip search mcs-driver-rest-http     # all REST-HTTP variants
+pip search mcs-orchestrator-        # all orchestrators
+```
 
-The format ensures that new drivers can be published without requiring a central registry. At the same time, the namespace 
-layout supports modular development, semantic clarity, and direct support for dependency injection in orchestrators.
+Implicit namespace packages (Python 3.3+) allow multiple independently packaged drivers to coexist under `mcs.drivers.*` without conflicts. See the [python-sdk README](https://github.com/modelcontextstandard/python-sdk#architecture--naming-pypi-convention) for the full rationale.
 
 ---
 
@@ -141,10 +139,11 @@ layout supports modular development, semantic clarity, and direct support for de
 
 We welcome new drivers and improvements:
 
-1. pip install mcs-driver-core
-2. Implement the MCSDriver Interface and follow the naming conventions above
-3. Implement your driver under `mcs/drivers/<protocol>_<transport>_driver.py`.
-4. Publish to PyPI (using the naming scheme) or open a PR in this repo.
+1. `pip install mcs-drivers-core`
+2. Implement the `MCSDriver` interface (and optionally `MCSToolDriver` for orchestrator support).
+3. Place your driver under `src/mcs/drivers/<protocol>_<transport>/`.
+4. Follow the naming convention: `mcs-driver-<protocol>-<transport>[-<variant>]`.
+5. Publish to PyPI or open a PR in this repo.
 
 ---
 
