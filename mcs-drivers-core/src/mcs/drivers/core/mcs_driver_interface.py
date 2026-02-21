@@ -2,9 +2,12 @@
 
 Based on MCS Driver Contract v0.4
 
-A driver encapsulates two mandatory responsibilities:
-1. **get_function_description** – fetch a machine‑readable function spec
-2. **process_llm_response** – execute a structured call emitted by the LLM
+A driver encapsulates three responsibilities:
+1. **get_function_description** – provide a machine-readable function spec
+   (may be model-specific, e.g. XML for Grok, JSON for GPT)
+2. **get_driver_system_message** – provide a ready-to-use system prompt
+   (typically wraps get_function_description with prompt guidance)
+3. **process_llm_response** – execute a structured call emitted by the LLM
 
 Implementations can use any transport (HTTP, CAN‑Bus, AS2, …) and any
 specification format (OpenAPI, JSON‑Schema, proprietary JSON). The interface
