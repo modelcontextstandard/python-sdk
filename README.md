@@ -83,19 +83,19 @@ messages = [
 ]
 
 while True:
-    llm_out = call_llm(messages)                    # your LLM call (pseudo code)
-    result  = driver.process_llm_response(llm_out)
+    llm_out  = call_llm(messages)                        # your LLM call (pseudo code)
+    response = driver.process_llm_response(llm_out)
 
-    if driver.call_executed:                         # tool was called successfully
+    if response.call_executed:                            # tool was called successfully
         messages.append({"role": "assistant", "content": llm_out})
-        messages.append({"role": "tool",      "content": str(result)})
+        messages.append({"role": "tool",      "content": str(response.result)})
 
-    elif driver.call_failed:                         # tool call found but could not be parsed/executed
+    elif response.call_failed:                            # tool call found but could not be parsed/executed
         messages.append({"role": "assistant", "content": llm_out})
-        messages.append({"role": "system",    "content": driver.get_retry_prompt()})
+        messages.append({"role": "system",    "content": response.retry_prompt})
 
-    else:                                            # no tool call -- final answer
-        print(result)
+    else:                                                 # no tool call -- final answer
+        print(response.result)
         break
 ```
 
@@ -163,10 +163,15 @@ The Python SDK uses **two prefixes** for package discovery via PyPI. Other langu
 
 ### Naming scheme
 
-| Component | PyPI Package Format | Python Namespace | Example |
-| --- | --- | --- | --- |
-| Driver | `mcs-driver-<protocol>-<transport>[-<variant>]` | `mcs.drivers.<protocol>_<transport>` | `mcs-driver-rest-http` |
-| Orchestrator | `mcs-orchestrator-<strategy>[-<variant>]` | `mcs.orchestrators.<strategy>` | `mcs-orchestrator-basic` |
+| Level | Pattern | Example |
+| --- | --- | --- |
+| PyPI package | `mcs-driver-<protocol>-<transport>[-<variant>]` | `mcs-driver-rest-http` |
+| Python import | `mcs.drivers.<protocol>_<transport>` | `from mcs.drivers.rest_http import RestHttpDriver` |
+| Class (Driver) | `<Protocol><Transport>Driver` | `RestHttpDriver` |
+| Class (ToolDriver) | `<Protocol><Transport>ToolDriver` | `RestHttpToolDriver` |
+| Files | `driver.py` / `tooldriver.py` | `src/mcs/drivers/rest_http/driver.py` |
+| Orchestrator (PyPI) | `mcs-orchestrator-<strategy>[-<variant>]` | `mcs-orchestrator-basic` |
+| Orchestrator (import) | `mcs.orchestrators.<strategy>` | `from mcs.orchestrators.basic import BasicOrchestrator` |
 
 **Every driver defaults to hybrid** -- it implements both `MCSDriver` (standalone) and `MCSToolDriver` (orchestrator-facing). This is the recommended pattern because it maximizes reusability: the same driver works directly with a client or as a building block inside an orchestrator.
 
@@ -194,6 +199,32 @@ The driver type (hybrid, standalone, toolonly) is also exposed programmatically 
 ### Why two prefixes instead of four?
 
 Earlier drafts used separate prefixes for tool drivers (`mcs-tool-`), hybrid drivers (`mcs-tool-driver-`), and full drivers (`mcs-driver-`). This made discovery harder -- users had to search three different prefixes to find all drivers for a given protocol-transport pair. Since hybrid is the recommended default, a single `mcs-driver-` prefix covers all cases. The type lives in the metadata, not the name.
+
+### Import convention (IntelliSense)
+
+The Python namespace follows a strict pattern so IDE autocompletion works predictably:
+
+```python
+from mcs.drivers.rest_http import RestHttpDriver           # MCSDriver
+from mcs.drivers.rest_http import RestHttpToolDriver       # MCSToolDriver
+from mcs.drivers.filesystem_localfs import FilesystemLocalfsDriver
+from mcs.orchestrators.basic import BasicOrchestrator
+```
+
+When you type `from mcs.drivers.` your IDE lists all installed drivers. When you type `from mcs.drivers.rest_http import ` you see the available classes.
+
+### File naming inside a driver package
+
+Each driver package follows this internal structure:
+
+```
+src/mcs/drivers/<protocol>_<transport>/
+    __init__.py          # re-exports public classes
+    driver.py            # MCSDriver implementation (standalone)
+    tooldriver.py        # MCSToolDriver implementation (orchestrator-facing)
+```
+
+Class names use PascalCase derived from the module path: `rest_http` becomes `RestHttpDriver` / `RestHttpToolDriver`. This makes the mapping from package name to import path to class name predictable.
 
 ### Namespace packages
 

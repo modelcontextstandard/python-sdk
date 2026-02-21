@@ -28,7 +28,7 @@ import json
 import re
 import logging
 
-from . import MCSDriver, MCSToolDriver, Tool, DriverMeta, DriverBinding
+from . import MCSDriver, MCSToolDriver, Tool, DriverMeta, DriverBinding, DriverResponse
 
 logger = logging.getLogger(__name__)
 
@@ -171,70 +171,62 @@ class BasicOrchestrator(MCSDriver, ABC):
             return None
 
 
-    def process_llm_response(self, llm_response: str) -> Any:
-        """
-        Parses the LLM's response, identifies tool calls, and dispatches them for execution.
-
-        This method expects the LLM's response to be a JSON string formatted as
-        a tool call (as specified in `get_driver_system_message`). It then iterates
-        through registered drivers to find the tool and executes it using `execute_tool`.
+    def process_llm_response(self, llm_response: str) -> DriverResponse:
+        """Parse the LLM's response, identify tool calls, and dispatch for execution.
 
         Parameters
         ----------
         llm_response : str
-            The raw string content from the LLM's assistant message, expected to be
-            a JSON string representing a tool call.
+            The raw string content from the LLM's assistant message.
 
         Returns
         -------
-        Any
-            The raw result returned by the `execute_tool` method of the relevant driver.
-            If the `llm_response` is not a tool call or no matching tool is found,
-            it may raise an error or return the original `llm_response` (depending on error handling).
-
-        Raises
-        ------
-        RuntimeError
-            If there's an error parsing the LLM's response or if no matching tool is found
-            among the aggregated drivers.
+        DriverResponse
+            Self-contained result with status flags.
         """
-        logger.info(f"Processing LLM response")
+        logger.info("Processing LLM response")
         logger.debug(f"{llm_response}")
 
         json_block = self._extract_json(llm_response)
         if not json_block:
-            return llm_response  # treat as plain text
+            return DriverResponse.no_match(llm_response)
 
         try:
-            parsed = json.loads(llm_response)
-            tool_name = parsed.get("tool")
-            arguments = parsed.get("arguments", {})
-
-            if not tool_name:
-                logger.error("LLM response is missing the 'tool' key.")
-                raise ValueError("LLM response JSON is missing the 'tool' key.")
-
-            logger.info(f"Attempting to execute tool '{tool_name}' with arguments: {arguments}")
-
-            for driver in self.drivers:
-                # Prüfe, ob das Tool in diesem Treiber vorhanden ist
-                if any(tool.name == tool_name for tool in driver.list_tools()):
-                    logger.info(f"Dispatching tool '{tool_name}' to driver '{driver.meta.name}'.")
-                    result = driver.execute_tool(tool_name, arguments)
-                    logger.info(f"Tool '{tool_name}' executed successfully.")
-                    logger.debug(f"Raw result from tool '{tool_name}': {result}")
-                    return result
-
-            logger.warning(f"No matching tool '{tool_name}' found across all drivers.")
-            raise ValueError(f"No matching tool '{tool_name}' found")
-
+            parsed = json.loads(json_block)
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing LLM response as JSON: {e}")
-            raise RuntimeError(f"Error in Orchestrator: Failed to decode LLM response. Original error: {str(e)}")
+            return DriverResponse.failed(llm_response, detail=f"JSON parse error: {e}")
 
-        except Exception as e:
-            logger.error(f"An unexpected error occurred in the orchestrator: {e}", exc_info=True)
-            raise RuntimeError(f"Error in Orchestrator: {str(e)}")
+        tool_name = parsed.get("tool")
+        arguments = parsed.get("arguments", {})
+
+        if not tool_name:
+            return DriverResponse.failed(
+                llm_response,
+                detail="Tool call detected but no 'tool' field found.",
+            )
+
+        logger.info(f"Attempting to execute tool '{tool_name}' with arguments: {arguments}")
+
+        for driver in self.drivers:
+            if any(tool.name == tool_name for tool in driver.list_tools()):
+                logger.info(f"Dispatching tool '{tool_name}' to driver '{driver.meta.name}'.")
+                try:
+                    result = driver.execute_tool(tool_name, arguments)
+                    logger.info(f"Tool '{tool_name}' executed successfully.")
+                    return DriverResponse.executed(result)
+                except Exception as e:
+                    logger.error(f"Tool '{tool_name}' execution failed: {e}", exc_info=True)
+                    return DriverResponse.failed(
+                        llm_response,
+                        detail=f"Tool '{tool_name}' execution failed: {e}",
+                    )
+
+        logger.warning(f"No matching tool '{tool_name}' found across all drivers.")
+        return DriverResponse.failed(
+            llm_response,
+            detail=f"No matching tool '{tool_name}' found across registered drivers.",
+        )
 
     @staticmethod
     def _format_tool_for_llm(tool: Tool) -> str:

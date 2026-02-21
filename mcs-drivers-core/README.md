@@ -76,19 +76,19 @@ messages = [
 ]
 
 while True:
-    llm_out = call_llm(messages)                    # your LLM call (pseudo code)
-    result  = driver.process_llm_response(llm_out)
+    llm_out  = call_llm(messages)                        # your LLM call (pseudo code)
+    response = driver.process_llm_response(llm_out)
 
-    if driver.call_executed:                         # tool was called successfully
+    if response.call_executed:                            # tool was called successfully
         messages.append({"role": "assistant", "content": llm_out})
-        messages.append({"role": "tool",      "content": str(result)})
+        messages.append({"role": "tool",      "content": str(response.result)})
 
-    elif driver.call_failed:                         # tool call found but could not be parsed/executed
+    elif response.call_failed:                            # tool call found but could not be parsed/executed
         messages.append({"role": "assistant", "content": llm_out})
-        messages.append({"role": "system",    "content": driver.get_retry_prompt()})
+        messages.append({"role": "system",    "content": response.retry_prompt})
 
-    else:                                            # no tool call -- final answer
-        print(result)
+    else:                                                 # no tool call -- final answer
+        print(response.result)
         break
 ```
 
@@ -116,12 +116,19 @@ quickly.
 
 The Python SDK uses **two prefixes** for package discovery via PyPI. Other language SDKs may define their own conventions.
 
-| Component | PyPI Package Format | Python Namespace | Example |
-| --- | --- | --- | --- |
-| Driver | `mcs-driver-<protocol>-<transport>[-<variant>]` | `mcs.drivers.<protocol>_<transport>` | `mcs-driver-rest-http` |
-| Orchestrator | `mcs-orchestrator-<strategy>[-<variant>]` | `mcs.orchestrators.<strategy>` | `mcs-orchestrator-basic` |
+| Level | Pattern | Example |
+| --- | --- | --- |
+| PyPI package | `mcs-driver-<protocol>-<transport>[-<variant>]` | `mcs-driver-rest-http` |
+| Python import | `mcs.drivers.<protocol>_<transport>` | `from mcs.drivers.rest_http import RestHttpDriver` |
+| Class (Driver) | `<Protocol><Transport>Driver` | `RestHttpDriver` |
+| Class (ToolDriver) | `<Protocol><Transport>ToolDriver` | `RestHttpToolDriver` |
+| Files | `driver.py` / `tooldriver.py` | `src/mcs/drivers/rest_http/driver.py` |
+| Orchestrator (PyPI) | `mcs-orchestrator-<strategy>[-<variant>]` | `mcs-orchestrator-basic` |
+| Orchestrator (import) | `mcs.orchestrators.<strategy>` | `from mcs.orchestrators.basic import BasicOrchestrator` |
 
 Drivers default to **hybrid** (implementing both `MCSDriver` and `MCSToolDriver`). Use suffix `-standalone` or `-toolonly` when a driver explicitly supports only one mode. Author/vendor variants use a free suffix, e.g. `-acme`.
+
+The consistent mapping from PyPI name to import path to class name enables IDE autocompletion: type `from mcs.drivers.` and your IDE lists all installed drivers.
 
 Discovery with just two prefixes:
 
@@ -131,7 +138,7 @@ pip search mcs-driver-rest-http     # all REST-HTTP variants
 pip search mcs-orchestrator-        # all orchestrators
 ```
 
-Implicit namespace packages (Python 3.3+) allow multiple independently packaged drivers to coexist under `mcs.drivers.*` without conflicts. See the [python-sdk README](https://github.com/modelcontextstandard/python-sdk#architecture--naming-pypi-convention) for the full rationale.
+Implicit namespace packages (Python 3.3+) allow multiple independently packaged drivers to coexist under `mcs.drivers.*` without conflicts. See the [python-sdk README](https://github.com/modelcontextstandard/python-sdk#architecture--naming-pypi-convention) for the full naming rationale and file layout convention.
 
 ---
 
