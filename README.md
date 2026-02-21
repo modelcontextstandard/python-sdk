@@ -34,15 +34,22 @@ But for most tool integrations, implementing a robust MCS driver is the pragmati
 
 Each part of the SDK is packaged independently. Install exactly what you need.
 
-| Sub-directory / Project     | PyPI Distribution      | Purpose                                                           |
-| --------------------------- | ---------------------- | ----------------------------------------------------------------- |
-| **`mcs-drivers-core/`**     | `mcs-drivers-core`     | Defines the language-agnostic `MCSDriver` interface and metadata. |
-| **`mcs-driver-rest-http/`** | `mcs-driver-rest-http` | A reference driver for connecting to REST APIs (OpenAPI).         |
-| **`mcs-examples/`**         | *(not on PyPI)*        | A minimal client and FastAPI demo for local development.          |
+| Component | PyPI Distribution | Purpose |
+| --- | --- | --- |
+| **`mcs-drivers-core/`** | `mcs-drivers-core` | The `MCSDriver` and `MCSToolDriver` interfaces, metadata classes, `BasicOrchestrator`, and mixins. |
+| **`mcs-examples/`** | *(not on PyPI)* | Minimal client examples and a FastAPI quickstart demo. |
 
-> **Why split packages?**<br> 
-> The core contract is \~5 kB and has no runtime dependencies.<br> 
-> Only add the drivers your app truly needs.
+Drivers live in their own repositories:
+
+| Driver | Repo | PyPI |
+| --- | --- | --- |
+| REST-HTTP (OpenAPI) | [mcs-driver-rest-http](https://github.com/modelcontextstandard/mcs-driver-rest-http) | `mcs-driver-rest-http` |
+| Filesystem (local) | [mcs-driver-filesystem-localfs](https://github.com/modelcontextstandard/mcs-driver-filesystem-localfs) | `mcs-driver-filesystem-localfs` |
+
+> **Why separate repos?**<br>
+> The core contract is ~5 kB with zero runtime dependencies.<br>
+> Drivers have their own release cadence, dependencies, and maintainers.<br>
+> Install only what you need: `pip install mcs-drivers-core mcs-driver-rest-http`
 
 ---
 
