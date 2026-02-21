@@ -81,8 +81,8 @@ final_answer = driver.process_llm_response(llm_out)
 Once perfect prompts exist for a protocol and transport, they are encapsulated inside the driver. 
 This avoids the burden to come up with prompts across apps again and again, this makes the logic reusable.
 
-First time in history of function call it makes sense to get the perfect prompt for a use case, because once developed
-everyone can use it directly, without even knowing how it looks like.
+For the first time, investing in the perfect prompt for a use case pays off directly -- once developed,
+everyone can reuse it without even seeing the prompt itself.
 
 With this interface using projects like DSPy to optimize prompts for different LLMs will make the effort pay off really
 quickly.
@@ -100,7 +100,7 @@ quickly.
 
 ## Architecture & Naming
 
-The SDK follows a consistent naming convention based on PEP 420 namespace packages. This allows multiple independently packaged 
+The SDK follows a consistent naming convention based on implicit namespace packages. This allows multiple independently packaged 
 drivers to coexist under shared namespaces like `mcs.drivers`, `mcs.tooldrivers`, and `mcs.orchestrators`.
 
 | Component Type  | PyPI Package Name Format            | Python Namespace                     | Example                          |
@@ -128,7 +128,7 @@ layout supports modular development, semantic clarity, and direct support for de
 We welcome new drivers and improvements:
 
 1. pip install mcs-driver-core
-2. Implement the MCSDriver Interace and follow the naming conventions above
+2. Implement the MCSDriver Interface and follow the naming conventions above
 3. Implement your driver under `mcs/drivers/<protocol>_<transport>_driver.py`.
 4. Publish to PyPI (using the naming scheme) or open a PR in this repo.
 
