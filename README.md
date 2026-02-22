@@ -36,8 +36,8 @@ Each part of the SDK is packaged independently. Install exactly what you need.
 
 | Component | PyPI Distribution | Purpose |
 | --- | --- | --- |
-| **`src/`** | `mcs-driver-core` | The `MCSDriver` and `MCSToolDriver` interfaces, metadata classes, `BasicOrchestrator`, and mixins. |
-| **`mcs-examples/`** | *(not on PyPI)* | Minimal client examples and a FastAPI quickstart demo. |
+| **`src/`** | `mcs-driver-core` | The `MCSDriver` and `MCSToolDriver` interfaces, metadata classes, `BasicOrchestrator`, and mixins (e.g. `ToolCallSignalingMixin`). |
+| **`mcs-examples/`** | *(not on PyPI)* | Reference drivers, LLM chat clients (non-streaming, streaming, TCS), orchestrator demo, and FastAPI quickstart. See [`mcs-examples/README.md`](mcs-examples/README.md) for full details. |
 
 Drivers live in their own repositories:
 
@@ -109,14 +109,25 @@ everyone can reuse it without even seeing the prompt itself.
 With this interface using projects like DSPy to optimize prompts for different LLMs will make the effort pay off really
 quickly.
 
-### 3. Development
+### 3. Running the examples
+
+The `mcs-examples/` folder contains runnable demos for every part of the SDK -- from standalone reference drivers (no LLM needed) to streaming chat clients with real models.  Install the example dependencies and try them out:
+
+```bash
+pip install -e ".[examples]"
+python mcs-examples/mcs_driver_minimal_client_stream.py --model gpt-4o --debug
+```
+
+See [`mcs-examples/README.md`](mcs-examples/README.md) for the full list of examples, including local model usage (Ollama, vLLM) and the `ToolCallSignalingMixin` demo.
+
+### 4. Development
 
 git clone https://github.com/modelcontextstandard/python-sdk.git
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 
 
-#### 3.1. Development of a new driver
+#### 4.1. Development of a new driver
 
 Create a project named `mcs-driver-<protocol>-<transport>`:
 
