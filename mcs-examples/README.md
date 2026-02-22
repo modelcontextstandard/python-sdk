@@ -62,6 +62,29 @@ python mcs_driver_minimal_client_stream.py --model ollama/llama3 --debug
 
 LiteLLM routes `ollama/*` models to a local Ollama instance automatically.
 
+### Streaming with ToolCallSignalingMixin (TCS)
+
+```bash
+python mcs_driver_minimal_client_stream_tcs.py --model gpt-4o --debug
+```
+
+Demonstrates `ToolCallSignalingMixin` -- an opt-in mixin that lets the driver signal whether streamed tokens look like a tool call.  The client buffers suspicious tokens instead of displaying them.  When the tool call is confirmed, it executes invisibly and the next LLM turn streams seamlessly.  The user never sees raw JSON.
+
+This is especially useful for **local models without native tool-call events** (e.g. Llama via vLLM):
+
+```bash
+python mcs_driver_minimal_client_stream_tcs.py \
+    --model openai/meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --api-base http://localhost:8000/v1 --debug
+```
+
+The TCS examples are intentionally separate files to keep the base examples simple:
+
+- `mcs_driver_minimal_client_stream_tcs.py` -- streaming client with buffer logic
+- `reference/csv_localfs_driver_tcs.py` -- hybrid driver with `ToolCallSignalingMixin`
+
+In production you would add the mixin directly to your driver rather than creating a separate class.
+
 ## 3) Orchestrator client example
 
 - `mcs_tooldriver_minimal_client.py` -> `MCSToolDriver` + `BasicOrchestrator` usage
@@ -77,6 +100,7 @@ Files:
 
 - `reference/csv_localfs_tooldriver.py` -> pure `MCSToolDriver`
 - `reference/csv_localfs_driver.py` -> hybrid `MCSDriver` wrapping the tooldriver
+- `reference/csv_localfs_driver_tcs.py` -> same driver with `ToolCallSignalingMixin` (for TCS demo)
 - `reference/runtime_local_tooldriver.py` -> second tooldriver (for orchestration demo)
 - `reference/demo_tooldriver.py` -> direct tooldriver usage
 - `reference/demo_hybrid_driver.py` -> standalone hybrid driver usage
