@@ -1,106 +1,29 @@
-import asyncio
-import logging
+"""MCS minimal client launcher.
 
-from typing import Dict, List
-from dotenv import load_dotenv
+Convenience entry point that delegates to the non-streaming or streaming
+variant depending on the ``--stream`` flag.
 
-from mcs.drivers.core import MCSDriver, DriverMeta
-from mcs.drivers.rest_http import RestHttpDriver
+Usage:
+    python mcs_driver_minimal_client.py [--stream] [--model MODEL] [--debug] [--data-dir DIR]
 
-from litellm import completion
+For direct usage prefer:
+    python mcs_driver_minimal_client_non_stream.py [--model MODEL] [--debug]
+    python mcs_driver_minimal_client_stream.py     [--model MODEL] [--debug]
+"""
 
-# Configure logging
-logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s", force=True
-    )
-logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+from __future__ import annotations
 
-class ChatSession:
-    def __init__(self, driver: MCSDriver) -> None:
-        self.mcs_driver: MCSDriver = driver    
-
-    async def _extract_llm_response(self, model: str = "gpt-4o", messages: List[Dict[str, str]] = None,
-                                    response_format: Dict[str, str] = None) \
-            -> str:
-        llm_response = completion(model=model, messages=messages, response_format=response_format)
-        print(llm_response)
-        llm_response = llm_response.choices[0].message.content
-
-        return llm_response
-
-    async def start(self) -> None:
-        try:
-            system_message = self.mcs_driver.get_driver_system_message()
-            logging.info(f"\nSystem message:\n{system_message}\n")
-            messages = [{"role": "system", "content": system_message}]
-
-            while True:
-                try:
-                    user_input = input("You: ").strip().lower()
-                    if user_input in ["quit", "exit"]:
-                        logging.info("\nExiting...")
-                        break
-
-                    messages.append({"role": "user", "content": user_input})
-
-                    llm_response = await self._extract_llm_response(messages=messages)
-                    logging.info("\nAssistant: %s", llm_response)
-
-                    response = self.mcs_driver.process_llm_response(llm_response)
-
-                    if response.call_executed:
-                        messages.append({"role": "assistant", "content": llm_response})
-                        messages.append({"role": "system", "content": str(response.result)})
-
-                        final_response = await self._extract_llm_response(messages=messages)
-                        logging.info("\nFinal response: %s", final_response)
-                        messages.append(
-                            {"role": "assistant", "content": final_response}
-                        )
-                    elif response.call_failed:
-                        messages.append({"role": "assistant", "content": llm_response})
-                        messages.append({"role": "system", "content": response.retry_prompt})
-                    else:
-                        messages.append({"role": "assistant", "content": llm_response})
-
-                except KeyboardInterrupt:
-                    logging.info("\nExiting...")
-                    break
-        except Exception as e:
-            print(f"An error occurred: {e}")
-
-def invoke_capability(driver, capability: str):        
-        if capability in driver.meta.capabilities:
-            method = getattr(driver, capability, None)
-            if callable(method):
-                return method()
-        return None
+import sys
 
 
-async def main() -> None:
-    load_dotenv()
-
-    # Optional Autostart and getting the URLs
-
-    # Only one url is implemented right now, need to do some magic if we want to support multiple urls
-    # Support for only one driver is implemented
-    function_spec_urls = ['https://mcs-quickstart.coolify.alsdienst.de/openapi.json']
-    http_driver = RestHttpDriver(function_spec_urls)
-
-    drivers = [http_driver]
-
-    for driver in drivers:
-        result = invoke_capability(driver, "healthcheck")
-        binding = driver.meta.bindings[0]
-        if result:
-            details = {k: v for k, v in result.items() if k != 'status'}
-            print(f"{driver.meta.name} for {binding.protocol} over {binding.transport} - Status: {result['status'].value} - (Details: {details})")
-        else:
-            print(f"{driver.meta.name} for {binding.protocol} over {binding.transport} - capability not supported")
-
-    chat_session = ChatSession(http_driver)
-    await chat_session.start()
+def main() -> None:
+    if "--stream" in sys.argv:
+        sys.argv.remove("--stream")
+        from mcs_driver_minimal_client_stream import main as run
+    else:
+        from mcs_driver_minimal_client_non_stream import main as run
+    run()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

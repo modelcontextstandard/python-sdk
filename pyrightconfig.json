@@ -1,9 +1,9 @@
 {
   "include": [
-    "mcs-drivers-core/src",
+    "src",
     "mcs-examples"
   ],
   "extraPaths": [
-    "mcs-drivers-core/src"
+    "src"
   ]
 }

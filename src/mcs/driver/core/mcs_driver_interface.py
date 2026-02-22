@@ -1,13 +1,15 @@
 """MCS core driver interface.
 
-Based on MCS Driver Contract v0.4
+Based on MCS Driver Contract v0.5
 
 A driver encapsulates three responsibilities:
-1. **get_function_description** – provide a machine-readable function spec
-   (may be model-specific, e.g. XML for Grok, JSON for GPT)
+1. **get_function_description** – provide a function spec
+   (may be model-specific, e.g. XML for Grok, JSON for GPT or raw pass-through, e.g. OpenAPI, ...)
 2. **get_driver_system_message** – provide a ready-to-use system prompt
    (typically wraps get_function_description with prompt guidance)
-3. **process_llm_response** – execute a structured call emitted by the LLM
+3. **process_llm_response** – processes the LLM output (text or native tool-call object),
+   searches for a structured call, executes it if found, and returns a DriverResponse
+   that includes pre-formatted messages for the client's conversation history.
 
 Implementations can use any transport (HTTP, CAN‑Bus, AS2, …) and any
 specification format (OpenAPI, JSON‑Schema, proprietary JSON). The interface
@@ -17,9 +19,9 @@ keeps the integration surface minimal and self‑contained.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -78,7 +80,7 @@ class DriverMeta:
     ...     bindings=(
     ...         DriverBinding(protocol="REST", transport="HTTP", spec_format="OpenAPI"),
     ...     ),
-    ...     supported_llms=("*", "claude-3"),
+    ...     supported_llms=("*", "claude-4"),
     ...     capabilities=("healthcheck",)
     ... )
     """
@@ -100,9 +102,10 @@ class DriverResponse:
 
     Attributes
     ----------
-    result :
-        Raw output of the executed operation, or the unchanged LLM
-        response when no call was detected / execution failed.
+    tool_call_result :
+        Raw output of the executed tool operation.  Only meaningful when
+        ``call_executed`` is ``True``.  ``None`` when no call was detected
+        or when the call failed.
     call_executed :
         ``True`` when a tool call was found and successfully executed.
     call_failed :
@@ -114,40 +117,20 @@ class DriverResponse:
     retry_prompt :
         Driver-authored prompt hint that the client can append to the
         conversation so the LLM can correct its output and retry.
+    messages :
+        Pre-formatted conversation messages that the client can append
+        directly to its message history.  The driver is responsible for
+        building these in the correct format (e.g. assistant message
+        with the original LLM output, followed by a tool-result message).
+        ``None`` when no messages need to be appended (e.g. final answer
+        with no tool call detected).
     """
-    result: Any
+    tool_call_result: Any = None
     call_executed: bool = False
     call_failed: bool = False
-    call_detail: Optional[str] = None
-    retry_prompt: Optional[str] = None
-
-    @staticmethod
-    def executed(result: Any) -> DriverResponse:
-        """Convenience factory for a successful execution."""
-        return DriverResponse(result=result, call_executed=True)
-
-    @staticmethod
-    def failed(
-        llm_response: Any,
-        detail: str | None = None,
-        retry_prompt: str | None = None,
-    ) -> DriverResponse:
-        """Convenience factory for a detected-but-failed call."""
-        return DriverResponse(
-            result=llm_response,
-            call_failed=True,
-            call_detail=detail,
-            retry_prompt=retry_prompt or (
-                "Your previous response looked like a tool call but could "
-                "not be parsed. Please try again using the exact format "
-                "described in the system instructions."
-            ),
-        )
-
-    @staticmethod
-    def no_match(llm_response: Any) -> DriverResponse:
-        """Convenience factory when no tool call was detected."""
-        return DriverResponse(result=llm_response)
+    call_detail: str | None = None
+    retry_prompt: str | None = None
+    messages: list[dict[str, Any]] | None = field(default=None)
 
 
 class MCSDriver(ABC):
@@ -155,7 +138,7 @@ class MCSDriver(ABC):
 
     A driver is responsible for two core tasks:
 
-    1.  Provide a **llm-readable function description** so an LLM can
+    1.  Provide a **function description** so an LLM can
         discover the available tools.
     2.  **Execute** the structured call emitted by the LLM and return the
         result inside a :class:`DriverResponse`.
@@ -179,7 +162,7 @@ class MCSDriver(ABC):
 
     @abstractmethod
     def get_function_description(self, model_name: str | None = None) -> str:  # noqa: D401
-        """Return the raw function specification.
+        """Return the raw or driver transformed function specification.
 
         Parameters
         ----------
@@ -198,7 +181,7 @@ class MCSDriver(ABC):
     def get_driver_system_message(self, model_name: str | None = None) -> str:  # noqa: D401
         """Return the system prompt that exposes the tools to the LLM.
 
-        The default implementation *may* call `get_function_description`
+        The default implementation *should* call `get_function_description`
         and embed it in a prompt template, but drivers are free to provide
         their own model-specific wording.
 
@@ -215,34 +198,47 @@ class MCSDriver(ABC):
         """
 
     @abstractmethod
-    def process_llm_response(self, llm_response: str) -> DriverResponse:  # noqa: D401
-        """Execute the structured call emitted by the LLM.
+    def process_llm_response(self, llm_response: str | dict, *, streaming: bool = False) -> DriverResponse:  # noqa: D401
+        """Parse the LLM output for a structured call. If found, execute it.
 
-        Returns a :class:`DriverResponse` that carries the result and
-        status flags:
+        The returned :class:`DriverResponse` tells the client what happened:
 
-        * **Executed** -- ``DriverResponse.executed(result)``
-        * **Failed** -- ``DriverResponse.failed(llm_response, detail, retry_prompt)``
-        * **No match** -- ``DriverResponse.no_match(llm_response)``
+        * ``response.call_executed`` -- a tool call was found and
+          successfully executed.  ``response.tool_call_result`` contains
+          the raw tool output.  ``response.messages`` contains
+          pre-formatted conversation entries the client can append
+          directly to its message history.
+        * ``response.call_failed`` -- a tool-call signature was found
+          but could not be parsed or executed.
+          ``response.retry_prompt`` contains a driver-authored hint
+          the client can append to the conversation for a retry.
+          ``response.call_detail`` may carry debugging information.
+          ``response.messages`` contains the entries needed for a
+          retry round (assistant message + retry hint).
+        * Neither flag set -- no tool call was detected.
+          The LLM output is a final answer for the user.
+          ``response.messages`` is ``None``; the client handles the
+          final answer directly.
 
-        Before signalling *detected but failed* the driver should attempt
-        any configured self-healing patterns (e.g. fixing known
-        model-specific formatting errors).
-
-        When no call is detected the driver must return the input
-        unchanged (via ``DriverResponse.no_match``) so that chaining
-        across multiple drivers works correctly.
+        Before signalling *failed* the driver should attempt any
+        configured self-healing patterns (e.g. fixing known
+        model-specific formatting errors) -- see Section 9 in docs.
 
         Parameters
         ----------
         llm_response :
-            The content of the assistant message.  Typically a JSON string
-            that contains the selected ``tool`` (or function name) and its
-            ``arguments``.
+            The raw content of the assistant message (``str``) or a
+            structured native tool-call object (``dict``) for LLMs
+            that emit tool calls as structured data rather than text.
+        streaming :
+            When ``True``, the driver knows it is receiving incremental
+            chunks.  It may skip expensive operations like self-healing
+            on intermediate chunks and only apply them on the final call.
 
         Returns
         -------
         DriverResponse
-            Self-contained result with status flags, detail, and
-            optional retry prompt.
+            Self-contained result object with ``tool_call_result``,
+            ``call_executed``, ``call_failed``, ``call_detail``,
+            ``retry_prompt``, and ``messages``.
         """
