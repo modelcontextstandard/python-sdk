@@ -9,14 +9,21 @@ version         = "0.1.1"
 description     = "Minimal MCS client examples"
 requires-python = ">=3.9"
 dependencies    = [
-  "mcs-drivers-core>=0.2",
+  "mcs-driver-core>=0.2",
   "requests>=2.32",
   "litellm>=1.73",
   "python-dotenv>=1.1.0"
 ]
+
+[project.optional-dependencies]
+quickstart = [
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "pydantic>=2.7",
+]
 # Damit im Beispiel-Code die Treiber-Pakete verfügbar sind,
 # installiere sie lokal per editable install:
-# pip install -e ../mcs-drivers-core
+# pip install -e ..   (installs mcs-driver-core from the repo root)
 # pip install -e ../mcs-driver-rest-http
 #
 # Hier müssen keine runtime-Dependencies eingetragen werden,

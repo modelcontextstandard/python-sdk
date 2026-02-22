@@ -4,8 +4,8 @@ import logging
 from typing import Dict, List
 from dotenv import load_dotenv
 
-from mcs.drivers.core import BasicOrchestrator, MCSDriver
-from mcs.tooldrivers.rest_http_tooldriver import RestHttpToolDriver
+from mcs.driver.core import BasicOrchestrator, MCSDriver
+from mcs.driver.rest_http import RestHttpToolDriver
 
 from litellm import completion
 
@@ -48,19 +48,16 @@ class ChatSession:
 
                     response = self.mcs_driver.process_llm_response(llm_response)
 
-                    if response.call_executed:
-                        messages.append({"role": "assistant", "content": llm_response})
-                        messages.append({"role": "system", "content": str(response.result)})
+                    if response.messages:
+                        messages.extend(response.messages)
 
+                    if response.call_executed:
                         final_response = await self._extract_llm_response(messages=messages)
                         logging.info("\nFinal response: %s", final_response)
                         messages.append(
                             {"role": "assistant", "content": final_response}
                         )
-                    elif response.call_failed:
-                        messages.append({"role": "assistant", "content": llm_response})
-                        messages.append({"role": "system", "content": response.retry_prompt})
-                    else:
+                    elif not response.call_failed:
                         messages.append({"role": "assistant", "content": llm_response})
 
                 except KeyboardInterrupt:

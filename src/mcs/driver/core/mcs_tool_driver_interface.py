@@ -3,13 +3,11 @@
 Based on an extended MCS Driver Contract, this interface focuses on structured tool interaction.
 
 A tool driver encapsulates two primary responsibilities:
-1. **list_tools** – provide a machine-readable list of available tools and their parameters.
+1. **list_tools** – provide a list of available tools elements and their parameters.
 2. **execute_tool** – execute a specified tool with provided arguments and return the raw result.
 
 Implementations can use any underlying transport (e.g., HTTP, CAN-Bus, AS2, gRPC) and
 manage any internal specification format (e.g., OpenAPI, JSON-Schema, proprietary JSON).
-This interface aims to keep the integration surface minimal, explicit, and self-contained,
-enabling direct tool-centric communication.
 
 """
 
@@ -67,7 +65,7 @@ class Tool:
 
 class MCSToolDriver(ABC):
     """
-    Interface for drivers that integrate with an orchestrator by providing
+    Interface for drivers that integrate with an orchestrator or driver by providing
     structured Tool objects instead of prompts and free-text communication.
 
     This interface decouples the LLM-specific prompting and response parsing

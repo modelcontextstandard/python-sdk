@@ -1,7 +1,0 @@
--e mcs-drivers-core
--e mcs-examples
-pytest
-ruff
-pre-commit
-build
-twine

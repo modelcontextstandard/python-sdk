@@ -54,8 +54,6 @@ class BasicOrchestrator(MCSDriver, ABC):
             A list of initialized `MCSToolDriver` instances that this orchestrator will manage.
         """
         self.drivers = drivers
-        # The meta attribute combines bindings from all aggregated drivers.
-        # It sets default values for id, name, version, supported_llms, and capabilities.
         self.meta = DriverMeta(
             id="a218ad5e-5d05-4ff3-979c-9eb9e49a2d3c",
             name="Basic Orchestrator",
@@ -90,16 +88,10 @@ class BasicOrchestrator(MCSDriver, ABC):
         """
         Generates a comprehensive, LLM-readable description of all aggregated tools.
 
-        This description is typically formatted as a string suitable for inclusion
-        in a system prompt, allowing the LLM to understand the available tools,
-        their purposes, and their required parameters.
-
         Parameters
         ----------
         model_name : Optional[str]
-            An optional name of the target LLM. While this orchestrator generates
-            a generic description, future implementations could use this to tailor
-            the output for specific LLMs (e.g., format variations).
+            An optional name of the target LLM.
 
         Returns
         -------
@@ -116,15 +108,10 @@ class BasicOrchestrator(MCSDriver, ABC):
         """
         Formulates the system prompt to instruct the LLM on tool usage.
 
-        This prompt explains the role of the assistant, presents the available tools,
-        and defines the strict JSON format the LLM must use when making a tool call.
-        It also provides guidance for transforming raw tool output into conversational responses.
-
         Parameters
         ----------
         model_name : Optional[str]
-            An optional name of the target LLM. This can be used for future
-            model-specific prompt adjustments (e.g., varying tone or specific instructions).
+            An optional name of the target LLM.
 
         Returns
         -------
@@ -170,40 +157,55 @@ class BasicOrchestrator(MCSDriver, ABC):
             logging.error(f"Error extracting JSON: {e}")
             return None
 
-
-    def process_llm_response(self, llm_response: str) -> DriverResponse:
+    def process_llm_response(self, llm_response: str | dict, *, streaming: bool = False) -> DriverResponse:
         """Parse the LLM's response, identify tool calls, and dispatch for execution.
 
         Parameters
         ----------
-        llm_response : str
-            The raw string content from the LLM's assistant message.
+        llm_response :
+            The raw string content from the LLM's assistant message, or a
+            structured native tool-call object.
+        streaming :
+            Whether the driver is processing incremental streaming chunks.
 
         Returns
         -------
         DriverResponse
-            Self-contained result with status flags.
+            Self-contained result with status flags and pre-formatted messages.
         """
         logger.info("Processing LLM response")
         logger.debug(f"{llm_response}")
 
-        json_block = self._extract_json(llm_response)
+        llm_text = llm_response if isinstance(llm_response, str) else json.dumps(llm_response)
+
+        json_block = self._extract_json(llm_text)
         if not json_block:
-            return DriverResponse.no_match(llm_response)
+            return DriverResponse()
 
         try:
             parsed = json.loads(json_block)
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing LLM response as JSON: {e}")
-            return DriverResponse.failed(llm_response, detail=f"JSON parse error: {e}")
+            return DriverResponse(
+                call_failed=True,
+                call_detail=f"JSON parse error: {e}",
+                messages=[
+                    {"role": "assistant", "content": llm_text},
+                ],
+            )
 
         tool_name = parsed.get("tool")
         arguments = parsed.get("arguments", {})
 
         if not tool_name:
-            return DriverResponse.failed(
-                llm_response,
-                detail="Tool call detected but no 'tool' field found.",
+            return DriverResponse(
+                call_failed=True,
+                call_detail="Tool call detected but no 'tool' field found.",
+                retry_prompt="Return exactly one JSON object with fields: tool and arguments.",
+                messages=[
+                    {"role": "assistant", "content": llm_text},
+                    {"role": "system", "content": "Return exactly one JSON object with fields: tool and arguments."},
+                ],
             )
 
         logger.info(f"Attempting to execute tool '{tool_name}' with arguments: {arguments}")
@@ -214,36 +216,42 @@ class BasicOrchestrator(MCSDriver, ABC):
                 try:
                     result = driver.execute_tool(tool_name, arguments)
                     logger.info(f"Tool '{tool_name}' executed successfully.")
-                    return DriverResponse.executed(result)
+                    return DriverResponse(
+                        tool_call_result=result,
+                        call_executed=True,
+                        messages=[
+                            {"role": "assistant", "content": llm_text},
+                            {"role": "system", "content": str(result)},
+                        ],
+                    )
                 except Exception as e:
                     logger.error(f"Tool '{tool_name}' execution failed: {e}", exc_info=True)
-                    return DriverResponse.failed(
-                        llm_response,
-                        detail=f"Tool '{tool_name}' execution failed: {e}",
+                    retry = f"Tool '{tool_name}' execution failed: {e}. Check argument names and value types, then retry."
+                    return DriverResponse(
+                        call_failed=True,
+                        call_detail=f"Tool '{tool_name}' execution failed: {e}",
+                        retry_prompt=retry,
+                        messages=[
+                            {"role": "assistant", "content": llm_text},
+                            {"role": "system", "content": retry},
+                        ],
                     )
 
         logger.warning(f"No matching tool '{tool_name}' found across all drivers.")
-        return DriverResponse.failed(
-            llm_response,
-            detail=f"No matching tool '{tool_name}' found across registered drivers.",
+        retry = f"No matching tool '{tool_name}' found. Available tools: {', '.join(t.name for t in self._collect_tools())}."
+        return DriverResponse(
+            call_failed=True,
+            call_detail=f"No matching tool '{tool_name}' found across registered drivers.",
+            retry_prompt=retry,
+            messages=[
+                {"role": "assistant", "content": llm_text},
+                {"role": "system", "content": retry},
+            ],
         )
 
     @staticmethod
     def _format_tool_for_llm(tool: Tool) -> str:
-        """
-        Formats a single `Tool` object into a human-readable string for the LLM.
-
-        Parameters
-        ----------
-        tool : Tool
-            The tool object to format.
-
-        Returns
-        -------
-        str
-            A string representation of the tool, including its name, description,
-            and arguments with their descriptions and required status.
-        """
+        """Formats a single `Tool` object into a human-readable string for the LLM."""
         args_desc = []
         for param in tool.parameters:
             desc = f"- {param.name}: {param.description}"
