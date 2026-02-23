@@ -36,7 +36,7 @@ from rich.panel import Panel
 
 sys.path.insert(0, str(Path(__file__).parent / "reference"))
 
-from csv_localfs_driver_tcs import CsvLocalfsDriverTcs  # type: ignore[import-not-found]
+from csv_driver_tcs import CsvDriverTcs  # type: ignore[import-not-found]
 
 from mcs.driver.core import DriverResponse, MCSDriver
 from mcs.driver.core.mixins import ToolCallSignalingMixin
@@ -281,7 +281,7 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
     info = [
         "[bold cyan]MCS Chat (streaming + TCS)[/bold cyan]\n",
         f"Driver:   {driver.meta.name}",
-        f"Binding:  {binding.protocol} / {binding.transport}",
+        f"Binding:  {binding.capability} / {binding.adapter}",
         f"Model:    {model}",
         f"TCS:      {'active' if has_tcs else 'not supported by driver'}",
     ]
@@ -335,7 +335,7 @@ def main() -> None:
     load_dotenv()
     args = _parse_args()
 
-    driver = CsvLocalfsDriverTcs(args.data_dir)
+    driver = CsvDriverTcs(base_dir=args.data_dir)
     chat_loop(driver, args.model, args.debug, args.api_base, args.api_key)
 
     console.print("\n[dim]Chat ended.[/dim]")

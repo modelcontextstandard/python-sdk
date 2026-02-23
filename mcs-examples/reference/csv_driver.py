@@ -1,11 +1,12 @@
-"""CSV-LocalFS hybrid driver with ToolCallSignalingMixin.
+"""Step 4 -- CsvDriver: hybrid driver (MCSDriver + MCSToolDriver).
 
-This is a copy of ``csv_localfs_driver.py`` extended with
-``ToolCallSignalingMixin`` to demonstrate inline tool-call detection
-during streaming.  In production you would add the mixin directly to
-your driver -- the separation here keeps the base example simple.
+Wraps a CsvToolDriver and adds the three LLM-facing methods:
+  - get_function_description()
+  - get_driver_system_message()
+  - process_llm_response()
+
+The tool semantics are passed through 1:1 from the ToolDriver.
 """
-
 from __future__ import annotations
 
 import json
@@ -14,56 +15,42 @@ from dataclasses import dataclass
 from typing import Any
 
 from mcs.driver.core import (
-    DriverBinding, DriverMeta, DriverResponse, MCSDriver, MCSToolDriver,
-    Tool
+    DriverBinding,
+    DriverMeta,
+    DriverResponse,
+    MCSDriver,
+    MCSToolDriver,
+    Tool,
 )
-from mcs.driver.core.mixins import ToolCallSignalingMixin
 
-from csv_localfs_tooldriver import CsvLocalfsToolDriver  # type: ignore[import-not-found]
+from csv_tooldriver import CsvToolDriver
+from fs_adapter import FsAdapter
+from localfs_fs_adapter import LocalFsAdapter
 
 
 @dataclass(frozen=True)
-class _CsvLocalfsTcsDriverMeta(DriverMeta):
-    id: str = "b8c3e5f1-4d9a-4b2e-a7c6-9f1d3e5a8b2c"
-    name: str = "CSV LocalFS Hybrid Driver (TCS)"
+class _CsvDriverMeta(DriverMeta):
+    id: str = "a7b2f4d9-3e8c-4a1f-9b6d-5e2c8f1a4d7e"
+    name: str = "CSV Driver"
     version: str = "0.1.0"
     bindings: tuple[DriverBinding, ...] = (
-        DriverBinding(protocol="CSV", transport="LocalFS", spec_format="JSON-Schema"),
+        DriverBinding(capability="csv", adapter="*", spec_format="Custom"),
     )
     supported_llms: tuple[str, ...] | None = ("*",)
-    capabilities: tuple[str, ...] = ("hybrid",)
+    capabilities: tuple[str, ...] = ()
 
 
-class CsvLocalfsDriverTcs(MCSDriver, MCSToolDriver, ToolCallSignalingMixin):
-    """Hybrid CSV driver with streaming tool-call signaling."""
+class CsvDriver(MCSDriver, MCSToolDriver):
+    meta: DriverMeta = _CsvDriverMeta()
 
-    meta: DriverMeta = _CsvLocalfsTcsDriverMeta()
+    def __init__(self, adapter: FsAdapter | None = None, *, base_dir: str | None = None) -> None:
+        if adapter is None:
+            if base_dir is None:
+                raise ValueError("Either adapter or base_dir must be provided.")
+            adapter = LocalFsAdapter(base_dir)
+        self._tooldriver = CsvToolDriver(adapter)
 
-    TOOL_CALL_OPENERS = ("{", "```")
-
-    def __init__(self, base_dir: str) -> None:
-        self._tooldriver = CsvLocalfsToolDriver(base_dir=base_dir)
-
-    # -- ToolCallSignalingMixin -----------------------------------------------
-
-    def might_be_tool_call(self, partial: str) -> bool:
-        stripped = partial.strip()
-        if not stripped:
-            return False
-        for opener in self.TOOL_CALL_OPENERS:
-            if stripped.startswith(opener):
-                return True
-            if opener.startswith(stripped):
-                return True
-        return False
-
-    def is_complete_tool_call(self, text: str) -> bool:
-        payload = self._extract_json_obj(text)
-        if payload is None:
-            return False
-        return "tool" in payload
-
-    # -- MCSToolDriver --------------------------------------------------------
+    # -- MCSToolDriver pass-through --
 
     def list_tools(self) -> list[Tool]:
         return self._tooldriver.list_tools()
@@ -71,26 +58,19 @@ class CsvLocalfsDriverTcs(MCSDriver, MCSToolDriver, ToolCallSignalingMixin):
     def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         return self._tooldriver.execute_tool(tool_name, arguments)
 
-    # -- MCSDriver ------------------------------------------------------------
+    # -- MCSDriver (LLM-facing) --
 
     def get_function_description(self, model_name: str | None = None) -> str:
         tools_payload: list[dict[str, Any]] = []
         for tool in self._tooldriver.list_tools():
-            tools_payload.append(
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": [
-                        {
-                            "name": p.name,
-                            "description": p.description,
-                            "required": p.required,
-                            "schema": p.schema,
-                        }
-                        for p in tool.parameters
-                    ],
-                }
-            )
+            tools_payload.append({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": [
+                    {"name": p.name, "description": p.description, "required": p.required, "schema": p.schema}
+                    for p in tool.parameters
+                ],
+            })
         return json.dumps({"tools": tools_payload}, indent=2, ensure_ascii=False)
 
     def get_driver_system_message(self, model_name: str | None = None) -> str:
@@ -120,6 +100,10 @@ class CsvLocalfsDriverTcs(MCSDriver, MCSToolDriver, ToolCallSignalingMixin):
                     {"role": "system", "content": retry},
                 ],
             )
+
+        known = {t.name for t in self._tooldriver.list_tools()}
+        if tool_name not in known:
+            return DriverResponse()
 
         try:
             result = self._tooldriver.execute_tool(tool_name, arguments)

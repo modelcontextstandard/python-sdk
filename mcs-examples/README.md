@@ -13,26 +13,28 @@ These scripts provide the same "2-minute quickstart" concept shown in the organi
 
 The `docker/quickstart` container exists solely to host the API under a public URL so that chatbots like ChatGPT, Gemini, or Grok can access it directly via their built-in web tools -- no SDK, no driver, no setup required.  This demonstrates the core MCS idea: a standard API description is all you need to give context to an LLM.
 
-## 2) Reference drivers (small stdlib protocol)
+## 2) Reference drivers (4-step workflow)
 
-To demonstrate the full MCS driver stack we need a real protocol/transport pair -- but one that requires no external services, no API keys, and no network, to work as a simple reference implementation.
+To demonstrate the full MCS driver stack we need a real protocol/transport pair -- but one that requires no external services, no API keys, and no network.
 
-`reference/` uses **CSV over LocalFS** for this purpose: CSV files on disk as the "API".  This is a realistic protocol/transport pair -- a driver for giving LLMs structured access to local CSV data.  At the same time it requires no external services, making it ideal for demonstrating the full MCS stack.
+`reference/` uses **CSV over LocalFS** for this purpose: CSV files on disk as the "API".  The example follows the 4-step development workflow from [Section 4](../docs/docs/Specification/4_ToolDriver_Adapter.md):
 
-| File | Role |
-|---|---|
-| `reference/csv_localfs_tooldriver.py` | Pure `MCSToolDriver` -- exposes CSV operations as tools |
-| `reference/csv_localfs_driver.py` | Hybrid: `MCSDriver` + `MCSToolDriver` -- Default driver for the CSV reference implementation |
-| `reference/csv_localfs_driver_tcs.py` | Same hybrid driver with `ToolCallSignalingMixin` (for TCS demo) |
-| `reference/runtime_local_tooldriver.py` | Second tooldriver (for orchestration demo) |
-| `reference/data/sales.csv` | Sample dataset |
+| Step | File | Role |
+|---|---|---|
+| 1 | `reference/fs_adapter.py` | **Adapter interface** -- abstract filesystem backend (`list_dir`, `read_text`) |
+| 2 | `reference/localfs_adapter.py` | **Adapter implementation** -- concrete LocalFS backend |
+| 3 | `reference/csv_tooldriver.py` | **ToolDriver** -- CSV capability built on top of the adapter |
+| 4 | `reference/csv_driver.py` | **Driver** -- `MCSDriver` + `MCSToolDriver` wrapping the ToolDriver |
+| -- | `reference/csv_driver_tcs.py` | Same driver with `ToolCallSignalingMixin` (for TCS demo) |
+| -- | `reference/demo.py` | Runs all steps + a namespacing orchestrator with two directories |
+| -- | `reference/data/sales.csv` | Sample dataset (sales) |
+| -- | `reference/data2/inventory.csv` | Sample dataset (inventory, for orchestrator demo) |
 
-Standalone demos that run without an LLM:
+Standalone demo (runs without an LLM, walks through all four building blocks):
 
 ```bash
-python reference/demo_tooldriver.py           # direct tooldriver usage
-python reference/demo_hybrid_driver.py        # standalone hybrid driver usage
-python reference/demo_orchestrator_client.py  # orchestrator + simulated client steps
+cd mcs-examples
+python reference/demo.py
 ```
 
 ## 3) Minimal client examples (with LLM)
@@ -113,4 +115,4 @@ python mcs_driver_minimal_client.py --stream --tcs \
 The TCS examples (`_tcs` suffix) are intentionally separate files to keep the base examples simple.  In production you would add `ToolCallSignalingMixin` directly to your driver rather than creating a separate class.
 
 - `mcs_driver_minimal_client_stream_tcs.py` -- streaming client with buffer logic
-- `reference/csv_localfs_driver_tcs.py` -- hybrid driver with `ToolCallSignalingMixin`
+- `reference/csv_driver_tcs.py` -- driver with `ToolCallSignalingMixin`
