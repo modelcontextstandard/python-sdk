@@ -171,19 +171,22 @@ Because of implicit namespace packages (Python 3.3+) there must be **no** `__ini
 
 ## Architecture & Naming (PyPI Convention)
 
-The Python SDK uses **two prefixes** for package discovery via PyPI. Other language SDKs may define their own conventions.
+The Python SDK follows a **capability-based** naming convention. The driver name carries the capability (what it does for the LLM), not the protocol+transport pair. The transport is an adapter concern (see [Specification Section 4](https://github.com/modelcontextstandard/docs/blob/main/docs/Specification/4_ToolDriver_Adapter.md)).
 
 ### Naming scheme
 
 | Level | Pattern | Example |
 | --- | --- | --- |
-| PyPI package | `mcs-driver-<protocol>-<transport>[-<variant>]` | `mcs-driver-rest-http` |
-| Python import | `mcs.driver.<protocol>_<transport>` | `from mcs.driver.rest_http import RestHttpDriver` |
-| Class (Driver) | `<Protocol><Transport>Driver` | `RestHttpDriver` |
-| Class (ToolDriver) | `<Protocol><Transport>ToolDriver` | `RestHttpToolDriver` |
-| Files | `driver.py` / `tooldriver.py` | `src/mcs/driver/rest_http/driver.py` |
-| Orchestrator (PyPI) | `mcs-orchestrator-<strategy>[-<variant>]` | `mcs-orchestrator-basic` |
-| Orchestrator (import) | `mcs.orchestrators.<strategy>` | `from mcs.orchestrators.basic import BasicOrchestrator` |
+| PyPI package (Driver) | `mcs-driver-<capability>[-<variant>]` | `mcs-driver-pdf`, `mcs-driver-csv`, `mcs-driver-openapi` |
+| PyPI package (Orchestrator) | `mcs-orchestrator-<strategy>[-<variant>]` | `mcs-orchestrator-basic` |
+| PyPI package (Adapter) | `mcs-adapter-<source>[-<variant>]` | `mcs-adapter-localfs`, `mcs-adapter-s3` |
+| PyPI package (Bundle) | `mcs-bundle-<capability>-<source>[-<variant>]` | `mcs-bundle-pdf-localfs` |
+| Python import (Driver) | `mcs.driver.<capability>` | `from mcs.driver.csv import CsvDriver` |
+| Python import (Adapter) | `mcs.adapter.<source>` | `from mcs.adapter.localfs import LocalFsConnector` |
+| Python import (Orchestrator) | `mcs.orchestrators.<strategy>` | `from mcs.orchestrators.basic import BasicOrchestrator` |
+| Class (Driver) | `<Capability>Driver` | `CsvDriver`, `PdfDriver`, `OpenApiDriver` |
+| Class (ToolDriver) | `<Capability>ToolDriver` | `CsvToolDriver`, `PdfToolDriver` |
+| Files | `driver.py` / `tooldriver.py` | `src/mcs/driver/csv/driver.py` |
 
 **Every driver defaults to hybrid** -- it implements both `MCSDriver` (standalone) and `MCSToolDriver` (orchestrator-facing). This is the recommended pattern because it maximizes reusability: the same driver works directly with a client or as a building block inside an orchestrator.
 
@@ -194,53 +197,50 @@ When a driver explicitly supports only one mode, the variant suffix signals this
 | *(none)* | Hybrid (default) -- standalone & orchestrator |
 | `-standalone` | Standalone only -- no `list_tools()`/`execute_tool()` |
 | `-toolonly` | Orchestrator only -- no LLM-facing methods |
-| `-<name>` | Author/vendor variant, e.g. `-acme`, `-petstore` |
+| `-<name>` | Author/vendor variant, e.g. `-pymupdf`, `-petstore` |
 
 ### Discovery
 
-Search PyPI with just two prefixes:
+Search PyPI with three prefixes:
 
 ```
-pip search mcs-driver-              # all drivers
-pip search mcs-driver-rest-http     # all REST-HTTP variants
+pip search mcs-driver-              # all drivers (hybrid, toolonly, standalone)
 pip search mcs-orchestrator-        # all orchestrators
+pip search mcs-adapter-             # all adapters
 ```
 
 The driver type (hybrid, standalone, toolonly) is also exposed programmatically via `DriverMeta.capabilities` for registries like the planned [mcs-pkg](https://github.com/modelcontextstandard/mcs-pkg).
-
-### Why two prefixes instead of four?
-
-Earlier drafts used separate prefixes for tool drivers (`mcs-tool-`), hybrid drivers (`mcs-tool-driver-`), and full drivers (`mcs-driver-`). This made discovery harder -- users had to search three different prefixes to find all drivers for a given protocol-transport pair. Since hybrid is the recommended default, a single `mcs-driver-` prefix covers all cases. The type lives in the metadata, not the name.
 
 ### Import convention (IntelliSense)
 
 The Python namespace follows a strict pattern so IDE autocompletion works predictably:
 
 ```python
-from mcs.driver.rest_http import RestHttpDriver           # MCSDriver
-from mcs.driver.rest_http import RestHttpToolDriver       # MCSToolDriver
-from mcs.driver.filesystem_localfs import FilesystemLocalfsDriver
-from mcs.orchestrators.basic import BasicOrchestrator
+from mcs.driver.csv import CsvDriver                      # MCSDriver + MCSToolDriver
+from mcs.driver.pdf import PdfDriver                       # type "from mcs.driver." -> IDE lists all
+from mcs.driver.openapi import OpenApiDriver               # OpenAPI-based hybrid driver
+from mcs.adapter.localfs import LocalFsConnector           # adapter
+from mcs.orchestrators.basic import BasicOrchestrator      # orchestrator
 ```
 
-When you type `from mcs.driver.` your IDE lists all installed drivers. When you type `from mcs.driver.rest_http import ` you see the available classes.
+When you type `from mcs.driver.` your IDE lists all installed drivers. When you type `from mcs.driver.csv import ` you see the available classes.
 
 ### File naming inside a driver package
 
 Each driver package follows this internal structure:
 
 ```
-src/mcs/driver/<protocol>_<transport>/
+src/mcs/driver/<capability>/
     __init__.py          # re-exports public classes
     driver.py            # MCSDriver implementation (standalone)
     tooldriver.py        # MCSToolDriver implementation (orchestrator-facing)
 ```
 
-Class names use PascalCase derived from the module path: `rest_http` becomes `RestHttpDriver` / `RestHttpToolDriver`. This makes the mapping from package name to import path to class name predictable.
+Class names use PascalCase derived from the module path: `csv` becomes `CsvDriver` / `CsvToolDriver`. This makes the mapping from package name to import path to class name predictable.
 
 ### Namespace packages
 
-The SDK uses implicit namespace packages (Python 3.3+). Each driver installs into `mcs.driver.<protocol>_<transport>` without conflicting with other drivers. There must be **no** `__init__.py` in `src/`, `src/mcs/`, or `src/mcs/driver/`.
+The SDK uses implicit namespace packages (PEP 420, Python 3.3+). Each driver installs into `mcs.driver.<capability>` without conflicting with other drivers. There must be **no** `__init__.py` in `src/`, `src/mcs/`, or `src/mcs/driver/`. The same applies to adapters (`mcs.adapter.<source>`) and orchestrators (`mcs.orchestrators.<strategy>`).
 
 ---
 
@@ -250,8 +250,8 @@ We welcome new drivers and improvements:
 
 1. `pip install mcs-driver-core`
 2. Implement the `MCSDriver` interface (and optionally `MCSToolDriver` for orchestrator support).
-3. Place your driver under `src/mcs/driver/<protocol>_<transport>/`.
-4. Follow the naming convention: `mcs-driver-<protocol>-<transport>[-<variant>]`.
+3. Place your driver under `src/mcs/driver/<capability>/`.
+4. Follow the naming convention: `mcs-driver-<capability>[-<variant>]`.
 5. Publish to PyPI or open a PR in this repo.
 
 ---
