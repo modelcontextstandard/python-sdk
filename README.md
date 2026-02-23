@@ -1,6 +1,6 @@
 # `python-sdk` · Model Context Standard (MCS)
 
-> **Stage:** alpha `v0.1` · Contract v0.5 | Python ≥ 3.9
+> **Stage:** alpha `v0.1` · Contract v0.6 | Python ≥ 3.9
 > 
 > Reference SDK that showcases the **MCS driver contract** plus two first‑party drivers.
 > Every driver ships as **its own wheel**. Install only what you need.

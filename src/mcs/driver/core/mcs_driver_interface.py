@@ -1,6 +1,6 @@
 """MCS core driver interface.
 
-Based on MCS Driver Contract v0.5
+Based on MCS Driver Contract v0.6
 
 A driver encapsulates three responsibilities:
 1. **get_function_description** – provide a function spec
@@ -26,61 +26,63 @@ from typing import Any
 
 @dataclass(frozen=True)
 class DriverBinding:
-    """Describes a single supported interface binding.
-
-    A binding links a high-level protocol, its transport mechanism,
-    and the format used to describe its callable functions.
+    """Describes what a driver does and how it reaches its backend.
 
     Attributes
     ----------
-    protocol :
-        Logical protocol layer, e.g. "REST", "GraphQL", "EDI"
-    transport :
-        Transport channel, e.g. "HTTP", "MQTT", "AS2"
+    capability :
+        What the driver provides, e.g. "csv", "rest", "filesystem", "pdf".
+    adapter :
+        Which backend implementation is used, e.g. "localfs", "http", "smb", "s3".
+        Use ``"*"`` when the driver works with any adapter.
     spec_format :
-        Description format, e.g. "OpenAPI", "JSON-Schema", "WSDL", "Custom"
+        Description format used for the tool definitions,
+        e.g. "OpenAPI", "JSON-Schema", "Custom".
 
     Example
     -------
-    >>> DriverBinding(protocol="REST", transport="HTTP", spec_format="OpenAPI")
+    >>> DriverBinding(capability="rest", adapter="http", spec_format="OpenAPI")
+    >>> DriverBinding(capability="csv", adapter="localfs", spec_format="Custom")
     """
-    protocol: str
-    transport: str
+    capability: str
+    adapter: str
     spec_format: str
 
 
 @dataclass(frozen=True)
 class DriverMeta:
-    """Static metadata that describes the capabilities of a driver.
+    """Static metadata that describes what a driver does and what it supports.
 
-    The metadata can be inspected by orchestrators or clients to determine
-    compatibility, supported models, and runtime features.
+    Inspected by orchestrators or clients to determine compatibility,
+    supported models, and available optional features.
 
     Attributes
     ----------
     id :
-        Globally unique identifier (e.g. UUID)
+        Globally unique identifier (e.g. UUID).
     name :
-        Human-readable name of the driver
+        Human-readable name of the driver.
     version :
-        Semantic version string (e.g. "1.0.0")
+        Semantic version string (e.g. "1.0.0").
     bindings :
-        One or more supported interface definitions.
+        One or more capability + adapter combinations the driver supports.
     supported_llms :
-        Tuple of supported model identifiers. Use "*" to match all models. None if the driver is a MCS Tool Driver.
+        Tuple of supported model identifiers. Use ``"*"`` to match all
+        models. ``None`` if the driver is a pure MCS ToolDriver.
     capabilities :
-        Optional list of runtime features like "healthcheck", "streaming", etc.
+        Optional runtime features / mixins, e.g. ``"tcs"``,
+        ``"healthcheck"``, ``"autostart"``, ``"streaming"``.
 
     Example
     -------
     >>> DriverMeta(
     ...     id="c0c24b2f-0d18-425b-8135-2155e0289e00",
-    ...     name="HTTP REST Driver",
+    ...     name="REST HTTP Driver",
     ...     version="1.0.0",
     ...     bindings=(
-    ...         DriverBinding(protocol="REST", transport="HTTP", spec_format="OpenAPI"),
+    ...         DriverBinding(capability="rest", adapter="http", spec_format="OpenAPI"),
     ...     ),
-    ...     supported_llms=("*", "claude-4"),
+    ...     supported_llms=("*",),
     ...     capabilities=("healthcheck",)
     ... )
     """
@@ -154,7 +156,7 @@ class MCSDriver(ABC):
     Attributes
     ----------
     meta :
-        :class:`DriverMeta` instance that declares protocol, transport,
+        :class:`DriverMeta` instance that declares capability, adapter,
         spec format and supported models.  It acts like a device-ID so an
         orchestrator can pick the right driver at runtime.
     """

@@ -14,7 +14,7 @@ class _RuntimeLocalMeta(DriverMeta):
     name: str = "Runtime Local ToolDriver"
     version: str = "0.1.0"
     bindings: tuple[DriverBinding, ...] = (
-        DriverBinding(protocol="Runtime", transport="LocalProcess", spec_format="JSON-Schema"),
+        DriverBinding(capability="runtime", adapter="local", spec_format="Custom"),
     )
     supported_llms: tuple[str, ...] | None = None
     capabilities: tuple[str, ...] = ()
