@@ -1,18 +1,16 @@
-"""Non-streaming MCS chat client using the CSV-LocalFS reference driver.
+"""Non-streaming MCS chat client using the CSV driver.
 
 Usage:
-    python mcs_driver_minimal_client_non_stream.py [--model MODEL] [--debug] [--data-dir DIR]
+    python chat_non_stream.py [--model MODEL] [--debug] [--data-dir DIR]
 
 Requires:
-    pip install litellm rich python-dotenv
-    export OPENAI_API_KEY=sk-...              # for gpt-4o
-    export OPENAI_API_BASE=http://localhost:11434  # for ollama (litellm routing)
+    pip install mcs-driver-csv litellm rich python-dotenv
+    export OPENAI_API_KEY=sk-...
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -21,10 +19,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-sys.path.insert(0, str(Path(__file__).parent / "reference"))
-
-from csv_driver import CsvDriver  # type: ignore[import-not-found]
-
+from mcs.driver.csv import CsvDriver
 from mcs.driver.core import DriverResponse, MCSDriver
 
 console = Console()
@@ -33,10 +28,10 @@ MAX_TOOL_ROUNDS = 10
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="MCS non-streaming chat client (CSV-LocalFS)")
+    p = argparse.ArgumentParser(description="MCS non-streaming chat client (CSV)")
     p.add_argument("--model", default="gpt-4o", help="LiteLLM model identifier (default: gpt-4o)")
     p.add_argument("--debug", "-d", action="store_true", help="Show raw LLM output and DriverResponse details")
-    p.add_argument("--data-dir", default=str(Path(__file__).parent / "reference" / "data"),
+    p.add_argument("--data-dir", default=str(Path(__file__).parent / "data"),
                    help="CSV base directory for the driver")
     return p.parse_args()
 
