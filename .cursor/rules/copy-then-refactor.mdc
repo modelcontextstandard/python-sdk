@@ -1,41 +1,44 @@
 ---
-description: When migrating or porting code between repositories or packages, always copy the original files first, then refactor in place. Never rewrite from scratch.
+description: Never rewrite files from scratch. Always copy first (Shell cp), then apply targeted edits (StrReplace). This applies to migrations, moves, and any situation where an existing file serves as the basis for a new one.
 alwaysApply: true
 ---
 
 # Copy First, Then Refactor
 
-When migrating, porting, or moving code from one location to another (between repos, packages, or directories):
+## Rule
 
-1. **Copy the original files verbatim** before making any changes. Use file system copy operations, not manual re-typing or rewriting from memory.
-2. **Verify the copy** is identical to the source (hash check or diff).
-3. **Then refactor in place** -- adjust imports, rename classes, adapt to new architecture.
-4. **Run existing tests** against the copied code before refactoring to establish a baseline.
+When a new file is based on an existing file -- whether migrating between packages, moving to a new directory, or creating a variant -- **never use Write to regenerate the file from scratch**. Always:
 
-This applies to:
-- Source files (.py, .ts, .js, etc.)
-- Test files
-- Fixture files (JSON, YAML, etc.)
-- Configuration files
+1. **Copy** the original file verbatim using `Shell: cp source target`.
+2. **Edit** only the lines that actually change using `StrReplace` on the copy.
+3. **Run tests** to verify nothing broke.
+
+## Scope
+
+This applies whenever the new file shares most of its content with an existing one:
+
+- Migrating code between repos, packages, or directories
+- Creating a variant of an existing file (e.g. stream vs. non-stream client)
+- Porting source files, tests, fixtures, or configuration
 
 ## Why
 
-- Rewriting from scratch loses features, edge-case handling, and subtle logic.
-- Copying preserves the full implementation, including parts you might not remember.
-- A diff between copy and refactored version makes the actual changes reviewable.
+- **Write rewrites are error-prone** -- regenerating 200 lines to change 5 risks silently dropping logic, edge cases, or subtle formatting.
+- **Write rewrites are not reviewable** -- the user sees a brand new file, not a diff of what actually changed.
+- **Write rewrites are wasteful** -- many more tokens for the same result.
+- **StrReplace edits are surgical** -- only the actual changes appear, making them easy to verify.
 
 ## Bad
 
 ```
-# Reading old file, then writing a "new version" from scratch
-Read(old_file) -> mentally extract logic -> Write(new_file)  # LOSES DETAILS
+Read(old_file)                         # read the original
+Write(new_file, <entire content>)      # rewrite everything from memory → LOSES DETAILS
 ```
 
 ## Good
 
 ```
-# Copy first, then edit
-Shell: cp old_file new_file     # exact copy
-Read(new_file)                  # verify
-StrReplace(new_file, ...)       # targeted refactoring changes
+Shell: cp old_file new_file            # exact copy
+StrReplace(new_file, old_import, new_import)   # targeted change 1
+StrReplace(new_file, old_default, new_default) # targeted change 2
 ```

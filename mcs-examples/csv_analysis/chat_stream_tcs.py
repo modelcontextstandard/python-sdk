@@ -6,39 +6,35 @@ signals that streamed tokens might be a tool call, the client buffers
 them instead of displaying.  Once the call is confirmed and executed,
 the next LLM turn streams seamlessly -- the user never sees raw JSON.
 
-This is a copy of ``mcs_driver_minimal_client_stream.py`` with the
-buffer logic added.  The separation keeps the base example simple.
-
 Usage:
-    python mcs_driver_minimal_client_stream_tcs.py [--model MODEL] [--debug] [--data-dir DIR]
+    python chat_stream_tcs.py [--model MODEL] [--debug] [--data-dir DIR]
 
     # Local model:
-    python mcs_driver_minimal_client_stream_tcs.py \\
-        --model openai/meta-llama/Meta-Llama-3.1-8B-Instruct \\
+    python chat_stream_tcs.py \
+        --model openai/meta-llama/Meta-Llama-3.1-8B-Instruct \
         --api-base http://localhost:8000/v1 --debug
 
 Requires:
-    pip install -e ".[examples]"
+    pip install mcs-driver-csv litellm rich python-dotenv
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import sys
+import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from litellm import completion
 from rich.console import Console
 from rich.panel import Panel
 
-sys.path.insert(0, str(Path(__file__).parent / "reference"))
-
-from csv_driver_tcs import CsvDriverTcs  # type: ignore[import-not-found]
-
-from mcs.driver.core import DriverResponse, MCSDriver
+from mcs.driver.csv import CsvDriver
+from mcs.driver.core import DriverMeta, DriverBinding, DriverResponse, MCSDriver
 from mcs.driver.core.mixins import ToolCallSignalingMixin
 
 console = Console()
@@ -47,17 +43,70 @@ MAX_TOOL_ROUNDS = 10
 SIGNAL_TIMEOUT_MS = 3000
 
 
+@dataclass(frozen=True)
+class _CsvTcsMeta(DriverMeta):
+    id: str = "b8c3e5f1-4d9a-4b2e-a7c6-9f1d3e5a8b2c"
+    name: str = "CSV Driver (TCS)"
+    version: str = "0.1.0"
+    bindings: tuple[DriverBinding, ...] = (
+        DriverBinding(capability="csv", adapter="localfs", spec_format="Custom"),
+    )
+    supported_llms: tuple[str, ...] = ("*",)
+    capabilities: tuple[str, ...] = ()
+
+
+class CsvDriverTcs(CsvDriver, ToolCallSignalingMixin):
+    """CsvDriver extended with streaming tool-call signaling.
+
+    Shows how to add TCS to any existing driver by mixing in
+    ``ToolCallSignalingMixin`` and implementing two methods.
+    """
+
+    meta: DriverMeta = _CsvTcsMeta()
+
+    TOOL_CALL_OPENERS = ("{", "```")
+
+    def might_be_tool_call(self, partial: str) -> bool:
+        stripped = partial.strip()
+        if not stripped:
+            return False
+        for opener in self.TOOL_CALL_OPENERS:
+            if stripped.startswith(opener) or opener.startswith(stripped):
+                return True
+        return False
+
+    def is_complete_tool_call(self, text: str) -> bool:
+        payload = self._extract_json_obj(text)
+        if payload is None:
+            return False
+        return "tool" in payload
+
+    @staticmethod
+    def _extract_json_obj(raw: str) -> dict[str, Any] | None:
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```[^\n]*\n", "", cleaned)
+            cleaned = re.sub(r"\n```$", "", cleaned)
+        match = re.search(r"\{.*\}", cleaned, re.S)
+        if not match:
+            return None
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="MCS streaming chat client with tool-call signaling (CSV-LocalFS)")
+        description="MCS streaming chat client with tool-call signaling (CSV)")
     p.add_argument("--model", default="gpt-4o", help="LiteLLM model identifier (default: gpt-4o)")
     p.add_argument("--api-base", default=None,
-                   help="Custom OpenAI-compatible API base URL (e.g. http://localhost:8000/v1)")
+                   help="Custom OpenAI-compatible API base URL")
     p.add_argument("--api-key", default=None,
-                   help="API key for --api-base (default: 'no-key' when --api-base is set)")
+                   help="API key for --api-base")
     p.add_argument("--debug", "-d", action="store_true",
                    help="Show tool-call signaling, payloads, and DriverResponse details")
-    p.add_argument("--data-dir", default=str(Path(__file__).parent / "reference" / "data"),
+    p.add_argument("--data-dir", default=str(Path(__file__).parent / "data"),
                    help="CSV base directory for the driver")
     return p.parse_args()
 
@@ -75,7 +124,6 @@ def _fmt_tool_params(params: dict) -> str:
 
 
 def _extract_native_tool_calls(chunk) -> list[dict] | None:
-    """Pull native tool_calls from an OpenAI-style streaming delta."""
     choices = getattr(chunk, "choices", None)
     delta = choices[0].delta if choices else None
     if delta is None:
@@ -103,11 +151,6 @@ def _stream_one_turn(
     api_base: str | None = None,
     api_key: str | None = None,
 ) -> tuple[str | None, DriverResponse | None]:
-    """Stream one LLM turn with tool-call signaling support.
-
-    When the driver implements ``ToolCallSignalingMixin``, the client
-    buffers tokens that look like a tool call instead of printing them.
-    """
     kwargs: dict = {"model": model, "messages": messages, "stream": True}
     if api_base:
         kwargs["api_base"] = api_base

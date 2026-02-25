@@ -1,27 +1,26 @@
-"""Streaming MCS chat client using the CSV-LocalFS reference driver.
+"""Streaming MCS chat client using the CSV driver.
 
 Streams LLM output token-by-token.  When the driver detects a tool call
 in the accumulated buffer it executes the tool, feeds the result back, and
 resumes streaming.  A ``--debug`` flag shows raw tool-call payloads and
-DriverResponse details inline (similar to OctaClaw's debug mode).
+DriverResponse details inline.
 
 Usage:
-    python mcs_driver_minimal_client_stream.py [--model MODEL] [--debug] [--data-dir DIR]
+    python chat_stream.py [--model MODEL] [--debug] [--data-dir DIR]
 
     # Local model via OpenAI-compatible server (vLLM, llama.cpp, etc.):
-    python mcs_driver_minimal_client_stream.py \
+    python chat_stream.py \
         --model openai/meta-llama/Meta-Llama-3.1-8B-Instruct \
         --api-base http://localhost:8000/v1 --debug
 
 Requires:
-    pip install -e ".[examples]"
+    pip install mcs-driver-csv litellm rich python-dotenv
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -29,10 +28,7 @@ from litellm import completion
 from rich.console import Console
 from rich.panel import Panel
 
-sys.path.insert(0, str(Path(__file__).parent / "reference"))
-
-from csv_driver import CsvDriver  # type: ignore[import-not-found]
-
+from mcs.driver.csv import CsvDriver
 from mcs.driver.core import DriverResponse, MCSDriver
 
 console = Console()
@@ -41,14 +37,14 @@ MAX_TOOL_ROUNDS = 10
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="MCS streaming chat client (CSV-LocalFS)")
+    p = argparse.ArgumentParser(description="MCS streaming chat client (CSV)")
     p.add_argument("--model", default="gpt-4o", help="LiteLLM model identifier (default: gpt-4o)")
     p.add_argument("--api-base", default=None,
                    help="Custom OpenAI-compatible API base URL (e.g. http://localhost:8000/v1)")
     p.add_argument("--api-key", default=None,
                    help="API key for --api-base (default: 'no-key' when --api-base is set)")
     p.add_argument("--debug", "-d", action="store_true", help="Show tool-call payloads and DriverResponse details")
-    p.add_argument("--data-dir", default=str(Path(__file__).parent / "reference" / "data"),
+    p.add_argument("--data-dir", default=str(Path(__file__).parent / "data"),
                    help="CSV base directory for the driver")
     return p.parse_args()
 
@@ -66,7 +62,6 @@ def _fmt_tool_params(params: dict) -> str:
 
 
 def _extract_native_tool_calls(chunk) -> list[dict] | None:
-    """Pull native tool_calls from an OpenAI-style streaming delta."""
     delta = chunk.choices[0].delta if chunk.choices else None
     if delta is None:
         return None
@@ -93,13 +88,6 @@ def _stream_one_turn(
     api_base: str | None = None,
     api_key: str | None = None,
 ) -> tuple[str | None, DriverResponse | None]:
-    """Stream a single LLM turn, detect tool calls, return final text or DriverResponse.
-
-    Returns
-    -------
-    (final_text, None)        -- LLM finished with a text answer (no tool call).
-    (None, DriverResponse)    -- A tool call was detected and executed (or failed).
-    """
     kwargs: dict = {"model": model, "messages": messages, "stream": True}
     if api_base:
         kwargs["api_base"] = api_base
@@ -109,7 +97,6 @@ def _stream_one_turn(
     buffer = ""
     native_calls: list[dict] = []
     printed_header = False
-    after_tool_debug = False
 
     for chunk in stream:  # type: ignore[union-attr]
         choices = getattr(chunk, "choices", None)
@@ -137,42 +124,10 @@ def _stream_one_turn(
             print(token, end="", flush=True)
 
         if finish == "tool_calls" and native_calls:
-            for nc_item in native_calls:
-                try:
-                    args = json.loads(nc_item.get("arguments", "{}"))
-                except json.JSONDecodeError:
-                    args = {}
-                tool_payload = {"tool": nc_item.get("name"), "arguments": args}
-
-                if debug:
-                    if printed_header:
-                        print()
-                    console.print(f"  [dim]\u2699 {nc_item.get('name', '?')}({_fmt_tool_params(args)})[/dim]")
-
-                dr = driver.process_llm_response(tool_payload, streaming=False)
-
-                if debug:
-                    _print_debug_dr(dr)
-
-                return None, dr
+            return None, _handle_native_calls(native_calls, driver, debug, printed_header)
 
     if native_calls:
-        for nc_item in native_calls:
-            try:
-                args = json.loads(nc_item.get("arguments", "{}"))
-            except json.JSONDecodeError:
-                args = {}
-            tool_payload = {"tool": nc_item.get("name"), "arguments": args}
-
-            if debug:
-                if printed_header:
-                    print()
-                console.print(f"  [dim]\u2699 {nc_item.get('name', '?')}({_fmt_tool_params(args)})[/dim]")
-
-            dr = driver.process_llm_response(tool_payload, streaming=False)
-            if debug:
-                _print_debug_dr(dr)
-            return None, dr
+        return None, _handle_native_calls(native_calls, driver, debug, printed_header)
 
     dr = driver.process_llm_response(buffer, streaming=False)
 
@@ -189,6 +144,28 @@ def _stream_one_turn(
     if printed_header:
         print()
     return buffer, None
+
+
+def _handle_native_calls(
+    native_calls: list[dict], driver: MCSDriver, debug: bool, printed_header: bool,
+) -> DriverResponse:
+    for nc_item in native_calls:
+        try:
+            args = json.loads(nc_item.get("arguments", "{}"))
+        except json.JSONDecodeError:
+            args = {}
+        tool_payload = {"tool": nc_item.get("name"), "arguments": args}
+
+        if debug:
+            if printed_header:
+                print()
+            console.print(f"  [dim]\u2699 {nc_item.get('name', '?')}({_fmt_tool_params(args)})[/dim]")
+
+        dr = driver.process_llm_response(tool_payload, streaming=False)
+        if debug:
+            _print_debug_dr(dr)
+        return dr
+    return DriverResponse()
 
 
 def _print_debug_dr(dr: DriverResponse) -> None:
