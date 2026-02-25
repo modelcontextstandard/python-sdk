@@ -11,6 +11,7 @@ members = [
     "mcs-adapter-http",
     "mcs-adapter-localfs",
     "mcs-driver-core",
+    "mcs-driver-csv",
     "mcs-driver-filesystem",
     "mcs-driver-rest",
     "mcs-examples",
@@ -1472,6 +1473,21 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "mcs-driver-csv"
+version = "0.1.0"
+source = { editable = "packages/drivers/mcs-driver-csv" }
+dependencies = [
+    { name = "mcs-adapter-localfs" },
+    { name = "mcs-driver-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcs-adapter-localfs", editable = "packages/adapters/mcs-adapter-localfs" },
+    { name = "mcs-driver-core", editable = "packages/core" },
+]
+
+[[package]]
 name = "mcs-driver-filesystem"
 version = "0.2.0"
 source = { editable = "packages/drivers/mcs-driver-filesystem" }
@@ -1554,6 +1570,7 @@ dependencies = [
     { name = "mcs-adapter-http" },
     { name = "mcs-adapter-localfs" },
     { name = "mcs-driver-core" },
+    { name = "mcs-driver-csv" },
     { name = "mcs-driver-filesystem" },
     { name = "mcs-driver-rest" },
     { name = "mcs-examples" },
@@ -1596,6 +1613,7 @@ requires-dist = [
     { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
     { name = "mcs-adapter-localfs", editable = "packages/adapters/mcs-adapter-localfs" },
     { name = "mcs-driver-core", editable = "packages/core" },
+    { name = "mcs-driver-csv", editable = "packages/drivers/mcs-driver-csv" },
     { name = "mcs-driver-filesystem", editable = "packages/drivers/mcs-driver-filesystem" },
     { name = "mcs-driver-rest", editable = "packages/drivers/mcs-driver-rest" },
     { name = "mcs-examples", editable = "mcs-examples" },
