@@ -31,11 +31,20 @@ class LocalFsAdapter:
         self.base_dir = Path(base_dir) if base_dir else Path.cwd()
 
     def _resolve(self, path_str: str) -> Path:
-        """Resolve *path_str* against ``base_dir`` when relative."""
+        """Resolve *path_str* against ``base_dir`` when relative.
+
+        Raises ``ValueError`` if the resolved path escapes ``base_dir``.
+        """
         p = Path(path_str)
         if not p.is_absolute():
             p = self.base_dir / p
-        return p.resolve()
+        resolved = p.resolve()
+        base_resolved = self.base_dir.resolve()
+        if base_resolved not in resolved.parents and resolved != base_resolved:
+            raise ValueError(
+                f"Path escapes configured base directory: {path_str}"
+            )
+        return resolved
 
     def list_dir(self, path: str) -> str:
         """List entries in *path* and return a JSON string with the result."""
@@ -72,6 +81,23 @@ class LocalFsAdapter:
             return json.dumps({"path": str(target), "bytes_written": len(content.encode(encoding))})
         except Exception as e:
             return json.dumps({"error": str(e)})
+
+    def list_files(self, path: str, pattern: str = "*") -> list[str]:
+        """Return relative paths of files matching *pattern* under *path*."""
+        target = self._resolve(path)
+        if not target.is_dir():
+            return []
+        base = self.base_dir.resolve()
+        return sorted(
+            str(p.relative_to(base))
+            for p in target.glob(pattern)
+            if p.is_file()
+        )
+
+    def read_raw(self, path: str, *, encoding: str = "utf-8") -> str:
+        """Return the raw text content of a file (no JSON wrapping)."""
+        target = self._resolve(path)
+        return target.read_text(encoding=encoding)
 
     def exists(self, path: str) -> bool:
         """Return ``True`` when *path* exists on disk."""
