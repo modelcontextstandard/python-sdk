@@ -24,7 +24,6 @@ from mcs.driver.core import (
 )
 
 from csv_tooldriver import CsvToolDriver
-from fs_adapter import FsAdapter
 from localfs_fs_adapter import LocalFsAdapter
 
 
@@ -34,7 +33,7 @@ class _CsvDriverMeta(DriverMeta):
     name: str = "CSV Driver"
     version: str = "0.1.0"
     bindings: tuple[DriverBinding, ...] = (
-        DriverBinding(capability="csv", adapter="*", spec_format="Custom"),
+        DriverBinding(capability="csv", adapter="localfs", spec_format="Custom"),
     )
     supported_llms: tuple[str, ...] | None = ("*",)
     capabilities: tuple[str, ...] = ()
@@ -43,12 +42,8 @@ class _CsvDriverMeta(DriverMeta):
 class CsvDriver(MCSDriver, MCSToolDriver):
     meta: DriverMeta = _CsvDriverMeta()
 
-    def __init__(self, adapter: FsAdapter | None = None, *, base_dir: str | None = None) -> None:
-        if adapter is None:
-            if base_dir is None:
-                raise ValueError("Either adapter or base_dir must be provided.")
-            adapter = LocalFsAdapter(base_dir)
-        self._tooldriver = CsvToolDriver(adapter)
+    def __init__(self, base_dir: str) -> None:
+        self._tooldriver = CsvToolDriver(LocalFsAdapter(base_dir))
 
     # -- MCSToolDriver pass-through --
 

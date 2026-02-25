@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 from mcs.driver.core import DriverBinding, DriverMeta, MCSToolDriver, Tool, ToolParameter
@@ -44,7 +45,7 @@ class RuntimeLocalToolDriver(MCSToolDriver):
             ),
         ]
 
-    def execute_tool(self, tool_name: str, arguments: dict[str, object]) -> str:
+    def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
         if tool_name == "now_utc":
             return json.dumps({"timestamp": datetime.now(timezone.utc).isoformat()})
         if tool_name == "format_epoch_seconds":
