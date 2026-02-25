@@ -4,8 +4,9 @@ import logging
 from typing import Dict, List
 from dotenv import load_dotenv
 
-from mcs.driver.core import BasicOrchestrator, MCSDriver
-from mcs.driver.rest_http import RestHttpToolDriver
+from mcs.driver.core import MCSDriver
+from mcs.orchestrator.rest import RestOrchestrator
+from mcs.driver.rest import RestToolDriver
 
 from litellm import completion
 
@@ -74,11 +75,9 @@ async def main() -> None:
 
     # Only one url is implemented right now, need to do some magic if we want to support multiple urls
     spec_url = 'https://mcs-quickstart.coolify.alsdienst.de/openapi.json'
-    http_tool_driver = RestHttpToolDriver(spec_url)
-    print(http_tool_driver.list_tools())
-
-    tools_list = [http_tool_driver]
-    orchestrator = BasicOrchestrator(tools_list)
+    orchestrator = RestOrchestrator()
+    orchestrator.add_connection(spec_url, label="quickstart")
+    print(orchestrator.list_tools())
     print(orchestrator.get_driver_system_message())
 
     chat_session = ChatSession(orchestrator)

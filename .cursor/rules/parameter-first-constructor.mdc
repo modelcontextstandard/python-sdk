@@ -1,0 +1,67 @@
+---
+description: When creating a new class (Driver, ToolDriver, Adapter, Orchestrator, etc.), use the parameter-first constructor pattern with an optional DI escape hatch.
+alwaysApply: true
+---
+
+# Parameter-First Constructor with Optional DI
+
+Every new class must accept **configuration parameters directly** in its constructor.
+The caller should never need to know about or pre-instantiate internal dependencies.
+For testing and advanced composition, provide an optional DI parameter (prefixed with `_`).
+
+## Pattern
+
+```python
+class MyDriver:
+    def __init__(
+        self,
+        url: str = "",          # primary config parameter(s)
+        *,
+        option_a: str = "default",
+        _tooldriver: MCSToolDriver | None = None,   # DI escape hatch
+        **adapter_kwargs: Any,
+    ) -> None:
+        if _tooldriver is not None:
+            self._td = _tooldriver
+        elif url:
+            self._td = SomeToolDriver(url, **adapter_kwargs)
+        else:
+            raise ValueError("Either 'url' or '_tooldriver' must be provided")
+        self._option_a = option_a
+```
+
+## Rules
+
+1. **Config parameters first** -- the constructor accepts the same values a user would put in a config file (URLs, paths, credentials, flags).
+2. **Internal dependencies are created inside `__init__`** -- the class knows which ToolDriver/Adapter to instantiate. The caller does not.
+3. **DI parameter uses `_` prefix** -- e.g. `_tooldriver`, `_adapter`. This signals "internal / advanced use only".
+4. **DI parameter is keyword-only and defaults to `None`**.
+5. **Validate** -- if neither the primary config nor the DI parameter is provided, raise a clear `ValueError`.
+6. **Lazy imports** -- use `from ... import ...` inside `__init__` to avoid circular dependencies.
+
+## Applies to
+
+- `MCSDriver` (hybrid drivers)
+- `MCSToolDriver` (tool drivers)
+- Adapters (when they have sub-dependencies)
+- Orchestrators
+
+## Usage examples
+
+```python
+# Config-driven (normal usage, e.g. from a config file)
+driver = RestDriver("https://api.example.com/openapi.json")
+driver = RestDriver("https://api.example.com/openapi.json", basic_user="u:p")
+driver = FilesystemDriver(base_dir="/data/files")
+
+# DI (testing / composition)
+driver = RestDriver(_tooldriver=mock_td)
+driver = FilesystemToolDriver(_adapter=fake_fs)
+```
+
+## Why
+
+- **Client simplicity** -- the client only passes configuration values, never internal objects.
+- **Config-driven instantiation** -- a config loader can create any driver from a dict of parameters without knowing implementation details.
+- **Testability** -- mocks and fakes can be injected via `_tooldriver` / `_adapter` without subclassing or patching.
+- **Composability** -- orchestrators can inject pre-configured ToolDrivers when needed.

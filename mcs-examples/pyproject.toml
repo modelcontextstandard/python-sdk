@@ -1,4 +1,3 @@
-# mcs-examples/pyproject.toml
 [build-system]
 requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -6,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name            = "mcs-examples"
 version         = "0.1.1"
-description     = "Minimal MCS client examples"
+description     = "Minimal MCS client and driver examples."
 requires-python = ">=3.9"
 dependencies    = [
   "mcs-driver-core>=0.2",
   "requests>=2.32",
   "litellm>=1.73",
-  "python-dotenv>=1.1.0"
+  "python-dotenv>=1.1.0",
 ]
 
 [project.optional-dependencies]
@@ -21,13 +20,9 @@ quickstart = [
   "uvicorn>=0.29",
   "pydantic>=2.7",
 ]
-# Damit im Beispiel-Code die Treiber-Pakete verfügbar sind,
-# installiere sie lokal per editable install:
-# pip install -e ..   (installs mcs-driver-core from the repo root)
-# pip install -e ../mcs-driver-rest-http
-#
-# Hier müssen keine runtime-Dependencies eingetragen werden,
-# denn die Treiber-Pakete liefern ihre eigenen Abhängigkeiten.
+
+[tool.uv.sources]
+mcs-driver-core = { workspace = true }
 
 [tool.setuptools.packages.find]
 where   = ["."]
