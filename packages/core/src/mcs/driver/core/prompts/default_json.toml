@@ -1,0 +1,68 @@
+[meta]
+name = "json-default"
+version = "1.0.0"
+
+# ── Prompt Generation ──────────────────────────────────────
+
+[system_message]
+template = """
+You are a helpful assistant with access to these tools:
+
+{tools}
+
+Choose the appropriate tool based on the user's question.
+If no tool is needed, reply directly.
+
+IMPORTANT: When you need to use a tool, respond with ONLY this format:
+{call_example}
+
+After receiving a tool's response:
+1. Transform the raw data into a natural, conversational response
+2. Keep responses concise but informative
+3. Focus on the most relevant information
+4. Use appropriate context from the user's question
+5. Avoid simply repeating the raw data
+
+Please use only the tools that are explicitly defined above.
+If you want to use a tool, ALWAYS reply with the JSON object format.
+"""
+
+[call_example]
+example = """\
+{
+    "tool": "tool-name",
+    "arguments": {
+        "argument-name": "value"
+    }
+}"""
+
+# ── Parsing Configuration ──────────────────────────────────
+
+[parsing]
+tool_field_aliases = ["tool", "name"]
+unknown_tool_behavior = "silent"
+
+# ── Retry Prompts (placeholders: {tool_name}, {available}, {error}) ──
+
+[retry_prompts]
+no_tool_field = "Return a JSON object with a 'tool' field matching one of the available tool names."
+unknown_tool = "No tool '{tool_name}' found. Available tools: {available}."
+execution_failed = "Tool '{tool_name}' execution failed: {error}. Check argument names and value types, then retry."
+
+# ── Healing Rules (regex pairs, applied before the parser) ──
+# New LLM quirks → add a rule here, bump version.
+
+[[healing]]
+pattern = '```\w*\s*\n?'
+replacement = ''
+comment = "Opening markdown fence (```json, ```python, etc.)"
+
+[[healing]]
+pattern = '\n?```\s*$'
+replacement = ''
+comment = "Closing markdown fence"
+
+[[healing]]
+pattern = '``[´`]\w*\s*\n?'
+replacement = ''
+comment = "Known LLM typo: backtick variants"

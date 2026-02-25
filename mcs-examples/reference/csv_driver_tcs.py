@@ -20,7 +20,7 @@ from mcs.driver.core import (
 from mcs.driver.core.mixins import ToolCallSignalingMixin
 
 from csv_tooldriver import CsvToolDriver
-from localfs_adapter import LocalFsAdapter
+from localfs_fs_adapter import LocalFsAdapter
 
 
 @dataclass(frozen=True)

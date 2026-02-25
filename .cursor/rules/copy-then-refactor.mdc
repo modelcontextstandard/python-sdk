@@ -1,0 +1,41 @@
+---
+description: When migrating or porting code between repositories or packages, always copy the original files first, then refactor in place. Never rewrite from scratch.
+alwaysApply: true
+---
+
+# Copy First, Then Refactor
+
+When migrating, porting, or moving code from one location to another (between repos, packages, or directories):
+
+1. **Copy the original files verbatim** before making any changes. Use file system copy operations, not manual re-typing or rewriting from memory.
+2. **Verify the copy** is identical to the source (hash check or diff).
+3. **Then refactor in place** -- adjust imports, rename classes, adapt to new architecture.
+4. **Run existing tests** against the copied code before refactoring to establish a baseline.
+
+This applies to:
+- Source files (.py, .ts, .js, etc.)
+- Test files
+- Fixture files (JSON, YAML, etc.)
+- Configuration files
+
+## Why
+
+- Rewriting from scratch loses features, edge-case handling, and subtle logic.
+- Copying preserves the full implementation, including parts you might not remember.
+- A diff between copy and refactored version makes the actual changes reviewable.
+
+## Bad
+
+```
+# Reading old file, then writing a "new version" from scratch
+Read(old_file) -> mentally extract logic -> Write(new_file)  # LOSES DETAILS
+```
+
+## Good
+
+```
+# Copy first, then edit
+Shell: cp old_file new_file     # exact copy
+Read(new_file)                  # verify
+StrReplace(new_file, ...)       # targeted refactoring changes
+```

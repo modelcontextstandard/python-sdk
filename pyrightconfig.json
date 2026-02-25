@@ -1,9 +1,12 @@
 {
-  "include": [
-    "src",
-    "mcs-examples"
-  ],
+  "venvPath": ".",
+  "venv": ".venv",
   "extraPaths": [
-    "src"
+    "packages/core/src",
+    "packages/adapters/mcs-adapter-http/src",
+    "packages/adapters/mcs-adapter-localfs/src",
+    "packages/drivers/mcs-driver-rest/src",
+    "packages/drivers/mcs-driver-filesystem/src",
+    "packages/orchestrators/mcs-orchestrator-rest/src"
   ]
 }
