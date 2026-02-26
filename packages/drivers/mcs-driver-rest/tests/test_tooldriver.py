@@ -437,7 +437,7 @@ class TestConstructorConfig:
 
     def test_custom_http_adapter_used(self):
         adapter = HttpAdapter(verify_ssl=False, timeout=30)
-        driver = RestToolDriver("https://example.com/spec.json", http=adapter)
+        driver = RestToolDriver("https://example.com/spec.json", _http=adapter)
         assert driver._http is adapter
         assert driver._http.verify_ssl is False
         assert driver._http.timeout == 30

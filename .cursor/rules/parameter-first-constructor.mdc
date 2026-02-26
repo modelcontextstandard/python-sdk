@@ -59,6 +59,27 @@ driver = RestDriver(_tooldriver=mock_td)
 driver = FilesystemToolDriver(_adapter=fake_fs)
 ```
 
+## `_` prefix convention
+
+The `_` prefix signals *"this is not configuration -- it is a dependency injection hook"*.
+
+| Prefix | Meaning | Examples |
+|--------|---------|----------|
+| no `_` | Config value a user would put in a config file | `url`, `base_dir`, `adapter`, `port` |
+| `_`    | Internal dependency for DI / testing / composition | `_tooldriver`, `_adapter`, `_http`, `_extraction_strategies` |
+
+**All** injectable dependencies use the `_` prefix -- including strategies:
+
+```python
+# DI for strategies (advanced / testing)
+driver = CsvDriver(base_dir="/data", _extraction_strategies=[MyCustomExtraction()])
+orchestrator = BaseOrchestrator(_resolution_strategy=my_strategy)
+```
+
+> **Note:** The existing `prompt_strategy` and `resolution_strategy` parameters
+> predate this convention and lack the `_` prefix. This is a known inconsistency
+> that will be resolved in a future cleanup.
+
 ## Why
 
 - **Client simplicity** -- the client only passes configuration values, never internal objects.

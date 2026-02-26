@@ -61,11 +61,11 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
         self,
         url: str,
         *,
-        http: HttpAdapter | None = None,
+        _http: HttpAdapter | None = None,
         **http_kwargs: Any,
     ) -> None:
         self.spec_url = url
-        self._http = http or HttpAdapter(**http_kwargs)
+        self._http = _http or HttpAdapter(**http_kwargs)
         self._tools: List[Tool] | None = None
         self._tool_map: Dict[str, Dict[str, Any]] = {}
         self._base_url: str | None = None
