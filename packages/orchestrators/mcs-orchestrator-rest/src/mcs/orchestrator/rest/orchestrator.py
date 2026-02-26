@@ -72,7 +72,7 @@ class RestOrchestrator(BaseOrchestrator):
         from mcs.driver.rest import RestToolDriver
 
         adapter = HttpAdapter(**http_kwargs)
-        td = RestToolDriver(url, http=adapter)
+        td = RestToolDriver(url, _http=adapter)
         self.add_driver(td, label=label)
 
     def remove_connection(self, label: str) -> None:
