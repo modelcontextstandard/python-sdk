@@ -3,29 +3,23 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "mcs-orchestrator-rest"
-version         = "0.2.0"
-description     = "Dynamic REST/OpenAPI orchestrator for the Model Context Standard."
+name            = "mcs-orchestrator-base"
+version         = "0.1.0"
+description     = "Base orchestrator with pluggable resolution strategies for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"
 license         = "Apache-2.0"
-keywords        = ["mcs", "modelcontextstandard", "orchestrator", "rest", "openapi"]
+keywords        = ["mcs", "modelcontextstandard", "orchestrator"]
 authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
 
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
 
 dependencies = [
     "mcs-driver-core>=0.2",
-    "mcs-orchestrator-base>=0.1",
-    "mcs-adapter-http>=0.2",
-    "mcs-driver-rest>=0.2",
 ]
 
 [tool.uv.sources]
 mcs-driver-core = { workspace = true }
-mcs-orchestrator-base = { workspace = true }
-mcs-adapter-http = { workspace = true }
-mcs-driver-rest = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

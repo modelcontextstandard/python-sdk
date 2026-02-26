@@ -5,9 +5,11 @@
     "packages/core/src",
     "packages/adapters/mcs-adapter-http/src",
     "packages/adapters/mcs-adapter-localfs/src",
+    "packages/adapters/mcs-adapter-smb/src",
     "packages/drivers/mcs-driver-rest/src",
     "packages/drivers/mcs-driver-filesystem/src",
     "packages/drivers/mcs-driver-csv/src",
+    "packages/orchestrators/mcs-orchestrator-base/src",
     "packages/orchestrators/mcs-orchestrator-rest/src"
   ]
 }

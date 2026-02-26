@@ -59,9 +59,10 @@ _TOOLS = [
 class FilesystemToolDriver(MCSToolDriver):
     """Provides filesystem operations as structured tools for an orchestrator.
 
-    Primary constructor takes configuration parameters and creates a
-    ``LocalFsAdapter`` internally.  For testing or alternative backends
-    an existing adapter can be injected via ``_adapter``.
+    Primary constructor takes an ``adapter`` flag (``"localfs"`` or
+    ``"smb"``) and forwards ``**adapter_kwargs`` to the chosen adapter.
+    For testing or alternative backends an existing adapter can be
+    injected via ``_adapter``.
     """
 
     meta: DriverMeta = _FsToolDriverMeta()
@@ -69,14 +70,18 @@ class FilesystemToolDriver(MCSToolDriver):
     def __init__(
         self,
         *,
-        base_dir: str | None = None,
+        adapter: str = "localfs",
         _adapter: Any = None,
+        **adapter_kwargs: Any,
     ) -> None:
         if _adapter is not None:
             self._adapter = _adapter
+        elif adapter == "smb":
+            from mcs.adapter.smb import SmbAdapter
+            self._adapter = SmbAdapter(**adapter_kwargs)
         else:
             from mcs.adapter.localfs import LocalFsAdapter
-            self._adapter = LocalFsAdapter(base_dir=base_dir)
+            self._adapter = LocalFsAdapter(**adapter_kwargs)
 
     # -- MCSToolDriver contract ----------------------------------------------
 
