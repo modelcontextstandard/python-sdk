@@ -41,11 +41,12 @@ class FilesystemDriver(DriverBase):
     def __init__(
         self,
         *,
-        base_dir: str | None = None,
+        adapter: str = "localfs",
         custom_tool_description: str | None = None,
         custom_driver_system_message: str | None = None,
         prompt_strategy: PromptStrategy | None = None,
         _tooldriver: MCSToolDriver | None = None,
+        **adapter_kwargs: Any,
     ) -> None:
         super().__init__(
             prompt_strategy=prompt_strategy,
@@ -56,7 +57,7 @@ class FilesystemDriver(DriverBase):
             self._td = _tooldriver
         else:
             from mcs.driver.filesystem.tooldriver import FilesystemToolDriver
-            self._td = FilesystemToolDriver(base_dir=base_dir)
+            self._td = FilesystemToolDriver(adapter=adapter, **adapter_kwargs)
 
     # -- MCSToolDriver delegation ---------------------------------------------
 
