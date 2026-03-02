@@ -205,3 +205,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Example output / LLM response dumps (may contain API keys)
+mcs-examples/**/*_results_*.json
+mcs-examples/**/*_responses*.json
