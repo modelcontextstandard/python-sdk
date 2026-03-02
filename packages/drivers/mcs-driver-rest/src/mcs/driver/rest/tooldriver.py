@@ -189,10 +189,13 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
         if spec.get("swagger", "").startswith("2"):
             spec = self._convert_swagger2(spec)
 
-        self._base_url = spec.get("servers", [{}])[0].get("url")
-        if not self._base_url:
+        raw_server_url = spec.get("servers", [{}])[0].get("url", "")
+        if raw_server_url and "://" in raw_server_url:
+            self._base_url = raw_server_url
+        else:
             parsed = urlparse(self.spec_url)
-            self._base_url = f"{parsed.scheme}://{parsed.netloc}"
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            self._base_url = origin + raw_server_url if raw_server_url else origin
         self._base_url = self._base_url.rstrip("/")
         self._parse_spec(spec)
         if self._tools:
