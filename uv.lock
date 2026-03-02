@@ -1599,6 +1599,7 @@ dependencies = [
     { name = "mcs-driver-core" },
     { name = "python-dotenv" },
     { name = "requests" },
+    { name = "rich" },
 ]
 
 [package.optional-dependencies]
@@ -1618,6 +1619,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'quickstart'", specifier = ">=2.7" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "requests", specifier = ">=2.32" },
+    { name = "rich", specifier = ">=13.0" },
     { name = "uvicorn", marker = "extra == 'quickstart'", specifier = ">=0.29" },
 ]
 provides-extras = ["quickstart"]

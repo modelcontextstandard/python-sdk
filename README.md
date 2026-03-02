@@ -111,20 +111,27 @@ quickly.
 
 ### 3. Running the examples
 
-The `mcs-examples/` folder contains runnable demos for every part of the SDK -- from standalone reference drivers (no LLM needed) to streaming chat clients with real models.  Install the example dependencies and try them out:
+The `mcs-examples/` folder contains runnable demos for every part of the SDK -- from standalone reference drivers (no LLM needed) to streaming chat clients with real models.
+
+The SDK root uses a **uv workspace** -- all packages under `packages/` and `mcs-examples/` are managed together. Use `uv` to install:
 
 ```bash
-pip install -e ".[examples]"
-python mcs-examples/mcs_driver_minimal_client_stream.py --model gpt-4o --debug
+pip install uv          # one-time: install uv
+uv sync                 # install all workspace packages as editable installs
+python mcs-examples/csv_analysis/chat_non_stream.py --model gpt-4o --debug
 ```
 
 See [`mcs-examples/README.md`](mcs-examples/README.md) for the full list of examples, including local model usage (Ollama, vLLM) and the `ToolCallSignalingMixin` demo.
 
+> **Note:** `pip install -e .` does **not** work at the workspace root. To install a single package directly use `pip install -e packages/core` etc., or use `uv sync` for the full workspace.
+
 ### 4. Development
 
+```bash
 git clone https://github.com/modelcontextstandard/python-sdk.git
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install uv
+uv sync
+```
 
 
 #### 4.1. Development of a new driver
