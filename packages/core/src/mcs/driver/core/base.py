@@ -164,7 +164,25 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsDriverContext):
         """Check whether *model_name* supports native function-calling.
 
         Uses litellm if available, otherwise returns ``False``.
+
+        .. todo::
+            The dependency on ``litellm`` solely for this check is
+            disproportionate.  Options under consideration:
+
+            (a) Lightweight standalone package (e.g. ``mcs-model-registry``)
+                that references / caches the ``litellm.model_cost`` JSON.
+            (b) Explicit configuration – the capability is supplied from
+                outside (e.g. via ``DriverMeta``, constructor parameter,
+                or a pluggable registry).
+            (c) Keep the status-quo lazy import (no hard dependency;
+                graceful fallback to ``False``).
+
+            Considerations: offline capability vs. freshness of model data.
+            ``litellm`` itself may fetch ``model_cost`` from the network.
+            Prompts are already designed to be loadable at runtime – a
+            similar pattern could apply here.
         """
+        # TODO: evaluate extraction of model-capability lookup (see docstring)
         try:
             from litellm import supports_function_calling  # type: ignore[import-untyped]
             return supports_function_calling(model=model_name)
