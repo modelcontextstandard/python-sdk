@@ -1,102 +1,59 @@
-# TODO -- Python SDK
+# TODO
 
-> **Prerequisite:** Verify that the v0.5 `DriverResponse.messages` and `process_llm_response(str | dict, streaming=...)` changes work correctly with and without streaming before proceeding.
+## Extract model-capability lookup from litellm dependency
 
----
+**Affects:** `packages/core/src/mcs/driver/core/base.py` → `_model_supports_native_tools()`
 
-## 1. BasicMCSDriver -- Abstract Base Class
+**Status:** Open / Undecided
 
-**Goal:** Eliminate the ~70 lines of boilerplate that every `MCSDriver` implementation currently duplicates (JSON extraction, `str | dict` normalization, `DriverResponse` construction with `messages`).
+**Problem:**
+`DriverBase._model_supports_native_tools()` uses a lazy import of
+`litellm.supports_function_calling()` to check whether a model supports native
+tool calls. This implicitly pulls in the entire `litellm` dependency (including
+~2600 model entries in `model_cost`) into `mcs-core`.
 
-**Design:** Template Method pattern. `BasicMCSDriver` implements the full `process_llm_response` pipeline and delegates only the execution logic to subclasses via one abstract hook.
+**Options:**
 
-```python
-class BasicMCSDriver(MCSDriver, ABC):
+1. **Standalone package `mcs-model-registry`** – references / caches the
+   `litellm.model_cost` JSON and exposes a slim
+   `supports_function_calling(model)` API without the rest of litellm.
+2. **Explicit configuration** – the capability is supplied from outside
+   (e.g. via `DriverMeta`, a constructor parameter, or a pluggable registry).
+3. **Keep the status quo** – lazy import with no hard dependency entry;
+   works without litellm (fallback `False`).
 
-    # Concrete: full pipeline
-    def process_llm_response(self, llm_response: str | dict, *, streaming: bool = False) -> DriverResponse:
-        llm_text = llm_response if isinstance(llm_response, str) else json.dumps(llm_response)
-        result = self._parse_llm_json(llm_text)
-        if result is None:
-            return DriverResponse()
-        if isinstance(result, DriverResponse):
-            return result
-        return self._execute_parsed_call(llm_text, result)
-
-    # The one hook subclasses MUST implement
-    @abstractmethod
-    def _execute_parsed_call(self, llm_text: str, parsed: dict) -> DriverResponse:
-        ...
-
-    # Default system message (overridable)
-    def get_driver_system_message(self, model_name: str | None = None) -> str:
-        return (
-            "You are a helpful assistant with access to these tools:\n\n"
-            f"{self.get_function_description(model_name)}\n\n"
-            'When you need to use a tool, respond with ONLY a JSON object:\n'
-            '{"tool": "tool-name", "arguments": {"param": "value"}}\n\n'
-            "After receiving a tool result, summarize it for the user.\n"
-            "Do not use tools that are not listed above.\n"
-        )
-
-    # Helpers for consistent DriverResponse construction
-    @staticmethod
-    def _success_response(llm_text: str, result: Any) -> DriverResponse: ...
-    @staticmethod
-    def _failed_response(llm_text: str, detail: str, retry: str) -> DriverResponse: ...
-
-    # JSON extraction + parsing (concrete, shared by all drivers)
-    def _parse_llm_json(self, llm_text: str) -> dict | DriverResponse | None: ...
-    @staticmethod
-    def _extract_json(raw: str) -> str | None: ...
-```
-
-**Subclass contract:** Implement `meta`, `get_function_description`, and `_execute_parsed_call`. Everything else is inherited.
-
-**Location:** New file `src/mcs/driver/core/mcs_basic_driver.py`, exported via `__init__.py`.
+**Trade-offs:**
+- The driver should ideally not need to actively fetch anything at runtime.
+- litellm itself may fetch `model_cost` from the network – requires
+  connectivity.
+- Prompts are already designed to be loadable at runtime → a similar pattern
+  could apply here.
+- Not a blocking issue since the fallback (`False`) works reliably.
 
 ---
 
-## 2. Message-Role Fix -- `"system"` to `"user"`
+## Extraction chain edge case: native-tool model called without `tools`
 
-**Problem:** All drivers currently use `{"role": "system", "content": str(result)}` for tool-call results in the `messages` list. This is semantically wrong:
+**Affects:** `packages/core/src/mcs/driver/core/base.py` → `_extract()`
 
-- `"system"` is meant for system-level instructions (typically one at conversation start).
-- Many LLMs ignore or deprioritize additional system messages mid-conversation.
-- Tool results are dynamic data the LLM should process, not system instructions.
+**Status:** Open
 
-**Fix:** Change the default role for tool results from `"system"` to `"user"`:
+**Problem:**
+The claim-based extraction chain distinguishes native tool-call responses from
+plain text by inspecting the **response shape** (e.g. presence of a
+`"tool_calls"` key). This covers >99% of practical cases, but an edge case
+remains: when a native-tool-capable model is called **without** `tools` and
+produces JSON in `content` that resembles a text-based tool call,
+`TextExtractionStrategy` could false-positive.
 
-```python
-# Before
-{"role": "system", "content": str(result)}
-
-# After
-{"role": "user", "content": f"[Tool Result]\n{result}"}
-```
-
-`"user"` is the most portable choice -- every LLM handles multiple user messages reliably. Specialized drivers (e.g. for OpenAI native function calling) can override and use `"role": "tool"` with `tool_call_id`.
-
-**Affected files:**
-- `python-sdk/src/mcs/driver/core/mcs_base_orchestrator.py`
-- `mcs-driver-rest-http/src/mcs/driver/rest_http/driver.py`
-- `mcs-driver-filesystem-localfs/src/mcs/driver/filesystem_localfs/driver.py`
-- `python-sdk/mcs-examples/reference/csv_localfs_driver.py`
-- All docs that show `messages` examples (Driver_Contract.md, Minimal_Driver_Contract.md, 2_Core_Idea.md, README files)
-
-Once `BasicMCSDriver` exists, the fix only needs to happen in `_success_response` / `_failed_response` -- one place instead of four.
-
----
-
-## 3. Driver Migration to BasicMCSDriver
-
-Migrate all existing `MCSDriver` implementations to extend `BasicMCSDriver` instead.
-
-| Driver | Current base | After migration | Reduction |
-|---|---|---|---|
-| `FilesystemLocalfsDriver` | `MCSDriver` | `BasicMCSDriver` | ~100 -> ~35 lines |
-| `CsvLocalfsDriver` | `MCSDriver` | `BasicMCSDriver` | ~115 -> ~40 lines |
-| `RestHttpDriver` | `MCSDriver` | `BasicMCSDriver` | ~265 -> ~235 lines (HTTP logic stays) |
-| `BasicOrchestrator` | `MCSDriver, ABC` | `BasicMCSDriver, ABC` | ~265 -> ~200 lines |
-
-Each migration: remove `_extract_json`, remove `process_llm_response` body, implement `_execute_parsed_call`, optionally remove `get_driver_system_message` if default suffices.
+**Possible solutions:**
+1. Pass `model_name` to `process_llm_response` so the extraction chain can
+   be context-aware (implies a signature change).
+2. Introduce session-level state after `get_driver_context` – the driver
+   remembers whether native tools were supplied and skips text extraction
+   accordingly.
+3. Accept the edge case as negligible for now (models called with `tools`
+   will always use native format; without `tools` the text strategy is the
+   only sensible fallback anyway).
+4. Setting the model name in the driver fix, or the format to choose. Maybe with 
+   the Strategy, since GPT-4.o and GPT-5 following the same pattern.
