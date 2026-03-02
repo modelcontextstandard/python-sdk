@@ -271,21 +271,25 @@ class TestExtractionCaching:
         driver.process_llm_response({"tool": "greet", "arguments": {}})
         assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
 
-    def test_cache_switches_on_different_type(self):
+    def test_text_fallback_does_not_become_preferred(self):
+        """TextExtraction is a fallback -- it never becomes _preferred_extractor."""
         driver = SimpleDriverBase()
 
         driver.process_llm_response({"tool": "greet", "arguments": {}})
         assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
 
         driver.process_llm_response('{"tool": "greet", "arguments": {}}')
-        assert isinstance(driver._preferred_extractor, TextExtractionStrategy)
+        assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
 
 
 # -- Custom ExtractionStrategy injection --------------------------------------
 
 class TestCustomExtractionStrategy:
-    def test_custom_strategy_used(self):
+    def test_custom_strategy_with_claims(self):
         class AlwaysGreetStrategy(ExtractionStrategy):
+            def claims(self, llm_response: str | dict) -> bool:
+                return True
+
             def extract(self, llm_response):
                 return ("greet", {"name": "Custom"})
 
@@ -295,3 +299,75 @@ class TestCustomExtractionStrategy:
         dr = driver.process_llm_response("anything at all")
         assert dr.call_executed is True
         assert dr.tool_call_result == "Hello!"
+
+
+# -- Claim-phase tests -------------------------------------------------------
+
+class TestClaimPhase:
+    """Verify the two-phase claim → extract → text-fallback protocol."""
+
+    def test_openai_claims_dict_with_tool_calls_key(self):
+        s = OpenAIExtractionStrategy()
+        assert s.claims({"tool_calls": [{"function": {"name": "x", "arguments": "{}"}}]})
+
+    def test_openai_claims_dict_with_tool_calls_none(self):
+        """Even tool_calls=None means 'my format, no tool call'."""
+        s = OpenAIExtractionStrategy()
+        assert s.claims({"role": "assistant", "content": "hi", "tool_calls": None})
+
+    def test_openai_does_not_claim_dict_without_tool_calls(self):
+        s = OpenAIExtractionStrategy()
+        assert not s.claims({"role": "assistant", "content": "hi"})
+
+    def test_openai_does_not_claim_str(self):
+        s = OpenAIExtractionStrategy()
+        assert not s.claims('{"tool_calls": []}')
+
+    def test_direct_dict_claims_tool_key(self):
+        s = DirectDictExtractionStrategy()
+        assert s.claims({"tool": "greet", "arguments": {}})
+
+    def test_direct_dict_claims_name_key(self):
+        s = DirectDictExtractionStrategy()
+        assert s.claims({"name": "greet", "arguments": {}})
+
+    def test_direct_dict_does_not_claim_empty(self):
+        s = DirectDictExtractionStrategy()
+        assert not s.claims({})
+
+    def test_text_never_claims(self):
+        codec = JsonPromptStrategy.from_defaults()
+        s = TextExtractionStrategy(codec)
+        assert not s.claims('{"tool": "greet"}')
+        assert not s.claims({"content": '{"tool": "greet"}'})
+
+    def test_claimer_blocks_text_fallback_even_when_extract_returns_none(self):
+        """The critical false-positive prevention test.
+
+        A dict with ``tool_calls: None`` is claimed by OpenAI strategy.
+        Even though extract returns None, text fallback must NOT run --
+        the JSON in content must not be misinterpreted as a tool call.
+        """
+        driver = SimpleDriverBase()
+        response = {
+            "role": "assistant",
+            "content": '{"tool": "greet", "arguments": {}}',
+            "tool_calls": None,
+        }
+        dr = driver.process_llm_response(response)
+        assert not dr.call_executed
+        assert not dr.call_failed
+
+    def test_str_input_falls_through_to_text(self):
+        """Pure str input: no strategy claims → text fallback extracts."""
+        driver = SimpleDriverBase()
+        dr = driver.process_llm_response('{"tool": "greet", "arguments": {}}')
+        assert dr.call_executed is True
+
+    def test_dict_without_tool_calls_key_uses_text_fallback(self):
+        """Dict from text-model client (no tool_calls key) → text fallback."""
+        driver = SimpleDriverBase()
+        dr = driver.process_llm_response(
+            {"role": "assistant", "content": '{"tool": "greet", "arguments": {}}'}
+        )
+        assert dr.call_executed is True
