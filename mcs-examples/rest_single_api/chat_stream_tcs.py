@@ -104,14 +104,20 @@ class RestDriverTcs(RestDriver, ToolCallSignalingMixin):
             return None
 
 
-DEFAULT_URL = "https://petstore3.swagger.io/api/v3/openapi.json"
+GITHUB_SPEC = (
+    "https://raw.githubusercontent.com/github/rest-api-description"
+    "/main/descriptions/api.github.com/api.github.com.json"
+)
+DEFAULT_TAGS = ["repos", "search"]
 
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="MCS streaming chat client with tool-call signaling (REST)")
     p.add_argument("--model", default="gpt-4o", help="LiteLLM model identifier (default: gpt-4o)")
-    p.add_argument("--url", default=DEFAULT_URL, help="OpenAPI spec URL")
+    p.add_argument("--url", default=GITHUB_SPEC, help="OpenAPI spec URL")
+    p.add_argument("--include-tags", nargs="*", default=None,
+                   help="Only include operations with these OpenAPI tags (default: repos search for GitHub)")
     p.add_argument("--api-base", default=None,
                    help="Custom OpenAI-compatible API base URL")
     p.add_argument("--api-key", default=None,
@@ -368,8 +374,12 @@ def main() -> None:
     load_dotenv()
     args = _parse_args()
 
-    driver = RestDriverTcs(url=args.url)
-    console.print(f"[dim]Tools discovered: {[t.name for t in driver.list_tools()]}[/dim]")
+    tags = args.include_tags if args.include_tags is not None else (
+        DEFAULT_TAGS if args.url == GITHUB_SPEC else None
+    )
+    driver = RestDriverTcs(url=args.url, include_tags=tags)
+    tools = driver.list_tools()
+    console.print(f"[dim]Tools discovered ({len(tools)}): {[t.name for t in tools]}[/dim]")
     chat_loop(driver, args.model, args.debug, args.api_base, args.api_key)
 
     console.print("\n[dim]Chat ended.[/dim]")
