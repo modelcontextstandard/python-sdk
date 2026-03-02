@@ -181,14 +181,35 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsDriverContext):
     def _extract(
         self, llm_response: str | dict,
     ) -> tuple[str, dict[str, Any]] | None:
-        """Try each ``ExtractionStrategy`` in order, with type-hint reordering.
+        """Two-phase extraction: Claim → Extract → Text-Fallback.
 
-        Dict-based strategies are tried first when *llm_response* is a
-        ``dict``; the text strategy is tried first when it is a ``str``.
-        The last successful strategy is cached and tried first on the
-        next call.
+        Each strategy can *claim* a response based on its shape (e.g.
+        ``"tool_calls"`` key for OpenAI).  The first claimer owns the
+        response exclusively -- even when ``extract()`` returns ``None``
+        (= "my format, but no tool call").
+
+        ``TextExtractionStrategy`` never claims and serves as the
+        natural fallback when no strategy takes ownership.
+
+        The ``_preferred_extractor`` cache promotes the last successful
+        claiming strategy to the front of the chain for subsequent
+        calls.  This is a stateful optimisation without side-effects:
+        the system produces the same result without it, just slower.
+
+        .. note::
+
+           The claim logic relies on the **response shape** (e.g. the
+           presence of a ``"tool_calls"`` key) to distinguish native
+           tool-call responses from plain text.  This covers >99% of
+           practical cases, but edge cases remain -- for instance when
+           a native-tool-capable model is called **without** ``tools``
+           and produces JSON in ``content`` that resembles a text-based
+           tool call.  Future solutions may include passing
+           ``model_name`` to ``process_llm_response`` or introducing
+           session-level state after ``get_driver_context``.
         """
-        ordered = self._reorder_for_type(type(llm_response))
+        ordered = list(self._extractors)
+        text_fallback: TextExtractionStrategy | None = None
 
         if self._preferred_extractor is not None and self._preferred_extractor in ordered:
             ordered = [self._preferred_extractor] + [
@@ -196,21 +217,15 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsDriverContext):
             ]
 
         for strategy in ordered:
-            result = strategy.extract(llm_response)
-            if result is not None:
-                self._preferred_extractor = strategy
+            if isinstance(strategy, TextExtractionStrategy):
+                text_fallback = strategy
+                continue
+            if strategy.claims(llm_response):
+                result = strategy.extract(llm_response)
+                if result is not None:
+                    self._preferred_extractor = strategy
                 return result
-        return None
 
-    def _reorder_for_type(
-        self, response_type: type,
-    ) -> list[ExtractionStrategy]:
-        """Put text-based strategies first for ``str``, dict-based first for ``dict``."""
-        if response_type is str:
-            text = [s for s in self._extractors if isinstance(s, TextExtractionStrategy)]
-            rest = [s for s in self._extractors if not isinstance(s, TextExtractionStrategy)]
-            return text + rest
-        else:
-            non_text = [s for s in self._extractors if not isinstance(s, TextExtractionStrategy)]
-            text = [s for s in self._extractors if isinstance(s, TextExtractionStrategy)]
-            return non_text + text
+        if text_fallback is not None:
+            return text_fallback.extract(llm_response)
+        return None

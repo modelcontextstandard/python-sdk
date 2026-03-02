@@ -34,7 +34,25 @@ logger = logging.getLogger(__name__)
 
 
 class ExtractionStrategy(ABC):
-    """Locate a tool call in an LLM response."""
+    """Locate a tool call in an LLM response.
+
+    The two-phase protocol works as follows:
+
+    1. **Claim** -- :meth:`claims` inspects the response *shape* and
+       returns ``True`` when this strategy recognises its format
+       (e.g. ``"tool_calls"`` key for OpenAI).  The default is
+       ``False``, which means *"I never claim -- use me as fallback"*.
+    2. **Extract** -- :meth:`extract` performs the actual parsing.
+
+    ``DriverBase._extract`` iterates the chain: the first strategy
+    that *claims* a response owns it exclusively (even when
+    ``extract`` returns ``None``).  ``TextExtractionStrategy`` never
+    claims and serves as the final fallback.
+    """
+
+    def claims(self, llm_response: str | dict) -> bool:
+        """Return ``True`` when the response shape belongs to this strategy."""
+        return False
 
     @abstractmethod
     def extract(
@@ -84,6 +102,11 @@ class DirectDictExtractionStrategy(ExtractionStrategy):
 
     TOOL_ALIASES = ("tool", "name")
 
+    def claims(self, llm_response: str | dict) -> bool:
+        if not isinstance(llm_response, dict):
+            return False
+        return any(llm_response.get(a) for a in self.TOOL_ALIASES)
+
     def extract(
         self, llm_response: str | dict,
     ) -> tuple[str, dict[str, Any]] | None:
@@ -117,9 +140,14 @@ class OpenAIExtractionStrategy(ExtractionStrategy):
 
     The ``arguments`` value is a JSON string that gets parsed to a dict.
 
-    Returns ``None`` when the input is not a dict or does not match
-    the expected structure.
+    Claims any dict that carries a ``"tool_calls"`` key -- even when the
+    value is ``None`` or an empty list.  This prevents the text fallback
+    from misinterpreting content as a tool call on models that use native
+    function-calling.
     """
+
+    def claims(self, llm_response: str | dict) -> bool:
+        return isinstance(llm_response, dict) and "tool_calls" in llm_response
 
     def extract(
         self, llm_response: str | dict,
