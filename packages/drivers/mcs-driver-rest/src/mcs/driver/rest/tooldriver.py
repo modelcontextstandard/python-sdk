@@ -61,10 +61,14 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
         self,
         url: str,
         *,
+        include_tags: List[str] | None = None,
+        include_paths: List[str] | None = None,
         _http: HttpAdapter | None = None,
         **http_kwargs: Any,
     ) -> None:
         self.spec_url = url
+        self._include_tags = {t.lower() for t in include_tags} if include_tags else None
+        self._include_paths = set(include_paths) if include_paths else None
         self._http = _http or HttpAdapter(**http_kwargs)
         self._tools: List[Tool] | None = None
         self._tool_map: Dict[str, Dict[str, Any]] = {}
@@ -201,6 +205,17 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
         if self._tools:
             logger.info("Parsed %d tools from spec.", len(self._tools))
 
+    def _matches_filter(self, path: str, operation: Dict[str, Any]) -> bool:
+        """Return True if the operation passes include_paths / include_tags."""
+        if self._include_paths is not None:
+            if path not in self._include_paths:
+                return False
+        if self._include_tags is not None:
+            op_tags = {t.lower() for t in operation.get("tags", [])}
+            if not op_tags & self._include_tags:
+                return False
+        return True
+
     def _parse_spec(self, spec: Dict[str, Any]) -> None:
         tools: list[Tool] = []
         for path, raw_path_item in spec.get("paths", {}).items():
@@ -212,6 +227,9 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
                     continue
 
                 operation = self._resolve_ref(raw_operation, spec)
+
+                if not self._matches_filter(path, operation):
+                    continue
                 tool_name = (
                     operation.get("operationId")
                     or self._generate_operation_id(method, path)

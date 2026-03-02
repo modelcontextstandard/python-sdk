@@ -5,8 +5,17 @@ an interactive chat loop with tool execution.  The client code is
 structurally identical to the CSV variant -- only the driver setup in
 ``main()`` differs.
 
+Default: GitHub REST API (search + repos).  Any OpenAPI spec works.
+
 Usage:
     python chat_non_stream.py [--model MODEL] [--debug] [--url URL]
+
+    # Browse GitHub repos (default):
+    python chat_non_stream.py --debug
+
+    # ReqRes user API:
+    python chat_non_stream.py --url https://reqres.in/openapi.json \
+        --include-tags legacy
 
     # Local model via OpenAI-compatible server (vLLM, llama.cpp, etc.):
     python chat_non_stream.py \
@@ -36,13 +45,19 @@ console = Console()
 MAX_TOOL_ROUNDS = 10
 
 
-DEFAULT_URL = "https://petstore3.swagger.io/api/v3/openapi.json"
+GITHUB_SPEC = (
+    "https://raw.githubusercontent.com/github/rest-api-description"
+    "/main/descriptions/api.github.com/api.github.com.json"
+)
+DEFAULT_TAGS = ["repos", "search"]
 
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="MCS non-streaming chat client (REST)")
     p.add_argument("--model", default="gpt-4o", help="LiteLLM model identifier (default: gpt-4o)")
-    p.add_argument("--url", default=DEFAULT_URL, help="OpenAPI spec URL")
+    p.add_argument("--url", default=GITHUB_SPEC, help="OpenAPI spec URL")
+    p.add_argument("--include-tags", nargs="*", default=None,
+                   help="Only include operations with these OpenAPI tags (default: repos search for GitHub)")
     p.add_argument("--api-base", default=None,
                    help="Custom OpenAI-compatible API base URL (e.g. http://localhost:8000/v1)")
     p.add_argument("--api-key", default=None,
@@ -171,8 +186,12 @@ def main() -> None:
     load_dotenv()
     args = _parse_args()
 
-    driver = RestDriver(url=args.url)
-    console.print(f"[dim]Tools discovered: {[t.name for t in driver.list_tools()]}[/dim]")
+    tags = args.include_tags if args.include_tags is not None else (
+        DEFAULT_TAGS if args.url == GITHUB_SPEC else None
+    )
+    driver = RestDriver(url=args.url, include_tags=tags)
+    tools = driver.list_tools()
+    console.print(f"[dim]Tools discovered ({len(tools)}): {[t.name for t in tools]}[/dim]")
     chat_loop(driver, args.model, args.debug, args.api_base, args.api_key)
 
     console.print("\n[dim]Chat ended.[/dim]")

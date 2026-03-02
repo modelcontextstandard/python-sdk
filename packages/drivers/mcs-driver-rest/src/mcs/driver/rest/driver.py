@@ -43,6 +43,8 @@ class RestDriver(DriverBase, SupportsHealthcheck):
         self,
         url: str = "",
         *,
+        include_tags: list[str] | None = None,
+        include_paths: list[str] | None = None,
         custom_tool_description: str | None = None,
         custom_driver_system_message: str | None = None,
         prompt_strategy: PromptStrategy | None = None,
@@ -58,7 +60,12 @@ class RestDriver(DriverBase, SupportsHealthcheck):
             self._td = _tooldriver
         elif url:
             from mcs.driver.rest.tooldriver import RestToolDriver
-            self._td = RestToolDriver(url, **http_kwargs)
+            self._td = RestToolDriver(
+                url,
+                include_tags=include_tags,
+                include_paths=include_paths,
+                **http_kwargs,
+            )
         else:
             raise ValueError("Either 'url' or '_tooldriver' must be provided")
 
