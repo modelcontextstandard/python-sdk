@@ -189,7 +189,7 @@ def via_litellm(
         "client": "litellm",
         "stream": stream,
         "native_tools": tools is not None,
-        "request": {k: v for k, v in kwargs.items() if k != "stream"},
+        "request": {k: v for k, v in kwargs.items() if k not in ("stream", "api_key")},
         "ts_start": _ts(),
     }
 
