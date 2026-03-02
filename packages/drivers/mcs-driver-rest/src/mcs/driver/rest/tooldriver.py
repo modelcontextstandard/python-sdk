@@ -176,6 +176,12 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
         clean = path.strip("/").replace("/", "_").replace("{", "").replace("}", "")
         return f"{method.lower()}_{clean}"
 
+    @staticmethod
+    def _sanitize_tool_name(name: str) -> str:
+        """Ensure tool names match ``^[a-zA-Z0-9_-]+$`` (required by OpenAI)."""
+        import re
+        return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
+
     # -- initialization -------------------------------------------------------
 
     def _initialize(self) -> None:
@@ -230,7 +236,7 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
 
                 if not self._matches_filter(path, operation):
                     continue
-                tool_name = (
+                tool_name = self._sanitize_tool_name(
                     operation.get("operationId")
                     or self._generate_operation_id(method, path)
                 )

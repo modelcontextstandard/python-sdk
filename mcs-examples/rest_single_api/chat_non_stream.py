@@ -49,7 +49,7 @@ GITHUB_SPEC = (
     "https://raw.githubusercontent.com/github/rest-api-description"
     "/main/descriptions/api.github.com/api.github.com.json"
 )
-DEFAULT_TAGS = ["repos", "search"]
+DEFAULT_TAGS = ["search"]
 
 
 def _parse_args() -> argparse.Namespace:
