@@ -1,9 +1,13 @@
 """Streaming MCS chat client using the CSV driver.
 
 Streams LLM output token-by-token.  When the driver detects a tool call
-in the accumulated buffer it executes the tool, feeds the result back, and
-resumes streaming.  A ``--debug`` flag shows raw tool-call payloads and
+in the accumulated output it executes the tool, feeds the result back, and
+the LLM continues.  A ``--debug`` flag shows raw tool-call payloads and
 DriverResponse details inline.
+
+The MCS integration loop in ``chat_loop`` is structurally identical to
+the non-streaming variant -- only the LLM call differs (streaming
+accumulation instead of a single request).
 
 Usage:
     python chat_stream.py [--model MODEL] [--debug] [--data-dir DIR]
@@ -62,6 +66,7 @@ def _fmt_tool_params(params: dict) -> str:
 
 
 def _extract_native_tool_calls(chunk) -> list[dict] | None:
+    """Collect native tool-call fragments from a single streaming chunk."""
     delta = chunk.choices[0].delta if chunk.choices else None
     if delta is None:
         return None
@@ -83,11 +88,25 @@ def _extract_native_tool_calls(chunk) -> list[dict] | None:
 def _stream_one_turn(
     model: str,
     messages: list[dict],
-    driver: MCSDriver,
     debug: bool,
     api_base: str | None = None,
     api_key: str | None = None,
-) -> tuple[str | None, DriverResponse | None]:
+) -> str | dict:
+    """Stream one LLM turn, display tokens live, return accumulated output.
+
+    This function is the streaming equivalent of a simple ``completion()``
+    call.  It handles token display and native tool-call accumulation,
+    but does **not** interact with the MCS driver at all -- that happens
+    in the caller's MCS loop.
+
+    Returns
+    -------
+    str
+        Accumulated text when the LLM produced a text response.
+    dict
+        MCS tool-call dict (``{"tool": ..., "arguments": ...}``) when the
+        LLM emitted a native/structured tool call via the API.
+    """
     kwargs: dict = {"model": model, "messages": messages, "stream": True}
     if api_base:
         kwargs["api_base"] = api_base
@@ -105,12 +124,14 @@ def _stream_one_turn(
             continue
 
         token = getattr(delta, "content", None) or ""
-        finish = choices[0].finish_reason if choices else None
 
         nc = _extract_native_tool_calls(chunk)
         if nc:
             for c in nc:
-                existing = next((x for x in native_calls if x.get("id") == c.get("id")), None)
+                existing = next(
+                    (x for x in native_calls if x.get("id") == c.get("id")),
+                    None,
+                )
                 if existing and c.get("arguments"):
                     existing["arguments"] = existing.get("arguments", "") + c["arguments"]
                 elif c.get("id"):
@@ -119,53 +140,24 @@ def _stream_one_turn(
         if token:
             buffer += token
             if not printed_header:
-                console.print(f"\n[bold blue]Assistant:[/bold blue] ", end="")
+                console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
                 printed_header = True
             print(token, end="", flush=True)
 
-        if finish == "tool_calls" and native_calls:
-            return None, _handle_native_calls(native_calls, driver, debug, printed_header)
-
-    if native_calls:
-        return None, _handle_native_calls(native_calls, driver, debug, printed_header)
-
-    dr = driver.process_llm_response(buffer, streaming=False)
-
-    if dr.call_executed or dr.call_failed:
-        if debug:
-            if printed_header:
-                print()
-            console.print(f"  [dim]\u2699 inline JSON tool call detected[/dim]")
-            _print_debug_dr(dr)
-        elif printed_header:
-            print("\r\033[K", end="")
-        return None, dr
-
     if printed_header:
         print()
-    return buffer, None
 
-
-def _handle_native_calls(
-    native_calls: list[dict], driver: MCSDriver, debug: bool, printed_header: bool,
-) -> DriverResponse:
-    for nc_item in native_calls:
+    if native_calls:
+        nc_item = native_calls[0]
         try:
             args = json.loads(nc_item.get("arguments", "{}"))
         except json.JSONDecodeError:
             args = {}
-        tool_payload = {"tool": nc_item.get("name"), "arguments": args}
-
         if debug:
-            if printed_header:
-                print()
             console.print(f"  [dim]\u2699 {nc_item.get('name', '?')}({_fmt_tool_params(args)})[/dim]")
+        return {"tool": nc_item.get("name"), "arguments": args}
 
-        dr = driver.process_llm_response(tool_payload, streaming=False)
-        if debug:
-            _print_debug_dr(dr)
-        return dr
-    return DriverResponse()
+    return buffer
 
 
 def _print_debug_dr(dr: DriverResponse) -> None:
@@ -217,24 +209,27 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
         messages.append({"role": "user", "content": user_input})
 
         for _round in range(MAX_TOOL_ROUNDS):
-            final_text, dr = _stream_one_turn(model, messages, driver, debug, api_base, api_key)
+            llm_out = _stream_one_turn(model, messages, debug, api_base, api_key)
+            response = driver.process_llm_response(llm_out)
 
-            if dr is not None:
-                if dr.messages:
-                    messages.extend(dr.messages)
+            if debug and (response.call_executed or response.call_failed):
+                _print_debug_dr(response)
 
-                if dr.call_executed:
-                    if debug:
-                        console.print("[dim]Tool executed -- streaming next LLM turn...[/dim]")
-                    continue
+            if response.messages:
+                messages.extend(response.messages)
 
-                if dr.call_failed:
-                    if debug:
-                        console.print(f"[yellow]Tool call failed: {dr.call_detail}[/yellow]")
-                    continue
+            if response.call_executed:
+                if debug:
+                    console.print("[dim]Tool executed -- streaming next LLM turn...[/dim]")
+                continue
 
-            if final_text is not None:
-                messages.append({"role": "assistant", "content": final_text})
+            if response.call_failed:
+                if debug:
+                    console.print(f"[yellow]Tool call failed: {response.call_detail}[/yellow]")
+                continue
+
+            if isinstance(llm_out, str):
+                messages.append({"role": "assistant", "content": llm_out})
             break
         else:
             console.print("[yellow]Max tool rounds reached -- stopping.[/yellow]")

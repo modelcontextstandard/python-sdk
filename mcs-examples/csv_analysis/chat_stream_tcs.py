@@ -6,6 +6,10 @@ signals that streamed tokens might be a tool call, the client buffers
 them instead of displaying.  Once the call is confirmed and executed,
 the next LLM turn streams seamlessly -- the user never sees raw JSON.
 
+The MCS integration loop in ``chat_loop`` is structurally identical to
+the non-streaming and basic streaming variants -- only the LLM call
+differs (TCS-aware buffering in ``_stream_one_turn``).
+
 Usage:
     python chat_stream_tcs.py [--model MODEL] [--debug] [--data-dir DIR]
 
@@ -32,6 +36,8 @@ from dotenv import load_dotenv
 from litellm import completion
 from rich.console import Console
 from rich.panel import Panel
+from rich.spinner import Spinner
+from rich.live import Live
 
 from mcs.driver.csv import CsvDriver
 from mcs.driver.core import DriverMeta, DriverBinding, DriverResponse, MCSDriver
@@ -124,6 +130,7 @@ def _fmt_tool_params(params: dict) -> str:
 
 
 def _extract_native_tool_calls(chunk) -> list[dict] | None:
+    """Collect native tool-call fragments from a single streaming chunk."""
     choices = getattr(chunk, "choices", None)
     delta = choices[0].delta if choices else None
     if delta is None:
@@ -150,7 +157,22 @@ def _stream_one_turn(
     debug: bool,
     api_base: str | None = None,
     api_key: str | None = None,
-) -> tuple[str | None, DriverResponse | None]:
+) -> str | dict:
+    """Stream one LLM turn with TCS-aware buffering, return accumulated output.
+
+    When the driver supports ``ToolCallSignalingMixin``, tokens that look
+    like the beginning of a tool call are held back instead of being
+    displayed.  If they turn out to be a complete tool call the buffered
+    text is returned directly (the driver will parse and execute it).
+    If the buffer times out it is flushed to the screen as normal text.
+
+    Returns
+    -------
+    str
+        Accumulated text when the LLM produced a text response.
+    dict
+        MCS tool-call dict when the LLM emitted a native/structured tool call.
+    """
     kwargs: dict = {"model": model, "messages": messages, "stream": True}
     if api_base:
         kwargs["api_base"] = api_base
@@ -160,13 +182,30 @@ def _stream_one_turn(
     has_signaling = isinstance(driver, ToolCallSignalingMixin)
 
     full_buffer = ""
-    display_buffer = ""
     native_calls: list[dict] = []
     printed_header = False
 
     buffering = False
     buffering_since: float = 0.0
     held_tokens = ""
+    spinner_live: Live | None = None
+
+    def _start_spinner() -> None:
+        nonlocal spinner_live
+        if spinner_live is not None:
+            return
+        spinner_live = Live(
+            Spinner("dots", text="[dim]Calling tool...[/dim]"),
+            console=console, transient=True,
+        )
+        spinner_live.start()
+
+    def _stop_spinner() -> None:
+        nonlocal spinner_live
+        if spinner_live is None:
+            return
+        spinner_live.stop()
+        spinner_live = None
 
     for chunk in stream:  # type: ignore[union-attr]
         choices = getattr(chunk, "choices", None)
@@ -175,12 +214,13 @@ def _stream_one_turn(
             continue
 
         token = getattr(delta, "content", None) or ""
-        finish = choices[0].finish_reason if choices else None
 
         nc = _extract_native_tool_calls(chunk)
         if nc:
             for c in nc:
-                existing = next((x for x in native_calls if x.get("id") == c.get("id")), None)
+                existing = next(
+                    (x for x in native_calls if x.get("id") == c.get("id")), None
+                )
                 if existing and c.get("arguments"):
                     existing["arguments"] = existing.get("arguments", "") + c["arguments"]
                 elif c.get("id"):
@@ -189,115 +229,83 @@ def _stream_one_turn(
         if token:
             full_buffer += token
 
+            # --- TCS: check whether new tokens might be a tool call ---
             if has_signaling and not buffering:
                 probe = (held_tokens + token).lstrip()
                 if driver.might_be_tool_call(probe):  # type: ignore[union-attr]
                     buffering = True
                     buffering_since = time.monotonic()
                     held_tokens += token
+                    _start_spinner()
                     if debug:
                         if not printed_header:
-                            console.print(f"\n[bold blue]Assistant:[/bold blue] ", end="")
+                            console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
                             printed_header = True
-                        console.print("[dim][buffering -- possible tool call][/dim]", end="")
                     continue
                 else:
                     if held_tokens:
                         if not printed_header:
-                            console.print(f"\n[bold blue]Assistant:[/bold blue] ", end="")
+                            console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
                             printed_header = True
                         print(held_tokens, end="", flush=True)
-                        display_buffer += held_tokens
                         held_tokens = ""
 
             if buffering:
                 held_tokens += token
 
                 if has_signaling and driver.is_complete_tool_call(held_tokens):  # type: ignore[union-attr]
+                    _stop_spinner()
                     if debug:
-                        print()
-                        console.print(f"  [dim]\u2699 buffered tool call confirmed[/dim]")
-                    dr = driver.process_llm_response(held_tokens, streaming=False)
-                    if debug:
-                        _print_debug_dr(dr)
-                    return None, dr
+                        console.print("  [dim]\u2699 buffered tool call confirmed[/dim]")
+                    return held_tokens
 
                 elapsed = (time.monotonic() - buffering_since) * 1000
                 if elapsed > SIGNAL_TIMEOUT_MS:
+                    _stop_spinner()
                     if debug:
-                        console.print(f" [yellow]timeout -- flushing buffer[/yellow]")
+                        console.print(" [yellow]timeout -- flushing buffer[/yellow]")
                     if not printed_header:
-                        console.print(f"\n[bold blue]Assistant:[/bold blue] ", end="")
+                        console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
                         printed_header = True
                     print(held_tokens, end="", flush=True)
-                    display_buffer += held_tokens
                     held_tokens = ""
                     buffering = False
 
                 continue
 
+            # --- normal token display ---
             if not printed_header:
-                console.print(f"\n[bold blue]Assistant:[/bold blue] ", end="")
+                console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
                 printed_header = True
             print(token, end="", flush=True)
-            display_buffer += token
 
-        if finish == "tool_calls" and native_calls:
-            return None, _handle_native_calls(native_calls, driver, debug, printed_header)
-
-    if native_calls:
-        return None, _handle_native_calls(native_calls, driver, debug, printed_header)
-
-    if buffering and held_tokens:
-        dr = driver.process_llm_response(held_tokens, streaming=False)
-        if dr.call_executed or dr.call_failed:
-            if debug:
-                print()
-                console.print(f"  [dim]\u2699 end-of-stream tool call confirmed[/dim]")
-                _print_debug_dr(dr)
-            return None, dr
-        if not printed_header:
-            console.print(f"\n[bold blue]Assistant:[/bold blue] ", end="")
-            printed_header = True
-        print(held_tokens, end="", flush=True)
-        display_buffer += held_tokens
-
-    dr = driver.process_llm_response(full_buffer, streaming=False)
-    if dr.call_executed or dr.call_failed:
-        if debug:
-            if printed_header:
-                print()
-            console.print(f"  [dim]\u2699 inline JSON tool call detected[/dim]")
-            _print_debug_dr(dr)
-        elif printed_header:
-            print("\r\033[K", end="")
-        return None, dr
+    _stop_spinner()
 
     if printed_header:
         print()
-    return full_buffer, None
 
-
-def _handle_native_calls(
-    native_calls: list[dict], driver: MCSDriver, debug: bool, printed_header: bool,
-) -> DriverResponse:
-    for nc_item in native_calls:
+    # Native tool calls -> MCS dict format
+    if native_calls:
+        nc_item = native_calls[0]
         try:
             args = json.loads(nc_item.get("arguments", "{}"))
         except json.JSONDecodeError:
             args = {}
-        tool_payload = {"tool": nc_item.get("name"), "arguments": args}
-
         if debug:
-            if printed_header:
-                print()
             console.print(f"  [dim]\u2699 {nc_item.get('name', '?')}({_fmt_tool_params(args)})[/dim]")
+        return {"tool": nc_item.get("name"), "arguments": args}
 
-        dr = driver.process_llm_response(tool_payload, streaming=False)
-        if debug:
-            _print_debug_dr(dr)
-        return dr
-    return DriverResponse()
+    # End-of-stream: check held buffer for complete tool call
+    if buffering and held_tokens:
+        if has_signaling and driver.is_complete_tool_call(held_tokens):  # type: ignore[union-attr]
+            if debug:
+                console.print("  [dim]\u2699 end-of-stream tool call confirmed[/dim]")
+            return held_tokens
+        if not printed_header:
+            console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
+        print(held_tokens)
+
+    return full_buffer
 
 
 def _print_debug_dr(dr: DriverResponse) -> None:
@@ -351,24 +359,27 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
         messages.append({"role": "user", "content": user_input})
 
         for _round in range(MAX_TOOL_ROUNDS):
-            final_text, dr = _stream_one_turn(model, messages, driver, debug, api_base, api_key)
+            llm_out = _stream_one_turn(model, messages, driver, debug, api_base, api_key)
+            response = driver.process_llm_response(llm_out)
 
-            if dr is not None:
-                if dr.messages:
-                    messages.extend(dr.messages)
+            if debug and (response.call_executed or response.call_failed):
+                _print_debug_dr(response)
 
-                if dr.call_executed:
-                    if debug:
-                        console.print("[dim]Tool executed -- streaming next LLM turn...[/dim]")
-                    continue
+            if response.messages:
+                messages.extend(response.messages)
 
-                if dr.call_failed:
-                    if debug:
-                        console.print(f"[yellow]Tool call failed: {dr.call_detail}[/yellow]")
-                    continue
+            if response.call_executed:
+                if debug:
+                    console.print("[dim]Tool executed -- streaming next LLM turn...[/dim]")
+                continue
 
-            if final_text is not None:
-                messages.append({"role": "assistant", "content": final_text})
+            if response.call_failed:
+                if debug:
+                    console.print(f"[yellow]Tool call failed: {response.call_detail}[/yellow]")
+                continue
+
+            if isinstance(llm_out, str):
+                messages.append({"role": "assistant", "content": llm_out})
             break
         else:
             console.print("[yellow]Max tool rounds reached -- stopping.[/yellow]")

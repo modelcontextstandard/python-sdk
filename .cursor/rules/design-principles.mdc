@@ -1,0 +1,65 @@
+---
+description: SOLID design principles and parameter-first constructor pattern. The system must be complex (many well-separated parts) but never complicated (hard to understand or extend).
+alwaysApply: true
+---
+
+# Design Principles
+
+## Complex, not complicated
+
+The MCS system has many layers (Adapters, ToolDrivers, Drivers, Strategies, Orchestrators). That is **complexity** -- and it is intentional. What must be avoided is **complication**: tangled dependencies, unclear responsibilities, hidden side effects. Every new class, layer, or abstraction must make the system *easier* to understand, not harder.
+
+## SOLID
+
+All code follows the SOLID principles. Here is how each one maps to MCS:
+
+| Principle | MCS application |
+|-----------|----------------|
+| **S**ingle Responsibility | Each layer has one job. Adapter = I/O transport, ToolDriver = tool definitions + execution, Driver = LLM prompt integration, Orchestrator = multi-driver coordination. |
+| **O**pen/Closed | New capabilities (adapters, drivers) are added by writing new classes, never by modifying existing ones. |
+| **L**iskov Substitution | Any implementation of an interface (e.g. `ImapAdapter`, `Pop3Adapter`) must be fully interchangeable without altering behavior for the consumer. |
+| **I**nterface Segregation | Small, focused interfaces per concern (e.g. `IEmailReader`, `IEmailWriter`) instead of one bloated `IEmailService`. |
+| **D**ependency Inversion | High-level modules (ToolDrivers) define the interfaces they need. Low-level modules (Adapters) implement them. Dependencies point inward, never outward. |
+
+## Parameter-First Constructor (DIP in practice)
+
+Every class accepts **config parameters directly** in its constructor. Internal dependencies are created inside `__init__`. For testing and composition an optional DI parameter (prefixed with `_`) is provided.
+
+```python
+class MyDriver:
+    def __init__(
+        self,
+        url: str = "",                               # config parameter(s)
+        *,
+        option_a: str = "default",
+        _tooldriver: MCSToolDriver | None = None,     # DI escape hatch
+        **adapter_kwargs: Any,
+    ) -> None:
+        if _tooldriver is not None:
+            self._td = _tooldriver
+        elif url:
+            self._td = SomeToolDriver(url, **adapter_kwargs)
+        else:
+            raise ValueError("Either 'url' or '_tooldriver' must be provided")
+```
+
+### Constructor rules
+
+1. **Config first** -- accept values a user would put in a config file (URLs, paths, flags).
+2. **Dependencies inside `__init__`** -- the caller never pre-instantiates internals.
+3. **`_` prefix for DI** -- `_tooldriver`, `_adapter`, `_http`. Keyword-only, defaults to `None`.
+4. **Validate** -- raise `ValueError` if neither config nor DI parameter is provided.
+5. **Lazy imports** -- `from ... import ...` inside `__init__` to avoid circular dependencies.
+
+### `_` prefix convention
+
+| Prefix | Meaning | Examples |
+|--------|---------|----------|
+| no `_` | Config value a user would put in a config file | `url`, `base_dir`, `adapter`, `port` |
+| `_`    | Internal dependency for DI / testing / composition | `_tooldriver`, `_adapter`, `_http`, `_extraction_strategies` |
+
+> **Note:** `prompt_strategy` and `resolution_strategy` predate this convention. Known inconsistency for future cleanup.
+
+### Applies to
+
+`MCSDriver`, `MCSToolDriver`, Adapters, Orchestrators -- any class that has internal dependencies.
