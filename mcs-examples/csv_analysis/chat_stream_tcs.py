@@ -6,6 +6,9 @@ signals that streamed tokens might be a tool call, the client buffers
 them instead of displaying.  Once the call is confirmed and executed,
 the next LLM turn streams seamlessly -- the user never sees raw JSON.
 
+The client itself has no knowledge of tool calls.  It only collects
+text tokens and asks the driver whether to hold back or display them.
+
 The MCS integration loop in ``chat_loop`` is structurally identical to
 the non-streaming and basic streaming variants -- only the LLM call
 differs (TCS-aware buffering in ``_stream_one_turn``).
@@ -35,12 +38,12 @@ from typing import Any
 from dotenv import load_dotenv
 from litellm import completion
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.spinner import Spinner
-from rich.live import Live
 
 from mcs.driver.csv import CsvDriver
-from mcs.driver.core import DriverMeta, DriverBinding, DriverResponse, MCSDriver
+from mcs.driver.core import DriverMeta, DriverBinding, DriverResponse, MCSDriver, SupportsDriverContext
 from mcs.driver.core.mixins import ToolCallSignalingMixin
 
 console = Console()
@@ -111,43 +114,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--api-key", default=None,
                    help="API key for --api-base")
     p.add_argument("--debug", "-d", action="store_true",
-                   help="Show tool-call signaling, payloads, and DriverResponse details")
+                   help="Show tool-call signaling and DriverResponse details")
     p.add_argument("--data-dir", default=str(Path(__file__).parent / "data"),
                    help="CSV base directory for the driver")
     return p.parse_args()
-
-
-def _fmt_tool_params(params: dict) -> str:
-    if not params:
-        return ""
-    parts = []
-    for key, val in params.items():
-        s = str(val)
-        if len(s) > 60:
-            s = s[:57] + "..."
-        parts.append(f"{key}={s}")
-    return ", ".join(parts)
-
-
-def _extract_native_tool_calls(chunk) -> list[dict] | None:
-    """Collect native tool-call fragments from a single streaming chunk."""
-    choices = getattr(chunk, "choices", None)
-    delta = choices[0].delta if choices else None
-    if delta is None:
-        return None
-    calls = getattr(delta, "tool_calls", None)
-    if not calls:
-        return None
-    result = []
-    for tc in calls:
-        fn = getattr(tc, "function", None)
-        if fn:
-            result.append({
-                "id": getattr(tc, "id", None),
-                "name": getattr(fn, "name", None),
-                "arguments": getattr(fn, "arguments", ""),
-            })
-    return result or None
 
 
 def _stream_one_turn(
@@ -157,32 +127,26 @@ def _stream_one_turn(
     debug: bool,
     api_base: str | None = None,
     api_key: str | None = None,
+    tools: list[dict] | None = None,
 ) -> str | dict:
-    """Stream one LLM turn with TCS-aware buffering, return accumulated output.
+    """Stream one LLM turn with TCS-aware buffering.
 
-    When the driver supports ``ToolCallSignalingMixin``, tokens that look
-    like the beginning of a tool call are held back instead of being
-    displayed.  If they turn out to be a complete tool call the buffered
-    text is returned directly (the driver will parse and execute it).
-    If the buffer times out it is flushed to the screen as normal text.
-
-    Returns
-    -------
-    str
-        Accumulated text when the LLM produced a text response.
-    dict
-        MCS tool-call dict when the LLM emitted a native/structured tool call.
+    Returns ``str`` for text-based responses (TCS path) or a message
+    ``dict`` when native ``tool_calls`` are present in the stream.
+    The client never interprets or parses tool calls itself.
     """
     kwargs: dict = {"model": model, "messages": messages, "stream": True}
     if api_base:
         kwargs["api_base"] = api_base
         kwargs["api_key"] = api_key or "no-key"
+    if tools:
+        kwargs["tools"] = tools
     stream = completion(**kwargs)
 
     has_signaling = isinstance(driver, ToolCallSignalingMixin)
 
     full_buffer = ""
-    native_calls: list[dict] = []
+    tool_calls_buffer: list[dict] = []
     printed_header = False
 
     buffering = False
@@ -213,93 +177,95 @@ def _stream_one_turn(
         if delta is None:
             continue
 
+        # --- accumulate native tool_calls deltas ---
+        tc_deltas = getattr(delta, "tool_calls", None)
+        if tc_deltas:
+            if not spinner_live:
+                _start_spinner()
+            for tc in tc_deltas:
+                idx = getattr(tc, "index", 0) or 0
+                while len(tool_calls_buffer) <= idx:
+                    tool_calls_buffer.append({"function": {"name": "", "arguments": ""}})
+                entry = tool_calls_buffer[idx]
+                fn = getattr(tc, "function", None)
+                if fn:
+                    if getattr(fn, "name", None):
+                        entry["function"]["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        entry["function"]["arguments"] += fn.arguments
+                tc_id = getattr(tc, "id", None)
+                if tc_id:
+                    entry["id"] = tc_id
+                    entry["type"] = "function"
+
         token = getattr(delta, "content", None) or ""
+        if not token:
+            continue
 
-        nc = _extract_native_tool_calls(chunk)
-        if nc:
-            for c in nc:
-                existing = next(
-                    (x for x in native_calls if x.get("id") == c.get("id")), None
-                )
-                if existing and c.get("arguments"):
-                    existing["arguments"] = existing.get("arguments", "") + c["arguments"]
-                elif c.get("id"):
-                    native_calls.append(c)
+        full_buffer += token
 
-        if token:
-            full_buffer += token
-
-            # --- TCS: check whether new tokens might be a tool call ---
-            if has_signaling and not buffering:
-                probe = (held_tokens + token).lstrip()
-                if driver.might_be_tool_call(probe):  # type: ignore[union-attr]
-                    buffering = True
-                    buffering_since = time.monotonic()
-                    held_tokens += token
-                    _start_spinner()
-                    if debug:
-                        if not printed_header:
-                            console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
-                            printed_header = True
-                    continue
-                else:
-                    if held_tokens:
-                        if not printed_header:
-                            console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
-                            printed_header = True
-                        print(held_tokens, end="", flush=True)
-                        held_tokens = ""
-
-            if buffering:
+        # --- TCS: ask the driver whether to hold back tokens ---
+        if has_signaling and not buffering:
+            probe = (held_tokens + token).lstrip()
+            if driver.might_be_tool_call(probe):  # type: ignore[union-attr]
+                buffering = True
+                buffering_since = time.monotonic()
                 held_tokens += token
-
-                if has_signaling and driver.is_complete_tool_call(held_tokens):  # type: ignore[union-attr]
-                    _stop_spinner()
-                    if debug:
-                        console.print("  [dim]\u2699 buffered tool call confirmed[/dim]")
-                    return held_tokens
-
-                elapsed = (time.monotonic() - buffering_since) * 1000
-                if elapsed > SIGNAL_TIMEOUT_MS:
-                    _stop_spinner()
-                    if debug:
-                        console.print(" [yellow]timeout -- flushing buffer[/yellow]")
+                _start_spinner()
+                continue
+            else:
+                if held_tokens:
                     if not printed_header:
                         console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
                         printed_header = True
                     print(held_tokens, end="", flush=True)
                     held_tokens = ""
-                    buffering = False
 
-                continue
+        if buffering:
+            held_tokens += token
 
-            # --- normal token display ---
-            if not printed_header:
-                console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
-                printed_header = True
-            print(token, end="", flush=True)
+            if has_signaling and driver.is_complete_tool_call(held_tokens):  # type: ignore[union-attr]
+                _stop_spinner()
+                if debug:
+                    console.print("  [dim]\u2699 driver confirmed complete call[/dim]")
+                return held_tokens
+
+            elapsed = (time.monotonic() - buffering_since) * 1000
+            if elapsed > SIGNAL_TIMEOUT_MS:
+                _stop_spinner()
+                if debug:
+                    console.print(" [yellow]timeout -- flushing buffer[/yellow]")
+                if not printed_header:
+                    console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
+                    printed_header = True
+                print(held_tokens, end="", flush=True)
+                held_tokens = ""
+                buffering = False
+
+            continue
+
+        # --- normal token display ---
+        if not printed_header:
+            console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
+            printed_header = True
+        print(token, end="", flush=True)
 
     _stop_spinner()
 
     if printed_header:
         print()
 
-    # Native tool calls -> MCS dict format
-    if native_calls:
-        nc_item = native_calls[0]
-        try:
-            args = json.loads(nc_item.get("arguments", "{}"))
-        except json.JSONDecodeError:
-            args = {}
-        if debug:
-            console.print(f"  [dim]\u2699 {nc_item.get('name', '?')}({_fmt_tool_params(args)})[/dim]")
-        return {"tool": nc_item.get("name"), "arguments": args}
+    # --- native tool_calls: return as message dict ---
+    if tool_calls_buffer:
+        msg: dict = {"role": "assistant", "content": full_buffer or None}
+        msg["tool_calls"] = tool_calls_buffer
+        return msg
 
-    # End-of-stream: check held buffer for complete tool call
+    # End-of-stream: check held buffer via driver (text path)
     if buffering and held_tokens:
         if has_signaling and driver.is_complete_tool_call(held_tokens):  # type: ignore[union-attr]
             if debug:
-                console.print("  [dim]\u2699 end-of-stream tool call confirmed[/dim]")
+                console.print("  [dim]\u2699 end-of-stream call confirmed[/dim]")
             return held_tokens
         if not printed_header:
             console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
@@ -324,16 +290,25 @@ def _print_debug_dr(dr: DriverResponse) -> None:
 
 def chat_loop(driver: MCSDriver, model: str, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
-    system_msg = driver.get_driver_system_message()
+    native_tools: list[dict] | None = None
+    if isinstance(driver, SupportsDriverContext):
+        ctx = driver.get_driver_context(model)
+        system_msg = ctx.system_message
+        native_tools = ctx.tools
+    else:
+        system_msg = driver.get_driver_system_message()
+
     messages: list[dict] = [{"role": "system", "content": system_msg}]
 
     binding = driver.meta.bindings[0]
     has_tcs = isinstance(driver, ToolCallSignalingMixin)
+    mode = "native tools" if native_tools else "text prompt"
     info = [
         "[bold cyan]MCS Chat (streaming + TCS)[/bold cyan]\n",
         f"Driver:   {driver.meta.name}",
         f"Binding:  {binding.capability} / {binding.adapter}",
         f"Model:    {model}",
+        f"Mode:     {mode}",
         f"TCS:      {'active' if has_tcs else 'not supported by driver'}",
     ]
     if api_base:
@@ -359,7 +334,7 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
         messages.append({"role": "user", "content": user_input})
 
         for _round in range(MAX_TOOL_ROUNDS):
-            llm_out = _stream_one_turn(model, messages, driver, debug, api_base, api_key)
+            llm_out = _stream_one_turn(model, messages, driver, debug, api_base, api_key, native_tools)
             response = driver.process_llm_response(llm_out)
 
             if debug and (response.call_executed or response.call_failed):
@@ -378,7 +353,10 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
                     console.print(f"[yellow]Tool call failed: {response.call_detail}[/yellow]")
                 continue
 
-            if isinstance(llm_out, str):
+            if isinstance(llm_out, dict):
+                content = llm_out.get("content", "") or ""
+                messages.append({"role": "assistant", "content": content})
+            else:
                 messages.append({"role": "assistant", "content": llm_out})
             break
         else:

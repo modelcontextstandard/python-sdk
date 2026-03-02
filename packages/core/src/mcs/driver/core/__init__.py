@@ -8,7 +8,7 @@ from .extraction_strategy import (
     DirectDictExtractionStrategy,
     OpenAIExtractionStrategy,
 )
-from .mixins import ToolCallSignalingMixin
+from .mixins import ToolCallSignalingMixin, SupportsDriverContext, DriverContext
 
 __all__ = [
     "MCSDriver", "DriverMeta", "DriverBinding", "DriverResponse",
@@ -18,4 +18,5 @@ __all__ = [
     "ExtractionStrategy", "TextExtractionStrategy",
     "DirectDictExtractionStrategy", "OpenAIExtractionStrategy",
     "ToolCallSignalingMixin",
+    "SupportsDriverContext", "DriverContext",
 ]

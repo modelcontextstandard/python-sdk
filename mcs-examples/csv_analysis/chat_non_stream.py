@@ -15,7 +15,6 @@ Requires:
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -26,7 +25,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 
 from mcs.driver.csv import CsvDriver
-from mcs.driver.core import DriverResponse, MCSDriver
+from mcs.driver.core import DriverResponse, MCSDriver, SupportsDriverContext
 
 console = Console()
 
@@ -47,37 +46,31 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _llm_call(model: str, messages: list[dict],
-              api_base: str | None = None, api_key: str | None = None) -> str | dict:
-    """Call the LLM and return its output.
+              api_base: str | None = None, api_key: str | None = None,
+              tools: list[dict] | None = None) -> dict:
+    """Call the LLM and return the full message dict.
 
-    Returns a string for text responses, or an MCS tool-call dict
-    (``{"tool": ..., "arguments": ...}``) for native/structured tool calls.
+    The client does not inspect or interpret the content -- that is the
+    driver's responsibility.  The returned dict is the raw message
+    from ``choices[0].message``.
     """
     kwargs: dict = {"model": model, "messages": messages}
     if api_base:
         kwargs["api_base"] = api_base
         kwargs["api_key"] = api_key or "no-key"
+    if tools:
+        kwargs["tools"] = tools
     resp = completion(**kwargs)
     assert isinstance(resp, ModelResponse)
     choice = resp.choices[0]
     assert isinstance(choice, Choices)
-    msg = choice.message
-
-    if hasattr(msg, "tool_calls") and msg.tool_calls:
-        tc = msg.tool_calls[0]
-        fn = tc.function
-        try:
-            args = json.loads(fn.arguments)
-        except (json.JSONDecodeError, TypeError):
-            args = {}
-        return {"tool": fn.name, "arguments": args}
-
-    return msg.content or ""
+    return choice.message.model_dump()
 
 
-def _print_debug_response(llm_out: str | dict, response: DriverResponse) -> None:
-    raw = llm_out if isinstance(llm_out, str) else json.dumps(llm_out, indent=2)
-    console.print(Panel(raw, title="Raw LLM output", border_style="dim"))
+def _print_debug_response(llm_out: dict, response: DriverResponse) -> None:
+    import json
+    console.print(Panel(json.dumps(llm_out, indent=2, ensure_ascii=False),
+                        title="Raw LLM output", border_style="dim"))
     parts = [f"call_executed={response.call_executed}  call_failed={response.call_failed}"]
     if response.call_detail:
         parts.append(f"detail: {response.call_detail}")
@@ -93,15 +86,25 @@ def _print_debug_response(llm_out: str | dict, response: DriverResponse) -> None
 
 def chat_loop(driver: MCSDriver, model: str, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
-    system_msg = driver.get_driver_system_message()
+    # Use get_driver_context if available, fall back to get_driver_system_message
+    native_tools: list[dict] | None = None
+    if isinstance(driver, SupportsDriverContext):
+        ctx = driver.get_driver_context(model)
+        system_msg = ctx.system_message
+        native_tools = ctx.tools
+    else:
+        system_msg = driver.get_driver_system_message()
+
     messages: list[dict] = [{"role": "system", "content": system_msg}]
 
     binding = driver.meta.bindings[0]
+    mode = "native tools" if native_tools else "text prompt"
     info = [
         "[bold cyan]MCS Chat (non-streaming)[/bold cyan]\n",
         f"Driver:   {driver.meta.name}",
         f"Binding:  {binding.capability} / {binding.adapter}",
         f"Model:    {model}",
+        f"Tools:    {mode}",
     ]
     if api_base:
         info.append(f"API base: {api_base}")
@@ -127,7 +130,7 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
 
         for _round in range(MAX_TOOL_ROUNDS):
             console.print("[dim]Thinking...[/dim]")
-            llm_out = _llm_call(model, messages, api_base, api_key)
+            llm_out = _llm_call(model, messages, api_base, api_key, native_tools)
             response = driver.process_llm_response(llm_out)
 
             if debug:
@@ -146,13 +149,13 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
                     console.print(f"[yellow]Tool call failed: {response.call_detail}[/yellow]")
                 continue
 
-            if isinstance(llm_out, str):
-                messages.append({"role": "assistant", "content": llm_out})
-                console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
-                try:
-                    console.print(Markdown(llm_out))
-                except Exception:
-                    console.print(llm_out)
+            content = llm_out.get("content", "") or ""
+            messages.append({"role": "assistant", "content": content})
+            console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
+            try:
+                console.print(Markdown(content))
+            except Exception:
+                console.print(content)
             break
         else:
             console.print("[yellow]Max tool rounds reached -- stopping.[/yellow]")

@@ -1,9 +1,11 @@
 """Streaming MCS chat client using the CSV driver.
 
-Streams LLM output token-by-token.  When the driver detects a tool call
-in the accumulated output it executes the tool, feeds the result back, and
-the LLM continues.  A ``--debug`` flag shows raw tool-call payloads and
-DriverResponse details inline.
+Streams LLM output token-by-token.  The client only buffers text and
+passes the accumulated buffer to the driver.  When the driver detects
+a tool call it executes it, feeds the result back, and the LLM continues.
+
+The client has no knowledge of tool calls whatsoever -- it just collects
+text and lets the driver decide.
 
 The MCS integration loop in ``chat_loop`` is structurally identical to
 the non-streaming variant -- only the LLM call differs (streaming
@@ -24,7 +26,6 @@ Requires:
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -33,7 +34,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from mcs.driver.csv import CsvDriver
-from mcs.driver.core import DriverResponse, MCSDriver
+from mcs.driver.core import DriverResponse, MCSDriver, SupportsDriverContext
 
 console = Console()
 
@@ -47,74 +48,34 @@ def _parse_args() -> argparse.Namespace:
                    help="Custom OpenAI-compatible API base URL (e.g. http://localhost:8000/v1)")
     p.add_argument("--api-key", default=None,
                    help="API key for --api-base (default: 'no-key' when --api-base is set)")
-    p.add_argument("--debug", "-d", action="store_true", help="Show tool-call payloads and DriverResponse details")
+    p.add_argument("--debug", "-d", action="store_true", help="Show DriverResponse details")
     p.add_argument("--data-dir", default=str(Path(__file__).parent / "data"),
                    help="CSV base directory for the driver")
     return p.parse_args()
 
 
-def _fmt_tool_params(params: dict) -> str:
-    if not params:
-        return ""
-    parts = []
-    for key, val in params.items():
-        s = str(val)
-        if len(s) > 60:
-            s = s[:57] + "..."
-        parts.append(f"{key}={s}")
-    return ", ".join(parts)
-
-
-def _extract_native_tool_calls(chunk) -> list[dict] | None:
-    """Collect native tool-call fragments from a single streaming chunk."""
-    delta = chunk.choices[0].delta if chunk.choices else None
-    if delta is None:
-        return None
-    calls = getattr(delta, "tool_calls", None)
-    if not calls:
-        return None
-    result = []
-    for tc in calls:
-        fn = getattr(tc, "function", None)
-        if fn:
-            result.append({
-                "id": getattr(tc, "id", None),
-                "name": getattr(fn, "name", None),
-                "arguments": getattr(fn, "arguments", ""),
-            })
-    return result or None
-
-
 def _stream_one_turn(
     model: str,
     messages: list[dict],
-    debug: bool,
     api_base: str | None = None,
     api_key: str | None = None,
-) -> str | dict:
-    """Stream one LLM turn, display tokens live, return accumulated output.
+    tools: list[dict] | None = None,
+) -> dict:
+    """Stream one LLM turn, display tokens live, return accumulated message dict.
 
-    This function is the streaming equivalent of a simple ``completion()``
-    call.  It handles token display and native tool-call accumulation,
-    but does **not** interact with the MCS driver at all -- that happens
-    in the caller's MCS loop.
-
-    Returns
-    -------
-    str
-        Accumulated text when the LLM produced a text response.
-    dict
-        MCS tool-call dict (``{"tool": ..., "arguments": ...}``) when the
-        LLM emitted a native/structured tool call via the API.
+    The client collects text and displays it live, but passes the full
+    accumulated message dict to the driver without interpretation.
     """
     kwargs: dict = {"model": model, "messages": messages, "stream": True}
     if api_base:
         kwargs["api_base"] = api_base
         kwargs["api_key"] = api_key or "no-key"
+    if tools:
+        kwargs["tools"] = tools
     stream = completion(**kwargs)
 
-    buffer = ""
-    native_calls: list[dict] = []
+    content_buffer = ""
+    tool_calls_buffer: list[dict] = []
     printed_header = False
 
     for chunk in stream:  # type: ignore[union-attr]
@@ -124,40 +85,38 @@ def _stream_one_turn(
             continue
 
         token = getattr(delta, "content", None) or ""
-
-        nc = _extract_native_tool_calls(chunk)
-        if nc:
-            for c in nc:
-                existing = next(
-                    (x for x in native_calls if x.get("id") == c.get("id")),
-                    None,
-                )
-                if existing and c.get("arguments"):
-                    existing["arguments"] = existing.get("arguments", "") + c["arguments"]
-                elif c.get("id"):
-                    native_calls.append(c)
-
         if token:
-            buffer += token
+            content_buffer += token
             if not printed_header:
                 console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
                 printed_header = True
             print(token, end="", flush=True)
 
+        tc_deltas = getattr(delta, "tool_calls", None)
+        if tc_deltas:
+            for tc in tc_deltas:
+                idx = getattr(tc, "index", 0) or 0
+                while len(tool_calls_buffer) <= idx:
+                    tool_calls_buffer.append({"function": {"name": "", "arguments": ""}})
+                entry = tool_calls_buffer[idx]
+                fn = getattr(tc, "function", None)
+                if fn:
+                    if getattr(fn, "name", None):
+                        entry["function"]["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        entry["function"]["arguments"] += fn.arguments
+                tc_id = getattr(tc, "id", None)
+                if tc_id:
+                    entry["id"] = tc_id
+                    entry["type"] = "function"
+
     if printed_header:
         print()
 
-    if native_calls:
-        nc_item = native_calls[0]
-        try:
-            args = json.loads(nc_item.get("arguments", "{}"))
-        except json.JSONDecodeError:
-            args = {}
-        if debug:
-            console.print(f"  [dim]\u2699 {nc_item.get('name', '?')}({_fmt_tool_params(args)})[/dim]")
-        return {"tool": nc_item.get("name"), "arguments": args}
-
-    return buffer
+    msg: dict = {"role": "assistant", "content": content_buffer or None}
+    if tool_calls_buffer:
+        msg["tool_calls"] = tool_calls_buffer
+    return msg
 
 
 def _print_debug_dr(dr: DriverResponse) -> None:
@@ -176,15 +135,24 @@ def _print_debug_dr(dr: DriverResponse) -> None:
 
 def chat_loop(driver: MCSDriver, model: str, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
-    system_msg = driver.get_driver_system_message()
+    native_tools: list[dict] | None = None
+    if isinstance(driver, SupportsDriverContext):
+        ctx = driver.get_driver_context(model)
+        system_msg = ctx.system_message
+        native_tools = ctx.tools
+    else:
+        system_msg = driver.get_driver_system_message()
+
     messages: list[dict] = [{"role": "system", "content": system_msg}]
 
     binding = driver.meta.bindings[0]
+    mode = "native tools" if native_tools else "text prompt"
     info = [
         "[bold cyan]MCS Chat (streaming)[/bold cyan]\n",
         f"Driver:   {driver.meta.name}",
         f"Binding:  {binding.capability} / {binding.adapter}",
         f"Model:    {model}",
+        f"Tools:    {mode}",
     ]
     if api_base:
         info.append(f"API base: {api_base}")
@@ -209,7 +177,7 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
         messages.append({"role": "user", "content": user_input})
 
         for _round in range(MAX_TOOL_ROUNDS):
-            llm_out = _stream_one_turn(model, messages, debug, api_base, api_key)
+            llm_out = _stream_one_turn(model, messages, api_base, api_key, native_tools)
             response = driver.process_llm_response(llm_out)
 
             if debug and (response.call_executed or response.call_failed):
@@ -228,8 +196,8 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
                     console.print(f"[yellow]Tool call failed: {response.call_detail}[/yellow]")
                 continue
 
-            if isinstance(llm_out, str):
-                messages.append({"role": "assistant", "content": llm_out})
+            content = llm_out.get("content", "") or ""
+            messages.append({"role": "assistant", "content": content})
             break
         else:
             console.print("[yellow]Max tool rounds reached -- stopping.[/yellow]")

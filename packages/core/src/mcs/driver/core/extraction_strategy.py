@@ -50,7 +50,11 @@ class TextExtractionStrategy(ExtractionStrategy):
     delegates entirely to ``codec.parse_tool_call()``, which applies
     healing rules and format-specific parsing (JSON regex, XML, ...).
 
-    Returns ``None`` immediately when the input is not a ``str``.
+    Accepts both ``str`` and ``dict`` input.  When a dict is received,
+    the ``"content"`` field is extracted and parsed as text.  This
+    allows clients to pass a full LLM message dict (e.g.
+    ``choices[0].message``) without the strategy needing to know
+    about the message envelope.
     """
 
     def __init__(self, codec: PromptStrategy) -> None:
@@ -59,9 +63,13 @@ class TextExtractionStrategy(ExtractionStrategy):
     def extract(
         self, llm_response: str | dict,
     ) -> tuple[str, dict[str, Any]] | None:
-        if not isinstance(llm_response, str):
-            return None
-        return self._codec.parse_tool_call(llm_response)
+        if isinstance(llm_response, str):
+            return self._codec.parse_tool_call(llm_response)
+        if isinstance(llm_response, dict):
+            content = llm_response.get("content")
+            if content and isinstance(content, str):
+                return self._codec.parse_tool_call(content)
+        return None
 
 
 class DirectDictExtractionStrategy(ExtractionStrategy):

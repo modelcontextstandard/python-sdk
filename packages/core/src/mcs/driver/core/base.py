@@ -25,11 +25,12 @@ from .extraction_strategy import (
     DirectDictExtractionStrategy,
     OpenAIExtractionStrategy,
 )
+from .mixins.driver_context_mixin import SupportsDriverContext, DriverContext
 
 logger = logging.getLogger(__name__)
 
 
-class DriverBase(MCSDriver, MCSToolDriver):
+class DriverBase(MCSDriver, MCSToolDriver, SupportsDriverContext):
     """Concrete base that wires ``MCSDriver`` methods to a ``PromptStrategy``.
 
     Subclasses must provide:
@@ -81,10 +82,12 @@ class DriverBase(MCSDriver, MCSToolDriver):
     def process_llm_response(
         self, llm_response: str | dict, *, streaming: bool = False
     ) -> DriverResponse:
-        llm_text = (
-            llm_response if isinstance(llm_response, str)
-            else json.dumps(llm_response)
-        )
+        if isinstance(llm_response, str):
+            llm_text = llm_response
+        elif isinstance(llm_response, dict):
+            llm_text = llm_response.get("content") or json.dumps(llm_response)
+        else:
+            llm_text = str(llm_response)
 
         parsed = self._extract(llm_response)
         if parsed is None:
@@ -133,6 +136,45 @@ class DriverBase(MCSDriver, MCSToolDriver):
                 {"role": "system", "content": result_text},
             ],
         )
+
+    # -- SupportsDriverContext override ----------------------------------------
+
+    def get_driver_context(
+        self, model_name: str | None = None,
+    ) -> DriverContext:
+        """Return context for an LLM call.
+
+        When *model_name* is given and the model supports native
+        function-calling, the returned :class:`DriverContext` includes
+        tool definitions in OpenAI format so the client can pass them
+        as ``tools=ctx.tools``.  Otherwise, tools are embedded in
+        ``system_message`` as text (the default MCS approach).
+        """
+        if model_name and self._model_supports_native_tools(model_name):
+            return DriverContext(
+                system_message=self._custom_system_message or "You are a helpful assistant.",
+                tools=self._tools_as_native_dicts(),
+            )
+        return DriverContext(
+            system_message=self.get_driver_system_message(model_name),
+        )
+
+    @staticmethod
+    def _model_supports_native_tools(model_name: str) -> bool:
+        """Check whether *model_name* supports native function-calling.
+
+        Uses litellm if available, otherwise returns ``False``.
+        """
+        try:
+            from litellm import supports_function_calling  # type: ignore[import-untyped]
+            return supports_function_calling(model=model_name)
+        except Exception:
+            return False
+
+    def _tools_as_native_dicts(self) -> list[dict[str, Any]]:
+        """Return tools as native API dicts via the active ``PromptStrategy``."""
+        schemas = json.loads(self._strategy.format_tools(self.list_tools()))["tools"]
+        return [{"type": "function", "function": s} for s in schemas]
 
     # -- Extraction chain -----------------------------------------------------
 
