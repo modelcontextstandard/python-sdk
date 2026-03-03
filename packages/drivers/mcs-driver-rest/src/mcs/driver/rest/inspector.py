@@ -65,7 +65,7 @@ def _build_overview_table(td: RestToolDriver) -> Table:
         info = td._tool_map.get(tool.name, {})
         method = info.get("method", "?")
         path = info.get("path", "?")
-        desc = tool.description
+        desc = tool.title or tool.description
         if len(desc) > 80:
             desc = desc[:77] + "..."
         method_style = {
@@ -96,7 +96,12 @@ def _show_tool_detail(td: RestToolDriver, tool_name: str) -> None:
 
     header = f"[bold cyan]{tool.name}[/bold cyan]  [dim]{method} {path}[/dim]"
     console.print(Panel(header, expand=False))
-    console.print(f"\n{tool.description}\n")
+
+    if tool.title:
+        console.print(f"\n[bold]{tool.title}[/bold]")
+    if tool.description and tool.description != tool.title:
+        console.print(f"\n{tool.description}")
+    console.print()
 
     if not tool.parameters:
         console.print("[dim]No parameters.[/dim]")

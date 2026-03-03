@@ -240,9 +240,8 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
                     operation.get("operationId")
                     or self._generate_operation_id(method, path)
                 )
-                description = operation.get("summary") or operation.get(
-                    "description", "No description available."
-                )
+                title = operation.get("summary") or None
+                description = operation.get("description") or title or "No description available."
                 parameters: list[ToolParameter] = []
 
                 op_params = operation.get("parameters", [])
@@ -297,6 +296,7 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
                         name=tool_name,
                         description=description,
                         parameters=parameters,
+                        title=title,
                     )
                 )
                 self._tool_map[tool_name] = {
