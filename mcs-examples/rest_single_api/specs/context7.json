@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Context7 Documentation API",
-    "description": "Search programming libraries and retrieve up-to-date documentation and code examples.",
+    "description": "Search programming libraries and retrieve up-to-date documentation and code examples. Use search_libraries first to resolve a library name to a Context7 library ID, then use query_documentation to fetch relevant docs.",
     "version": "2.0.0",
     "contact": {
       "name": "Context7",
@@ -18,14 +18,14 @@
     "/v2/libs/search": {
       "get": {
         "operationId": "search_libraries",
-        "summary": "Search for programming libraries by name",
-        "description": "Searches for libraries matching the given name and ranks results by relevance to the query. Returns library IDs, descriptions, snippet counts, and reputation scores.",
+        "summary": "Resolve a library name to a Context7-compatible library ID",
+        "description": "Resolves a package/product name to a Context7-compatible library ID and returns matching libraries.\n\nYou MUST call this tool before 'query_documentation' to obtain a valid library ID, UNLESS the user explicitly provides one in the format '/org/project' or '/org/project/version'.\n\nEach result includes:\n- Library ID (format: /org/project)\n- Name and description\n- Code Snippets: number of available code examples\n- Source Reputation: High, Medium, Low, or Unknown\n- Benchmark Score: quality indicator (100 is the highest)\n- Versions: available versions (format: /org/project/version)\n\nSelection criteria (in order of priority):\n1. Name similarity to the query (exact matches first)\n2. Description relevance to the user's intent\n3. Documentation coverage (prefer higher Code Snippet counts)\n4. Source reputation (prefer High or Medium)\n5. Benchmark Score\n\nIf multiple good matches exist, pick the most relevant one and explain why. If no good matches exist, suggest query refinements.\n\nIMPORTANT: Do not call this tool more than 3 times per question.",
         "parameters": [
           {
             "name": "query",
             "in": "query",
             "required": true,
-            "description": "The question or task you need help with. Used to rank results by relevance.",
+            "description": "The question or task the user needs help with. Used to rank library results by relevance. Example: 'How to set up authentication in Express.js'. Do not include sensitive information.",
             "schema": {
               "type": "string"
             }
@@ -34,7 +34,7 @@
             "name": "libraryName",
             "in": "query",
             "required": true,
-            "description": "Library or package name to search for (e.g. 'react', 'fastapi', 'next.js').",
+            "description": "Library or package name to search for (e.g. 'react', 'fastapi', 'next.js', 'langchain').",
             "schema": {
               "type": "string"
             }
@@ -42,7 +42,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Search results with matching libraries.",
+            "description": "Search results with matching libraries ranked by relevance.",
             "content": {
               "application/json": {
                 "schema": {
@@ -55,29 +55,35 @@
                         "properties": {
                           "id": {
                             "type": "string",
-                            "description": "Context7-compatible library ID (format: /org/project)."
+                            "description": "Context7-compatible library ID (format: /org/project). Pass this to query_documentation."
                           },
                           "name": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Library or package name."
                           },
                           "description": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Short summary of the library."
                           },
                           "codeSnippets": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "Number of available code examples. Higher is better."
                           },
                           "sourceReputation": {
                             "type": "string",
-                            "enum": ["High", "Medium", "Low", "Unknown"]
+                            "enum": ["High", "Medium", "Low", "Unknown"],
+                            "description": "Authority indicator of the documentation source."
                           },
                           "benchmarkScore": {
-                            "type": "number"
+                            "type": "number",
+                            "description": "Quality indicator (0-100). Higher is better."
                           },
                           "versions": {
                             "type": "array",
                             "items": {
                               "type": "string"
-                            }
+                            },
+                            "description": "Available versions (format: /org/project/version). Use if the user asks for a specific version."
                           }
                         }
                       }
@@ -94,13 +100,13 @@
       "get": {
         "operationId": "query_documentation",
         "summary": "Retrieve documentation and code examples for a library",
-        "description": "Fetches up-to-date documentation and code examples for the specified library. Use 'search_libraries' first to obtain a valid library ID unless the user provides one directly.",
+        "description": "Fetches up-to-date, reranked documentation and code examples for the specified library.\n\nYou MUST call 'search_libraries' first to obtain a valid Context7 library ID, UNLESS the user explicitly provides one in the format '/org/project' or '/org/project/version'.\n\nBe specific in your query for best results. Good: 'How to set up authentication with JWT in Express.js'. Bad: 'auth'.\n\nIMPORTANT: Do not call this tool more than 3 times per question. If you cannot find what you need after 3 calls, use the best information you have.",
         "parameters": [
           {
             "name": "query",
             "in": "query",
             "required": true,
-            "description": "Specific question or topic to retrieve documentation for (e.g. 'How to set up authentication with JWT').",
+            "description": "Specific question or topic to retrieve documentation for. Be detailed. Example: 'React useEffect cleanup function examples'. Do not include sensitive information.",
             "schema": {
               "type": "string"
             }
@@ -109,7 +115,7 @@
             "name": "libraryId",
             "in": "query",
             "required": true,
-            "description": "Context7-compatible library ID from search_libraries (e.g. '/mongodb/docs', '/vercel/next.js').",
+            "description": "Context7-compatible library ID obtained from search_libraries (e.g. '/mongodb/docs', '/vercel/next.js', '/vercel/next.js/v14.3.0-canary.87').",
             "schema": {
               "type": "string"
             }
@@ -117,7 +123,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Documentation content as text.",
+            "description": "Documentation content with code examples as plain text.",
             "content": {
               "text/plain": {
                 "schema": {
