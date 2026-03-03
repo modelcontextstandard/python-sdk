@@ -10,7 +10,7 @@ resolution-markers = [
 members = [
     "mcs-adapter-http",
     "mcs-adapter-localfs",
-    "mcs-adapter-smb-smbprotocol",
+    "mcs-adapter-smb",
     "mcs-driver-core",
     "mcs-driver-csv",
     "mcs-driver-filesystem",
@@ -1511,7 +1511,7 @@ version = "0.2.0"
 source = { editable = "packages/adapters/mcs-adapter-localfs" }
 
 [[package]]
-name = "mcs-adapter-smb-smbprotocol"
+name = "mcs-adapter-smb"
 version = "0.1.0"
 source = { editable = "packages/adapters/mcs-adapter-smb" }
 dependencies = [
@@ -1523,7 +1523,7 @@ requires-dist = [{ name = "smbprotocol", specifier = ">=1.0" }]
 
 [[package]]
 name = "mcs-driver-core"
-version = "0.2"
+version = "0.2.0"
 source = { editable = "packages/core" }
 
 [package.optional-dependencies]
@@ -1656,17 +1656,16 @@ requires-dist = [
 
 [[package]]
 name = "mcs-python-sdk"
-version = "0.2"
+version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "mcs-adapter-http" },
     { name = "mcs-adapter-localfs" },
-    { name = "mcs-adapter-smb-smbprotocol" },
+    { name = "mcs-adapter-smb" },
     { name = "mcs-driver-core" },
     { name = "mcs-driver-csv" },
     { name = "mcs-driver-filesystem" },
     { name = "mcs-driver-rest" },
-    { name = "mcs-examples" },
     { name = "mcs-orchestrator-base" },
     { name = "mcs-orchestrator-rest" },
 ]
@@ -1706,12 +1705,11 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'examples'", specifier = ">=1.40" },
     { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
     { name = "mcs-adapter-localfs", editable = "packages/adapters/mcs-adapter-localfs" },
-    { name = "mcs-adapter-smb-smbprotocol", editable = "packages/adapters/mcs-adapter-smb" },
+    { name = "mcs-adapter-smb", editable = "packages/adapters/mcs-adapter-smb" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-driver-csv", editable = "packages/drivers/mcs-driver-csv" },
     { name = "mcs-driver-filesystem", editable = "packages/drivers/mcs-driver-filesystem" },
     { name = "mcs-driver-rest", editable = "packages/drivers/mcs-driver-rest" },
-    { name = "mcs-examples", editable = "mcs-examples" },
     { name = "mcs-orchestrator-base", editable = "packages/orchestrators/mcs-orchestrator-base" },
     { name = "mcs-orchestrator-rest", editable = "packages/orchestrators/mcs-orchestrator-rest" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8" },
