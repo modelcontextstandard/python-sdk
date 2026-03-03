@@ -49,18 +49,50 @@ class Tool:
     that an external entity (e.g., an orchestrator or an LLM capable of
     tool-calling) can understand and invoke.
 
+    The three-tier identification mirrors both MCP and OpenAPI conventions:
+
+    * ``name``  -- machine identifier (MCP ``name``, OpenAPI ``operationId``)
+    * ``title`` -- short human-readable label (MCP ``title``, OpenAPI ``summary``)
+    * ``description`` -- full text forwarded to the LLM, may contain multi-line
+      prompt-engineering instructions (MCP ``description``, OpenAPI ``description``)
+
+    A client or orchestrator can choose to expose only ``name`` + ``title``
+    to the LLM to save context-window tokens and load the full
+    ``description`` on demand when a tool is actually selected.
+
+    At least one of ``title`` or ``description`` must be provided.
+    When only ``title`` is given, ``description`` is auto-filled from it
+    so that downstream consumers (e.g. ``PromptStrategy.format_tools``)
+    always find a non-empty ``description``.
+
     Attributes
     ----------
     name : str
-        The unique name of the tool, used to identify it.
-    description : str
-         A detailed description of what the tool does and when it should be used.
+        Unique machine-readable identifier for the tool.
+    title : str or None
+        Optional short human-readable label for display and token-efficient
+        tool listings.  Maps to OpenAPI ``summary`` / MCP ``title``.
+    description : str or None
+        Detailed description forwarded to the LLM.  May include usage
+        instructions, constraints and examples.  Auto-filled from
+        ``title`` when not provided explicitly.
     parameters : list[ToolParameter]
-        A list of `Parameter` objects, defining the inputs required by the tool.
+        Inputs required by the tool.
     """
     name: str
-    description: str
-    parameters: list[ToolParameter]
+    title: Optional[str] = None
+    description: Optional[str] = None
+    parameters: list[ToolParameter] = None  # type: ignore[assignment]    
+
+    def __post_init__(self) -> None:
+        if self.parameters is None:
+            self.parameters = []
+        if not self.description and self.title:
+            self.description = self.title
+        if not self.description and not self.title:
+            raise ValueError(
+                f"Tool '{self.name}': at least one of 'title' or 'description' must be provided."
+            )
 
 
 class MCSToolDriver(ABC):
