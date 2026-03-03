@@ -32,6 +32,127 @@ primarily a **driver challenge**, not a protocol stack challenge.
 
 ---
 
+## Quick Start
+
+### 1. Installation
+
+```bash
+pip install mcs-driver-rest   # REST/OpenAPI driver (includes core + http adapter)
+pip install mcs-driver-csv    # CSV driver (includes core + localfs adapter)
+```
+
+### 2. Text-based driver loop (works with any LLM)
+
+The simplest pattern -- the driver embeds all tool descriptions in the
+system prompt and parses the LLM's text output for structured tool calls.
+No `tools=` parameter needed; works with every model that can follow
+instructions.
+
+```python
+from mcs.driver.rest import RestDriver
+
+driver = RestDriver(url="https://api.example.com/openapi.json")
+system_prompt = driver.get_driver_system_message()
+
+messages = [
+    {"role": "system", "content": system_prompt},
+    {"role": "user",   "content": "Find the top Python repos on GitHub"},
+]
+
+while True:
+    llm_out  = call_llm(messages)                        # your LLM call (any model)
+    response = driver.process_llm_response(llm_out)
+
+    if response.messages:
+        messages.extend(response.messages)
+
+    if response.call_executed:
+        continue                                         # tool ran -- back to LLM
+    elif response.call_failed:
+        continue                                         # retry
+    else:
+        print(llm_out)                                   # final answer
+        break
+```
+
+### 3. Native tool calling (models with function-calling support)
+
+Models like GPT-5.2, Claude, or Gemini support native `tools=[]`.
+Drivers that implement the `SupportsDriverContext` mixin provide both the
+system prompt **and** tool definitions in one call:
+
+```python
+from openai import OpenAI
+from mcs.driver.rest import RestDriver
+from mcs.driver.core import SupportsDriverContext
+
+client = OpenAI()
+driver = RestDriver(url="https://api.example.com/openapi.json")
+
+# Get system prompt + native tool definitions from the driver
+ctx = driver.get_driver_context(model_name="gpt-5.2")
+
+messages = [
+    {"role": "system", "content": ctx.system_message},
+    {"role": "user",   "content": "Find the top Python repos on GitHub"},
+]
+
+while True:
+    completion = client.chat.completions.create(
+        model="gpt-5.2",
+        messages=messages,
+        tools=ctx.tools,                                 # native tools from driver
+    )
+    llm_message = completion.choices[0].message
+
+    # Pass the full message to the driver -- it handles both
+    # native tool_calls and text-based tool calls transparently
+    response = driver.process_llm_response(llm_message.to_dict())
+
+    if response.messages:
+        messages.extend(response.messages)
+
+    if response.call_executed:
+        continue                                         # tool ran -- back to LLM
+    elif response.call_failed:
+        continue                                         # retry
+    else:
+        print(llm_message.content)                       # final answer
+        break
+```
+
+The driver handles everything: it knows which extraction strategy to use
+(native JSON vs text-based), executes the tool call, and returns
+pre-formatted messages the client can append directly.
+
+### 4. How tools work under the hood
+
+The client never interprets tool calls -- it just passes the LLM response
+to the driver. Internally:
+
+1. The driver's **extraction chain** checks if the response contains a
+   native tool call (e.g. OpenAI `tool_calls` field) or a text-based call.
+2. The matching **extraction strategy** parses the call.
+3. The driver **executes** the tool and returns a `DriverResponse` with
+   pre-formatted `messages` (assistant message + tool result).
+4. The client appends these messages and loops back to the LLM.
+
+```
+Client                    Driver                     Backend
+  │                         │                           │
+  │── LLM response ───────▶│                           │
+  │                         │── extract tool call ──▶   │
+  │                         │── execute_tool() ───────▶│
+  │                         │◀── raw result ───────────│
+  │◀── DriverResponse ─────│                           │
+  │    .messages            │                           │
+  │    .call_executed       │                           │
+  │                         │                           │
+  │── append messages ──▶ LLM (next turn)              │
+```
+
+---
+
 ## What's inside?
 
 This SDK is a **uv workspace monorepo**. Each component is packaged
@@ -74,88 +195,22 @@ independently -- install exactly what you need.
 
 ---
 
-## Quick Start
-
-### 1. Installation
-
-```bash
-pip install mcs-driver-core                    # core contract only
-pip install mcs-driver-rest                    # REST/OpenAPI driver (includes core + http adapter)
-pip install mcs-driver-csv mcs-adapter-localfs # CSV driver with local filesystem
-```
-
-### 2. Using a Driver
-
-The interaction always follows this pattern:
-
-1. **Get system prompt** -- the driver provides a complete system message for the LLM.
-2. **Run LLM** -- send the system prompt + user input to the LLM.
-3. **Process response** -- the driver checks if the LLM wants to call a tool. If so, it executes the call and returns pre-formatted `messages` the client can append directly to its history.
-4. **Loop** -- if a tool was called, extend the message history with `response.messages` and repeat from step 2.
-
-```python
-from mcs.driver.rest import RestDriver
-
-driver = RestDriver(url="https://api.example.com/openapi.json")
-system_prompt = driver.get_driver_system_message()
-
-messages = [
-    {"role": "system", "content": system_prompt},
-    {"role": "user",   "content": "Find the top Python repos on GitHub"},
-]
-
-while True:
-    llm_out  = call_llm(messages)                        # your LLM call
-    response = driver.process_llm_response(llm_out)
-
-    if response.messages:
-        messages.extend(response.messages)
-
-    if response.call_executed:
-        continue
-    elif response.call_failed:
-        continue
-    else:
-        print(llm_out)
-        break
-```
-
-Once perfect prompts exist for a protocol and transport, they are
-encapsulated inside the driver. This avoids the burden of coming up with
-prompts across apps again and again -- the logic is reusable.
-
-For the first time, investing in the perfect prompt for a use case pays off
-directly: once developed, everyone can reuse it without even seeing the
-prompt itself.
-
-### 3. Native tool calling (optional)
-
-Drivers that implement the `SupportsDriverContext` mixin can provide native
-tool definitions alongside the system prompt:
-
-```python
-from mcs.driver.core import SupportsDriverContext
-
-if isinstance(driver, SupportsDriverContext):
-    ctx = driver.get_driver_context(model_name="gpt-4o")
-    # ctx.system_message  -- the system prompt
-    # ctx.tools           -- list of tool dicts for the LLM's tools= parameter
-```
-
-### 4. Running the examples
+## Running the examples
 
 ```bash
 pip install uv          # one-time: install uv
 uv sync                 # install all workspace packages as editable installs
-python mcs-examples/csv_analysis/chat_non_stream.py --model gpt-4o --debug
-python mcs-examples/rest_single_api/chat_non_stream.py --model gpt-4o --include-tags search
+python mcs-examples/csv_analysis/chat_non_stream.py --model gpt-5.2 --debug
+python mcs-examples/rest_single_api/chat_non_stream.py --model gpt-5.2 --include-tags search
 ```
 
 > **Note:** `pip install -e .` does **not** work at the workspace root.
 > Use `uv sync` for the full workspace, or `pip install -e packages/core`
 > etc. for individual packages.
 
-### 5. Development
+---
+
+## Development
 
 ```bash
 git clone https://github.com/modelcontextstandard/python-sdk.git
@@ -163,14 +218,15 @@ pip install uv
 uv sync
 ```
 
-### 6. Building & Publishing
+### Building & Publishing
 
 A cross-platform build script is included. It builds all 9 packages into
 a single `dist_all/` directory and optionally validates them with `twine`.
 
 ```bash
-python scripts/build_all.py --clean          # build all packages
-python scripts/build_all.py --clean --check   # build + twine check (dry-run)
+python scripts/build_all.py --build              # build all packages
+python scripts/build_all.py --build --check      # build + twine check (dry-run)
+python scripts/build_all.py --check              # check existing artifacts
 ```
 
 Upload to PyPI:
