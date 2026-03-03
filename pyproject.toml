@@ -1,26 +1,25 @@
 [project]
 name = "mcs-python-sdk"
-version = "0.2"
+version = "0.2.0"
 description = "Model Context Standard – Python SDK workspace root."
 requires-python = ">=3.9"
 dependencies = [
   "mcs-driver-core>=0.2",
   "mcs-adapter-http>=0.2",
   "mcs-adapter-localfs>=0.1",
-  "mcs-adapter-smb-smbprotocol>=0.1",
+  "mcs-adapter-smb>=0.1",
   "mcs-driver-rest>=0.2",
   "mcs-driver-filesystem>=0.2",
   "mcs-driver-csv>=0.1",
   "mcs-orchestrator-base>=0.1",
   "mcs-orchestrator-rest>=0.2",
-  "mcs-examples>=0.1",
 ]
 
 [tool.uv.sources]
 mcs-driver-core = { workspace = true }
 mcs-adapter-http = { workspace = true }
 mcs-adapter-localfs = { workspace = true }
-mcs-adapter-smb-smbprotocol = { workspace = true }
+mcs-adapter-smb = { workspace = true }
 mcs-driver-rest = { workspace = true }
 mcs-driver-filesystem = { workspace = true }
 mcs-driver-csv = { workspace = true }

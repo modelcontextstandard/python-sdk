@@ -57,3 +57,46 @@ produces JSON in `content` that resembles a text-based tool call,
    only sensible fallback anyway).
 4. Setting the model name in the driver fix, or the format to choose. Maybe with 
    the Strategy, since GPT-4.o and GPT-5 following the same pattern.
+
+---
+
+## CI/CD pipeline for automated PyPI publishing
+
+**Affects:** `.github/workflows/`
+
+**Status:** Open / Planned
+
+**Problem:**
+Publishing to PyPI is currently a manual process (`build` + `twine upload`
+for each package). With 9 independently versioned packages this is
+error-prone and tedious.
+
+**Desired state:**
+A GitHub Actions workflow that:
+
+1. Triggers on version-tag push (e.g. `mcs-driver-core/v0.3.0`).
+2. Builds the tagged package (`python -m build`).
+3. Runs the test suite for that package.
+4. Publishes to PyPI via `twine` using a trusted publisher (OIDC) or
+   API token stored in GitHub secrets.
+
+**Considerations:**
+- Each package has its own release cadence → per-package tags are preferable
+  over a single monorepo tag.
+- A matrix build for all packages on every push to `main` (lint + test only,
+  no publish) would catch regressions early.
+- `uv` could be used in CI for faster dependency resolution.
+
+---
+
+## Deprecate / yank `mcs-drivers-core` on PyPI
+
+**Affects:** PyPI
+
+**Status:** Open
+
+**Problem:**
+An earlier version was published under the name `mcs-drivers-core` (plural).
+The canonical name is now `mcs-driver-core` (singular, consistent with the
+`mcs-driver-<capability>` naming convention). The old package should be
+yanked or updated with a deprecation notice pointing to `mcs-driver-core`.

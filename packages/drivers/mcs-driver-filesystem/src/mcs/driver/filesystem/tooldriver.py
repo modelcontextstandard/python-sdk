@@ -13,6 +13,8 @@ from typing import Any, Dict, List
 
 from mcs.driver.core import MCSToolDriver, Tool, ToolParameter, DriverMeta, DriverBinding
 
+from .ports import FilesystemPort
+
 logger = logging.getLogger(__name__)
 
 
@@ -71,11 +73,11 @@ class FilesystemToolDriver(MCSToolDriver):
         self,
         *,
         adapter: str = "localfs",
-        _adapter: Any = None,
+        _adapter: FilesystemPort | None = None,
         **adapter_kwargs: Any,
     ) -> None:
         if _adapter is not None:
-            self._adapter = _adapter
+            self._adapter: FilesystemPort = _adapter
         elif adapter == "smb":
             from mcs.adapter.smb import SmbAdapter
             self._adapter = SmbAdapter(**adapter_kwargs)
