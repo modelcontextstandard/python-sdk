@@ -32,6 +32,9 @@ dependencies = [
     "mcs-adapter-http>=0.2",
 ]
 
+[project.optional-dependencies]
+inspector = ["rich>=13"]
+
 [tool.uv.sources]
 mcs-driver-core = { workspace = true }
 mcs-adapter-http = { workspace = true }

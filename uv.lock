@@ -1584,11 +1584,18 @@ dependencies = [
     { name = "mcs-driver-core" },
 ]
 
+[package.optional-dependencies]
+inspector = [
+    { name = "rich" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
     { name = "mcs-driver-core", editable = "packages/core" },
+    { name = "rich", marker = "extra == 'inspector'", specifier = ">=13" },
 ]
+provides-extras = ["inspector"]
 
 [[package]]
 name = "mcs-examples"

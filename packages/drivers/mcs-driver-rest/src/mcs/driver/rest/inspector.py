@@ -21,9 +21,15 @@ from __future__ import annotations
 import argparse
 import sys
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+except ImportError:
+    raise SystemExit(
+        "The inspector requires 'rich'. Install it with:\n"
+        "  pip install mcs-driver-rest[inspector]"
+    )
 
 from mcs.driver.rest.tooldriver import RestToolDriver
 
