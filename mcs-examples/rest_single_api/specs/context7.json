@@ -14,6 +14,97 @@
       "url": "https://context7.com/api"
     }
   ],
+  "security": [
+    {},
+    { "bearerAuth": [] }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Optional Context7 API key as Bearer token. Requests without a key may be rate-limited."
+      }
+    },
+    "schemas": {
+      "LibrarySearchResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Context7-compatible library ID (format: /org/project). Pass this to query_documentation."
+          },
+          "name": {
+            "type": "string",
+            "description": "Library or package name."
+          },
+          "description": {
+            "type": "string",
+            "description": "Short summary of the library."
+          },
+          "codeSnippets": {
+            "type": "integer",
+            "description": "Number of available code examples. Higher is better for documentation coverage."
+          },
+          "sourceReputation": {
+            "type": "string",
+            "enum": ["High", "Medium", "Low", "Unknown"],
+            "description": "Authority indicator of the documentation source."
+          },
+          "benchmarkScore": {
+            "type": "number",
+            "description": "Quality indicator (0-100). Higher is better."
+          },
+          "versions": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Available versions (format: /org/project/version). Use if the user asks for a specific version."
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable error message."
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid or missing required parameters.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Rate limit exceeded. Retry after the interval indicated in the Retry-After header.",
+        "headers": {
+          "Retry-After": {
+            "schema": { "type": "integer" },
+            "description": "Seconds to wait before retrying."
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "ServerError": {
+        "description": "Unexpected server error. Retry with a simpler query or try again later.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      }
+    }
+  },
   "paths": {
     "/v2/libs/search": {
       "get": {
@@ -25,7 +116,7 @@
             "name": "query",
             "in": "query",
             "required": true,
-            "description": "The question or task the user needs help with. Used to rank library results by relevance. Example: 'How to set up authentication in Express.js'. Do not include sensitive information.",
+            "description": "The question or task the user needs help with. Used to rank library results by relevance. Example: 'How to set up authentication in Express.js'.",
             "schema": {
               "type": "string"
             }
@@ -50,49 +141,16 @@
                   "properties": {
                     "results": {
                       "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "description": "Context7-compatible library ID (format: /org/project). Pass this to query_documentation."
-                          },
-                          "name": {
-                            "type": "string",
-                            "description": "Library or package name."
-                          },
-                          "description": {
-                            "type": "string",
-                            "description": "Short summary of the library."
-                          },
-                          "codeSnippets": {
-                            "type": "integer",
-                            "description": "Number of available code examples. Higher is better."
-                          },
-                          "sourceReputation": {
-                            "type": "string",
-                            "enum": ["High", "Medium", "Low", "Unknown"],
-                            "description": "Authority indicator of the documentation source."
-                          },
-                          "benchmarkScore": {
-                            "type": "number",
-                            "description": "Quality indicator (0-100). Higher is better."
-                          },
-                          "versions": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "description": "Available versions (format: /org/project/version). Use if the user asks for a specific version."
-                          }
-                        }
-                      }
+                      "items": { "$ref": "#/components/schemas/LibrarySearchResult" }
                     }
                   }
                 }
               }
             }
-          }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/ServerError" }
         }
       }
     },
@@ -106,7 +164,7 @@
             "name": "query",
             "in": "query",
             "required": true,
-            "description": "Specific question or topic to retrieve documentation for. Be detailed. Example: 'React useEffect cleanup function examples'. Do not include sensitive information.",
+            "description": "Specific question or topic to retrieve documentation for. Be detailed. Example: 'React useEffect cleanup function examples'.",
             "schema": {
               "type": "string"
             }
@@ -131,7 +189,10 @@
                 }
               }
             }
-          }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/ServerError" }
         }
       }
     }
