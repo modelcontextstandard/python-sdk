@@ -1,0 +1,133 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Context7 Documentation API",
+    "description": "Search programming libraries and retrieve up-to-date documentation and code examples.",
+    "version": "2.0.0",
+    "contact": {
+      "name": "Context7",
+      "url": "https://context7.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://context7.com/api"
+    }
+  ],
+  "paths": {
+    "/v2/libs/search": {
+      "get": {
+        "operationId": "search_libraries",
+        "summary": "Search for programming libraries by name",
+        "description": "Searches for libraries matching the given name and ranks results by relevance to the query. Returns library IDs, descriptions, snippet counts, and reputation scores.",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "description": "The question or task you need help with. Used to rank results by relevance.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "libraryName",
+            "in": "query",
+            "required": true,
+            "description": "Library or package name to search for (e.g. 'react', 'fastapi', 'next.js').",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results with matching libraries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Context7-compatible library ID (format: /org/project)."
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "codeSnippets": {
+                            "type": "integer"
+                          },
+                          "sourceReputation": {
+                            "type": "string",
+                            "enum": ["High", "Medium", "Low", "Unknown"]
+                          },
+                          "benchmarkScore": {
+                            "type": "number"
+                          },
+                          "versions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/context": {
+      "get": {
+        "operationId": "query_documentation",
+        "summary": "Retrieve documentation and code examples for a library",
+        "description": "Fetches up-to-date documentation and code examples for the specified library. Use 'search_libraries' first to obtain a valid library ID unless the user provides one directly.",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "description": "Specific question or topic to retrieve documentation for (e.g. 'How to set up authentication with JWT').",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "libraryId",
+            "in": "query",
+            "required": true,
+            "description": "Context7-compatible library ID from search_libraries (e.g. '/mongodb/docs', '/vercel/next.js').",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Documentation content as text.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
