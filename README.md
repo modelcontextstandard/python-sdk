@@ -1,5 +1,9 @@
 # Model Context Standard (MCS) -- Python SDK
 
+> **Stage:** Alpha 0.2.0 · **not for production use (yet)** · things will break
+>
+> Contract v0.6 | Python >= 3.9
+
 > **Your LLM needs to call an API. Don't build a server. Point at the spec.**
 
 ```bash
