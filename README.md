@@ -622,6 +622,30 @@ separate them. The `-toolonly` suffix (e.g. `mcs-driver-imap-toolonly`)
 is only used when a ToolDriver is explicitly designed as a building
 block that gets composed into a higher-level driver like `mcs-driver-mail`.
 
+### Package layout
+
+When publishing a driver, the directory layout matters as much as the
+PyPI name. All MCS packages share the `mcs.*` namespace -- that's what
+makes `from mcs.driver.mail import MailDriver` work across separately
+installed packages. The `src/mcs/` path is the key:
+
+```
+mcs-driver-mail/                    mcs-adapter-imap/
+  pyproject.toml                      pyproject.toml
+  src/                                src/
+    mcs/                                mcs/
+      driver/                             adapter/
+        mail/                               imap/
+          __init__.py                         __init__.py
+          driver.py                           adapter.py
+          tooldriver.py
+          ports.py
+```
+
+Get this right, and IDE autocomplete, jump-to-definition, and imports
+all work out of the box. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+the full setup guide.
+
 See the [full specification](https://modelcontextstandard.io) for
 architectural details, the orchestrator pattern, and security model.
 
