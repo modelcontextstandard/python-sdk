@@ -460,7 +460,7 @@ returns a `DriverResponse` with the result or a retry prompt.
 `execute_tool`), every driver that extends `DriverBase` is automatically
 a HybridDriver. That means `MailDriver` can talk to a client directly
 **and** be used as a ToolDriver inside another driver or orchestrator.
-This is the default -- you get both roles for free.
+This is the default.
 
 Three packages, clean separation:
 
@@ -489,7 +489,7 @@ system_prompt = mail.get_driver_system_message()
 ### Chain it -- multiple drivers, same loop
 
 Every MCS driver implements the same interface. The client doesn't change
-when you add more drivers -- just pass the LLM response through each one:
+when you add more drivers. Just pass the LLM response through each one:
 
 ```python
 from mcs.driver.rest import RestDriver
@@ -545,6 +545,11 @@ The manual `for driver in drivers` loop works, but an Orchestrator does
 it cleaner: it aggregates tools from multiple ToolDrivers, namespaces
 them to avoid collisions, and looks like a single driver to the client.
 
+And that will make it easy for users / client dev to allow change in configuration 
+while the loop is running.
+
+Add a new OpenAPI URL, or a filesystem driver.
+
 ```python
 from mcs.orchestrator.base import BaseOrchestrator
 from mcs.driver.rest import RestDriver
@@ -592,15 +597,30 @@ Orchestrator handles tool namespacing (`docs__search_libraries`,
 Orchestrator itself implements `MCSToolDriver`, it can be nested
 inside another Orchestrator.
 
-### Naming convention
+### Convention over configuration
+
+MCS follows the principle Ruby on Rails once taught us: 
+**convention over configuration**
+
+Consistent naming lets you discover packages on
+[pypi.org](https://pypi.org/search/?q=mcs-driver) by prefix -- search
+for `mcs-driver-` or `mcs-adapter-` and find what you need. The
+trade-off: you need to learn the conventions, and there's no system
+that enforces them at runtime.
 
 | Level | Pattern | Example |
 | --- | --- | --- |
-| PyPI (ToolDriver) | `mcs-driver-<protocol>-toolonly` | `mcs-driver-imap-toolonly` |
-| PyPI (Driver) | `mcs-driver-<capability>` | `mcs-driver-mail` |
+| PyPI (Driver) | `mcs-driver-<capability>` | `mcs-driver-mail`, `mcs-driver-pdf` |
 | PyPI (Adapter) | `mcs-adapter-<protocol>` | `mcs-adapter-imap` |
 | Python import | `mcs.driver.<capability>` | `from mcs.driver.mail import MailDriver` |
-| Class | `<Capability>Driver` | `MailDriver` |
+| Class | `<Capability>Driver` | `MailDriver`, `PdfDriver` |
+
+Most packages ship **both** the ToolDriver and the full Driver (a
+HybridDriver extending `DriverBase`). For example, `mcs-driver-pdf`
+contains a `PdfToolDriver` and a `PdfDriver` -- there's no reason to
+separate them. The `-toolonly` suffix (e.g. `mcs-driver-imap-toolonly`)
+is only used when a ToolDriver is explicitly designed as a building
+block that gets composed into a higher-level driver like `mcs-driver-mail`.
 
 See the [full specification](https://modelcontextstandard.io) for
 architectural details, the orchestrator pattern, and security model.
