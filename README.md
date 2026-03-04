@@ -646,6 +646,21 @@ uvx twine upload dist_all/*                       # production PyPI
 
 ---
 
+## Contributing
+
+We're building an open ecosystem -- your ideas power it. The highest
+impact right now: **new drivers**. Pick a protocol (GraphQL, MQTT,
+gRPC, ...) or a domain (PDF, database, calendar, ...) and build it
+using the bottom-up workflow above.
+
+Other focus areas: new adapters for existing drivers, PromptStrategy
+formats, test coverage, and real-world examples.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions, and
+how to submit a PR.
+
+---
+
 ## License
 
 Apache-2.0. See `LICENSE`.
