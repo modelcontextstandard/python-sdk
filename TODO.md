@@ -1,5 +1,17 @@
 # TODO
 
+# Test and verify dynamic tool sets
+Verfify if already possible to dynamically add tools to the tool set, by changing the configuration file or with that that the user can toggle tools on a GUI.
+
+# Orchestrator for tool details calls
+Injecting tools by the orchestrators strategy to list only titles, and the llm gets a tool to call the details.
+Making larger toolsset more token efficient.
+
+# Orchestrator with tool pagination
+As tools grow in number, the orchestrator should be able to paginate the tools to avoid token limits.
+For that the orchestartor should inject a pagination tool, when the tool set exceeds a certain number of tools.
+
+
 ## Extract model-capability lookup from litellm dependency
 
 **Affects:** `packages/core/src/mcs/driver/core/base.py` → `_model_supports_native_tools()`
