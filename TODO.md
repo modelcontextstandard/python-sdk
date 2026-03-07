@@ -101,6 +101,47 @@ A GitHub Actions workflow that:
 
 ---
 
+## Observability: INFO-level logging at every layer transition
+
+**Affects:** all packages — Adapters, ToolDrivers, Drivers, Orchestrators
+
+**Status:** Open
+
+**Priority:** High
+
+**Problem:**
+Open WebUI demonstrates what happens when observability is neglected: Tool
+Server specs are fetched with success logged at `DEBUG` only, failures are
+silently swallowed with `continue`, and the UI gives zero feedback on whether
+tools were loaded.  The result is an undebuggable black box — users cannot
+tell if a tool server connected, how many tools were registered, or why
+nothing works.
+
+MCS must avoid this pattern.  Every layer transition (Adapter connect,
+ToolDriver registration, Driver init, Orchestrator tool injection) should
+produce at least one `INFO`-level log entry on success **and** a clear
+`WARNING`/`ERROR` on failure — including actionable context (URL, tool count,
+error reason).
+
+**Concrete requirements:**
+
+1. **Adapter** — log on connect/disconnect with target info (URL, path, host).
+2. **ToolDriver** — log number of tools registered after adapter init
+   (`INFO: ToolDriver registered 12 tools from <source>`).
+3. **Driver** — log which tools were injected into the prompt and whether
+   native or text-based tool calling is used.
+4. **Orchestrator** — log strategy selection, pagination state, and final
+   tool count delivered to the driver.
+5. **Errors** — never silently `continue` past a failed connection or parse
+   error. Always log with enough context to diagnose without a debugger.
+
+**Anti-patterns to avoid (learned from Open WebUI):**
+- Success on `DEBUG`, failure on `ERROR` but swallowed → user sees nothing.
+- No UI/API feedback on tool registration status.
+- Lazy loading without any signal that loading happened.
+
+---
+
 ## Deprecate / yank `mcs-drivers-core` on PyPI
 
 **Affects:** PyPI
