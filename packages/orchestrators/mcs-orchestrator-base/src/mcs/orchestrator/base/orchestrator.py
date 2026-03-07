@@ -1,8 +1,9 @@
 """MCS Base Orchestrator -- generic multi-driver orchestrator.
 
 Manages multiple ``MCSToolDriver`` instances at runtime, each identified
-by a human-readable *label*.  Tool resolution (namespacing, switching,
-etc.) is delegated to a pluggable ``ResolutionStrategy``.
+by a human-readable *label*.  Tool listing and execution are delegated
+to a pluggable ``ResolutionStrategy`` (typically a ``ToolPipeline``
+composed of ``ToolLayer`` decorators).
 
 Inherits prompt generation and LLM response parsing from ``DriverBase``.
 Uses ``UnknownToolBehavior.RETRY_WITH_LIST`` so the LLM gets feedback
@@ -30,7 +31,7 @@ from mcs.driver.core import (
     UnknownToolBehavior,
 )
 
-from .strategies import ResolutionStrategy, NamespacingStrategy
+from .strategies import ResolutionStrategy, NamespacingLayer, ToolPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,9 @@ class BaseOrchestrator(DriverBase):
         if isinstance(ps, JsonPromptStrategy):
             ps.unknown_tool_behavior = UnknownToolBehavior.RETRY_WITH_LIST
         super().__init__(prompt_strategy=ps)
-        self._resolution = resolution_strategy or NamespacingStrategy()
+        self._resolution = resolution_strategy or ToolPipeline(
+            layers=[NamespacingLayer()],
+        )
         self._labeled: dict[str, MCSToolDriver] = {}
         self._lock = threading.RLock()
 
@@ -120,7 +123,17 @@ class BaseOrchestrator(DriverBase):
 
     def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         with self._lock:
-            driver, original_name = self._resolution.resolve(
-                self._labeled, tool_name,
-            )
-        return driver.execute_tool(original_name, arguments)
+            labeled_copy = dict(self._labeled)
+        return self._resolution.execute_tool(labeled_copy, tool_name, arguments)
+
+    # ------------------------------------------------------------------
+    # LLM integration (override to append layer instructions)
+    # ------------------------------------------------------------------
+
+    def get_driver_system_message(self, model_name: str | None = None) -> str:
+        base_msg = super().get_driver_system_message(model_name)
+        if isinstance(self._resolution, ToolPipeline):
+            instructions = self._resolution.get_instructions()
+            if instructions:
+                base_msg += "\n\n" + instructions
+        return base_msg

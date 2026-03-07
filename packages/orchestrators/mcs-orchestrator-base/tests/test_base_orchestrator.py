@@ -1,4 +1,4 @@
-"""Tests for BaseOrchestrator + ResolutionStrategies."""
+"""Tests for BaseOrchestrator + ToolLayer pipeline."""
 
 from __future__ import annotations
 
@@ -10,8 +10,11 @@ import pytest
 from mcs.driver.core import MCSToolDriver, Tool, ToolParameter, DriverMeta, DriverBinding
 from mcs.orchestrator.base import (
     BaseOrchestrator,
-    NamespacingStrategy,
-    ToolSwitchingStrategy,
+    ToolLayer,
+    ToolPipeline,
+    FlatCollector,
+    NamespacingLayer,
+    ToolSwitchingLayer,
 )
 
 
@@ -85,17 +88,17 @@ class TestDriverManagement:
         assert orch.remove_driver("nope") is None
 
 
-# -- NamespacingStrategy ------------------------------------------------------
+# -- NamespacingLayer ---------------------------------------------------------
 
-class TestNamespacingStrategy:
+class TestNamespacingLayer:
     def test_single_driver_no_prefix(self):
-        orch = BaseOrchestrator(resolution_strategy=NamespacingStrategy())
+        orch = BaseOrchestrator()
         orch.add_driver(_driver_ab(), label="alpha")
         names = [t.name for t in orch.list_tools()]
         assert names == ["tool_a", "tool_b"]
 
     def test_multiple_drivers_prefixed(self):
-        orch = BaseOrchestrator(resolution_strategy=NamespacingStrategy())
+        orch = BaseOrchestrator()
         orch.add_driver(_driver_ab(), label="alpha")
         orch.add_driver(_driver_c(), label="beta")
         names = [t.name for t in orch.list_tools()]
@@ -104,85 +107,191 @@ class TestNamespacingStrategy:
         assert "beta__tool_c" in names
 
     def test_descriptions_prefixed(self):
-        orch = BaseOrchestrator(resolution_strategy=NamespacingStrategy())
+        orch = BaseOrchestrator()
         orch.add_driver(_driver_ab(), label="alpha")
         orch.add_driver(_driver_c(), label="beta")
         tools = {t.name: t for t in orch.list_tools()}
         assert tools["beta__tool_c"].description.startswith("[beta]")
 
     def test_execute_namespaced(self):
-        orch = BaseOrchestrator(resolution_strategy=NamespacingStrategy())
+        orch = BaseOrchestrator()
         orch.add_driver(_driver_ab(), label="alpha")
         orch.add_driver(_driver_c(), label="beta")
         assert orch.execute_tool("alpha__tool_a", {}) == "result_a"
         assert orch.execute_tool("beta__tool_c", {}) == "result_c"
 
     def test_execute_unknown_raises(self):
-        orch = BaseOrchestrator(resolution_strategy=NamespacingStrategy())
+        orch = BaseOrchestrator()
         orch.add_driver(_driver_ab(), label="alpha")
         with pytest.raises(ValueError, match="No tool"):
             orch.execute_tool("nonexistent", {})
 
     def test_fallback_to_original_name(self):
-        orch = BaseOrchestrator(resolution_strategy=NamespacingStrategy())
+        orch = BaseOrchestrator()
         orch.add_driver(_driver_ab(), label="alpha")
         assert orch.execute_tool("tool_a", {}) == "result_a"
 
 
-# -- ToolSwitchingStrategy ---------------------------------------------------
+# -- ToolSwitchingLayer ------------------------------------------------------
 
-class TestToolSwitchingStrategy:
+class TestToolSwitchingLayer:
     def test_auto_active_with_single_driver(self):
-        strategy = ToolSwitchingStrategy()
-        orch = BaseOrchestrator(resolution_strategy=strategy)
+        layer = ToolSwitchingLayer()
+        orch = BaseOrchestrator(resolution_strategy=ToolPipeline(layers=[layer]))
         orch.add_driver(_driver_ab(), label="alpha")
         names = [t.name for t in orch.list_tools()]
         assert names == ["tool_a", "tool_b"]
 
     def test_no_active_with_multiple_raises(self):
-        strategy = ToolSwitchingStrategy()
-        orch = BaseOrchestrator(resolution_strategy=strategy)
+        layer = ToolSwitchingLayer()
+        orch = BaseOrchestrator(resolution_strategy=ToolPipeline(layers=[layer]))
         orch.add_driver(_driver_ab(), label="alpha")
         orch.add_driver(_driver_c(), label="beta")
         with pytest.raises(ValueError, match="No active driver"):
             orch.list_tools()
 
     def test_set_active_switches(self):
-        strategy = ToolSwitchingStrategy()
-        orch = BaseOrchestrator(resolution_strategy=strategy)
+        layer = ToolSwitchingLayer()
+        orch = BaseOrchestrator(resolution_strategy=ToolPipeline(layers=[layer]))
         orch.add_driver(_driver_ab(), label="alpha")
         orch.add_driver(_driver_c(), label="beta")
 
-        strategy.set_active("alpha")
+        layer.set_active("alpha")
         assert [t.name for t in orch.list_tools()] == ["tool_a", "tool_b"]
 
-        strategy.set_active("beta")
+        layer.set_active("beta")
         assert [t.name for t in orch.list_tools()] == ["tool_c"]
 
     def test_execute_active_only(self):
-        strategy = ToolSwitchingStrategy()
-        orch = BaseOrchestrator(resolution_strategy=strategy)
+        layer = ToolSwitchingLayer()
+        orch = BaseOrchestrator(resolution_strategy=ToolPipeline(layers=[layer]))
         orch.add_driver(_driver_ab(), label="alpha")
         orch.add_driver(_driver_c(), label="beta")
 
-        strategy.set_active("beta")
+        layer.set_active("beta")
         assert orch.execute_tool("tool_c", {}) == "result_c"
 
         with pytest.raises(ValueError, match="not found in active"):
             orch.execute_tool("tool_a", {})
 
     def test_invalid_active_label_raises(self):
-        strategy = ToolSwitchingStrategy()
-        orch = BaseOrchestrator(resolution_strategy=strategy)
+        layer = ToolSwitchingLayer()
+        orch = BaseOrchestrator(resolution_strategy=ToolPipeline(layers=[layer]))
         orch.add_driver(_driver_ab(), label="alpha")
-        strategy.set_active("nope")
+        layer.set_active("nope")
         with pytest.raises(ValueError, match="not found in registry"):
             orch.list_tools()
 
     def test_strategy_accessible_via_property(self):
-        strategy = ToolSwitchingStrategy()
-        orch = BaseOrchestrator(resolution_strategy=strategy)
-        assert orch.resolution_strategy is strategy
+        pipeline = ToolPipeline(layers=[ToolSwitchingLayer()])
+        orch = BaseOrchestrator(resolution_strategy=pipeline)
+        assert orch.resolution_strategy is pipeline
+
+
+# -- FlatCollector -----------------------------------------------------------
+
+class TestFlatCollector:
+    def test_collects_all_tools(self):
+        fc = FlatCollector()
+        labeled = {"a": _driver_ab(), "b": _driver_c()}
+        tools = fc.list_tools(labeled)
+        assert len(tools) == 3
+
+    def test_execute_dispatches(self):
+        fc = FlatCollector()
+        labeled = {"a": _driver_ab(), "b": _driver_c()}
+        assert fc.execute_tool(labeled, "tool_a", {}) == "result_a"
+        assert fc.execute_tool(labeled, "tool_c", {}) == "result_c"
+
+    def test_unknown_tool_raises(self):
+        fc = FlatCollector()
+        with pytest.raises(ValueError, match="No tool"):
+            fc.execute_tool({"a": _driver_ab()}, "nope", {})
+
+
+# -- ToolPipeline: composition -----------------------------------------------
+
+class TestToolPipeline:
+    def test_empty_pipeline_uses_flat_collector(self):
+        pipeline = ToolPipeline()
+        labeled = {"a": _driver_ab()}
+        assert [t.name for t in pipeline.list_tools(labeled)] == ["tool_a", "tool_b"]
+        assert pipeline.execute_tool(labeled, "tool_a", {}) == "result_a"
+
+    def test_single_layer(self):
+        pipeline = ToolPipeline(layers=[NamespacingLayer()])
+        labeled = {"a": _driver_ab(), "b": _driver_c()}
+        names = [t.name for t in pipeline.list_tools(labeled)]
+        assert "a__tool_a" in names
+        assert "b__tool_c" in names
+
+    def test_layers_property(self):
+        ns = NamespacingLayer()
+        pipeline = ToolPipeline(layers=[ns])
+        assert pipeline.layers == (ns,)
+
+    def test_get_instructions_empty(self):
+        pipeline = ToolPipeline(layers=[NamespacingLayer()])
+        assert pipeline.get_instructions() == ""
+
+    def test_chained_layers_execute(self):
+        """A passthrough layer wrapping NamespacingLayer still routes correctly."""
+        passthrough = ToolLayer()
+        ns = NamespacingLayer()
+        pipeline = ToolPipeline(layers=[ns, passthrough])
+        labeled = {"a": _driver_ab(), "b": _driver_c()}
+        assert pipeline.execute_tool(labeled, "a__tool_a", {}) == "result_a"
+
+
+# -- Custom layer with synthetic tools ---------------------------------------
+
+class _DoubleLayer(ToolLayer):
+    """Test layer that injects a synthetic 'double' tool."""
+
+    def list_tools(self, labeled):
+        tools = self._inner.list_tools(labeled)
+        tools.append(Tool(name="double", description="Doubles a number", parameters=[]))
+        return tools
+
+    def execute_tool(self, labeled, tool_name, arguments):
+        if tool_name == "double":
+            return arguments.get("n", 0) * 2
+        return self._inner.execute_tool(labeled, tool_name, arguments)
+
+    def get_instructions(self):
+        return "Use 'double' to double a number."
+
+
+class TestCustomLayer:
+    def test_synthetic_tool_in_list(self):
+        pipeline = ToolPipeline(layers=[_DoubleLayer()])
+        labeled = {"a": _driver_ab()}
+        names = [t.name for t in pipeline.list_tools(labeled)]
+        assert "double" in names
+        assert "tool_a" in names
+
+    def test_synthetic_tool_executes(self):
+        pipeline = ToolPipeline(layers=[_DoubleLayer()])
+        labeled = {"a": _driver_ab()}
+        assert pipeline.execute_tool(labeled, "double", {"n": 5}) == 10
+
+    def test_real_tool_still_works(self):
+        pipeline = ToolPipeline(layers=[_DoubleLayer()])
+        labeled = {"a": _driver_ab()}
+        assert pipeline.execute_tool(labeled, "tool_a", {}) == "result_a"
+
+    def test_get_instructions(self):
+        pipeline = ToolPipeline(layers=[_DoubleLayer()])
+        assert "double" in pipeline.get_instructions()
+
+    def test_layer_wrapping_namespacing(self):
+        pipeline = ToolPipeline(layers=[NamespacingLayer(), _DoubleLayer()])
+        labeled = {"a": _driver_ab(), "b": _driver_c()}
+        names = [t.name for t in pipeline.list_tools(labeled)]
+        assert "a__tool_a" in names
+        assert "double" in names
+        assert pipeline.execute_tool(labeled, "double", {"n": 3}) == 6
+        assert pipeline.execute_tool(labeled, "a__tool_a", {}) == "result_a"
 
 
 # -- DriverBase integration ---------------------------------------------------
@@ -200,6 +309,13 @@ class TestDriverBaseIntegration:
         orch.add_driver(_driver_ab(), label="alpha")
         msg = orch.get_driver_system_message()
         assert "tool_a" in msg
+
+    def test_system_message_includes_layer_instructions(self):
+        pipeline = ToolPipeline(layers=[_DoubleLayer()])
+        orch = BaseOrchestrator(resolution_strategy=pipeline)
+        orch.add_driver(_driver_ab(), label="alpha")
+        msg = orch.get_driver_system_message()
+        assert "double" in msg
 
     def test_process_llm_response_executes(self):
         orch = BaseOrchestrator()

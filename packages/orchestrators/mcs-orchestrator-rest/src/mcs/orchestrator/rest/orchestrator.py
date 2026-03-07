@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from mcs.driver.core import DriverMeta, DriverBinding
-from mcs.orchestrator.base import BaseOrchestrator, ResolutionStrategy
+from mcs.orchestrator.base import BaseOrchestrator
+from mcs.orchestrator.base.strategies import ResolutionStrategy
 
 logger = logging.getLogger(__name__)
 

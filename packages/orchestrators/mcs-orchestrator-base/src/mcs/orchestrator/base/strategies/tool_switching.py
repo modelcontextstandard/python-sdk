@@ -1,21 +1,24 @@
-"""Tool-switching resolution strategy.
+"""Tool-switching layer.
 
 Only one driver is active at any time.  The caller switches explicitly
 via ``set_active(label)``.  ``list_tools()`` exposes only the active
-driver's tools; ``resolve()`` searches only the active driver.
+driver's tools; ``execute_tool()`` dispatches only to the active driver.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from mcs.driver.core import MCSToolDriver, Tool
 
-from .strategy import ResolutionStrategy
+from .layer import ToolLayer
 
 
-class ToolSwitchingStrategy(ResolutionStrategy):
+class ToolSwitchingLayer(ToolLayer):
     """Only the active driver's tools are visible."""
 
-    def __init__(self) -> None:
+    def __init__(self, inner=None) -> None:
+        super().__init__(inner)
         self._active_label: str | None = None
 
     @property
@@ -26,8 +29,8 @@ class ToolSwitchingStrategy(ResolutionStrategy):
         """Set the active driver by *label*.
 
         Validation against the actual driver registry happens at
-        resolution time, not here, so the strategy stays stateless
-        with respect to the registry.
+        execution time, not here, so the layer stays stateless with
+        respect to the registry.
         """
         self._active_label = label
 
@@ -52,12 +55,15 @@ class ToolSwitchingStrategy(ResolutionStrategy):
         _, driver = self._active_driver(labeled)
         return driver.list_tools()
 
-    def resolve(
-        self, labeled: dict[str, MCSToolDriver], tool_name: str,
-    ) -> tuple[MCSToolDriver, str]:
+    def execute_tool(
+        self,
+        labeled: dict[str, MCSToolDriver],
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> Any:
         _, driver = self._active_driver(labeled)
         if any(t.name == tool_name for t in driver.list_tools()):
-            return driver, tool_name
+            return driver.execute_tool(tool_name, arguments)
         raise ValueError(
             f"Tool '{tool_name}' not found in active driver "
             f"'{self._active_label}'."
