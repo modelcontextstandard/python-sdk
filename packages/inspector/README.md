@@ -11,8 +11,14 @@ and execute them interactively -- all from the terminal.
 # Core inspector (bring your own driver)
 pip install mcs-inspector
 
-# With IMAP driver
-pip install mcs-inspector[imap]
+# With mail-reading driver (IMAP)
+pip install mcs-inspector[mailread]
+
+# With mail-sending driver (SMTP)
+pip install mcs-inspector[mailsend]
+
+# With composite mail driver (read + send)
+pip install mcs-inspector[mail]
 
 # With REST/OpenAPI driver
 pip install mcs-inspector[rest]
@@ -24,14 +30,21 @@ pip install mcs-inspector[all]
 ## Usage
 
 ```bash
-# Inspect an IMAP mailbox
-mcs-inspect imap --host imap.example.com --user alice@example.com
+# Inspect a mailbox (read)
+mcs-inspect mailread --host imap.example.com --user alice@example.com
+
+# Inspect a mail-sending server
+mcs-inspect mailsend --host smtp.example.com --user alice@example.com
+
+# Inspect both read + send as a composite driver
+mcs-inspect mail --read-host imap.example.com --read-user alice@example.com \
+                 --send-host smtp.example.com --send-user alice@example.com
 
 # Inspect a REST API via OpenAPI spec
 mcs-inspect rest https://api.example.com/openapi.json
 
 # Same via python -m
-python -m mcs.inspector imap --host imap.example.com --user alice@example.com
+python -m mcs.inspector mailread --host imap.example.com --user alice@example.com
 ```
 
 ## What it does
@@ -45,12 +58,17 @@ python -m mcs.inspector imap --host imap.example.com --user alice@example.com
 
 ```python
 from mcs.inspector import run_inspector
-from mcs.driver.imap import ImapToolDriver
+from mcs.driver.mailread import MailreadToolDriver
 
-td = ImapToolDriver(host="...", user="...", password="...")
-run_inspector(td, title="My IMAP Inspector")
+td = MailreadToolDriver(host="...", user="...", password="...")
+run_inspector(td, title="Mailread Inspector")
 ```
+
+## Links
+
+- **Homepage:** <https://www.modelcontextstandard.io>
+- **Source:** <https://github.com/modelcontextstandard/python-sdk>
 
 ## License
 
-Apache 2.0
+Apache-2.0
