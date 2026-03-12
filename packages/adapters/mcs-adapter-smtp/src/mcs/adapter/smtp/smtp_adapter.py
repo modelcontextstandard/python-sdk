@@ -12,6 +12,7 @@ import json
 import logging
 import smtplib
 from email.message import EmailMessage
+from email.utils import formataddr
 from typing import Sequence
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,10 @@ class SmtpAdapter:
     sender :
         Default sender address (``From`` header).  When *None*, *user*
         is used as the sender.
+    sender_name :
+        Display name for the sender (e.g. ``"Danny Gerst"``).  When set,
+        the ``From`` header is formatted as ``"Danny Gerst <email>"``
+        following RFC 5322.
     """
 
     def __init__(
@@ -51,13 +56,19 @@ class SmtpAdapter:
         ssl: bool = False,
         starttls: bool = True,
         sender: str | None = None,
+        sender_name: str | None = None,
     ) -> None:
         self._host = host
         self._user = user
         self._password = password
         self._ssl = ssl
         self._starttls = starttls and not ssl
-        self._sender = sender or user
+        self._sender_addr = sender or user
+        self._sender = (
+            formataddr((sender_name, self._sender_addr))
+            if sender_name
+            else self._sender_addr
+        )
 
         if port is not None:
             self._port = port
@@ -106,6 +117,8 @@ class SmtpAdapter:
             msg["Cc"] = cc
         if reply_to:
             msg["Reply-To"] = reply_to
+        # LLMs often emit literal "\n" instead of real newlines.
+        body = body.replace("\\n", "\n")
         msg.set_content(body)
 
         all_recipients = self._parse_recipients(to)

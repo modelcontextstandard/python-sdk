@@ -31,6 +31,7 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     g_send.add_argument("--send-ssl", action="store_true", help="Use implicit SSL for sending")
     g_send.add_argument("--send-no-starttls", action="store_true", help="Disable STARTTLS for sending")
     g_send.add_argument("--send-sender", default=None, help="Sender address (default: send-user)")
+    g_send.add_argument("--send-sender-name", default=None, help="Display name for the sender")
     g_send.add_argument("--send-adapter", default="smtp", help="Send adapter (default: smtp)")
 
 
@@ -63,6 +64,7 @@ def run(args: argparse.Namespace) -> None:
                 host=args.send_host, user=args.send_user, password=send_pw,
                 port=args.send_port, ssl=args.send_ssl, starttls=not args.send_no_starttls,
                 sender=args.send_sender,
+                sender_name=args.send_sender_name,
             ),
         )
     except Exception as exc:

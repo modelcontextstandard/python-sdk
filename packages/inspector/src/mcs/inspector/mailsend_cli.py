@@ -20,6 +20,7 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("--ssl", action="store_true", help="Use implicit SSL (port 465)")
     p.add_argument("--no-starttls", action="store_true", help="Disable STARTTLS upgrade")
     p.add_argument("--sender", default=None, help="Sender address (default: login user)")
+    p.add_argument("--sender-name", default=None, help="Display name for the sender (e.g. 'Danny Gerst')")
     p.add_argument("--adapter", default="smtp", help="Adapter to use (default: smtp)")
 
 
@@ -47,6 +48,7 @@ def run(args: argparse.Namespace) -> None:
             ssl=args.ssl,
             starttls=not args.no_starttls,
             sender=args.sender,
+            sender_name=args.sender_name,
         )
     except Exception as exc:
         console.print(f"[red bold]Failed to create driver:[/red bold] {exc}")
