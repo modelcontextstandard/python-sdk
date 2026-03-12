@@ -167,7 +167,10 @@ class SmtpAdapter:
         if reply_to:
             msg["Reply-To"] = reply_to
 
+        # LLMs often emit literal "\n" instead of real newlines.
+        html_body = html_body.replace("\\n", "\n")
         if text_body:
+            text_body = text_body.replace("\\n", "\n")
             msg.set_content(text_body)
             msg.add_alternative(html_body, subtype="html")
         else:

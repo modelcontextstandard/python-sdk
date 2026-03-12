@@ -62,7 +62,7 @@ _TOOLS: list[Tool] = [
                 name="body",
                 description="Plain-text message body.",
                 required=True,
-                schema={"type": "string"},
+                schema={"type": "string", "format": "multiline"},
             ),
             ToolParameter(
                 name="cc",
@@ -108,13 +108,13 @@ _TOOLS: list[Tool] = [
                 name="html_body",
                 description="HTML message body.",
                 required=True,
-                schema={"type": "string"},
+                schema={"type": "string", "format": "multiline"},
             ),
             ToolParameter(
                 name="text_body",
                 description="Plain-text fallback body (default: none).",
                 required=False,
-                schema={"type": "string", "default": ""},
+                schema={"type": "string", "default": "", "format": "multiline"},
             ),
             ToolParameter(
                 name="cc",

@@ -108,6 +108,20 @@ def _show_tool_detail(td: MCSToolDriver, tool_name: str) -> None:
     console.print(ptable)
 
 
+def _read_multiline() -> str:
+    """Read multiline input until the user enters a single '.' on a line."""
+    lines: list[str] = []
+    while True:
+        try:
+            line = console.input("  [dim]...[/dim] ")
+        except (EOFError, KeyboardInterrupt):
+            break
+        if line.strip() == ".":
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _prompt_arguments(tool: Tool) -> dict[str, Any]:
     """Interactively prompt for tool arguments."""
     if not tool.parameters:
@@ -120,6 +134,8 @@ def _prompt_arguments(tool: Tool) -> dict[str, Any]:
         schema = param.schema or {}
         default = schema.get("default")
         ptype = schema.get("type", "string")
+        fmt = schema.get("format", "")
+        is_multiline = fmt == "multiline"
         req_marker = "[green]*[/green]" if param.required else " "
 
         hint_parts: list[str] = []
@@ -129,7 +145,11 @@ def _prompt_arguments(tool: Tool) -> dict[str, Any]:
             hint_parts.append(f"default={default}")
         hint = f" [dim]({', '.join(hint_parts)})[/dim]" if hint_parts else ""
 
-        raw = console.input(f"  {req_marker} {param.name}{hint}: ").strip()
+        if is_multiline:
+            console.print(f"  {req_marker} {param.name}{hint}: [dim](multiline -- end with '.' on its own line)[/dim]")
+            raw = _read_multiline()
+        else:
+            raw = console.input(f"  {req_marker} {param.name}{hint}: ").strip()
 
         if not raw:
             if param.required and default is None:
