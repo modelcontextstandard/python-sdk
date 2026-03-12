@@ -11,22 +11,26 @@ these methods.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Protocol, Union, runtime_checkable
 
 
 @runtime_checkable
 class MailboxPort(Protocol):
-    """Contract that any mail-reading adapter must satisfy."""
+    """Contract that any mail-reading adapter must satisfy.
+
+    ``uid`` is ``int | str`` to support both IMAP (integer UIDs) and
+    REST APIs like Gmail (string message IDs).
+    """
 
     def list_folders(self) -> str: ...
 
     def list_messages(self, folder: str = "INBOX", *, limit: int = 20) -> str: ...
 
-    def fetch_message(self, uid: int, folder: str = "INBOX") -> str: ...
+    def fetch_message(self, uid: Union[int, str], folder: str = "INBOX") -> str: ...
 
-    def move_message(self, uid: int, destination: str, folder: str = "INBOX") -> str: ...
+    def move_message(self, uid: Union[int, str], destination: str, folder: str = "INBOX") -> str: ...
 
-    def set_flags(self, uid: int, flags: str, *, remove: bool = False, folder: str = "INBOX") -> str: ...
+    def set_flags(self, uid: Union[int, str], flags: str, *, remove: bool = False, folder: str = "INBOX") -> str: ...
 
     def create_folder(self, name: str) -> str: ...
 

@@ -185,7 +185,7 @@ class GmailAdapter:
 
         return json.dumps(messages)
 
-    def fetch_message(self, uid: str, folder: str = "INBOX") -> str:
+    def fetch_message(self, uid: int | str, folder: str = "INBOX") -> str:
         """Fetch a full message by ID."""
         msg = self._get(f"/messages/{uid}", params={"format": "full"})
         headers = msg.get("payload", {}).get("headers", [])
@@ -229,7 +229,7 @@ class GmailAdapter:
 
         return json.dumps(messages)
 
-    def move_message(self, uid: str, destination: str, folder: str = "INBOX") -> str:
+    def move_message(self, uid: int | str, destination: str, folder: str = "INBOX") -> str:
         """Move a message by adding/removing labels."""
         body: dict[str, Any] = {
             "addLabelIds": [destination],
@@ -241,7 +241,7 @@ class GmailAdapter:
             "labels": result.get("labelIds", []),
         })
 
-    def set_flags(self, uid: str, flags: str, *, remove: bool = False, folder: str = "INBOX") -> str:
+    def set_flags(self, uid: int | str, flags: str, *, remove: bool = False, folder: str = "INBOX") -> str:
         """Set or remove flags (mapped to Gmail labels).
 
         Supports IMAP-style flags (``\\Seen``, ``\\Flagged``, ``\\Deleted``)

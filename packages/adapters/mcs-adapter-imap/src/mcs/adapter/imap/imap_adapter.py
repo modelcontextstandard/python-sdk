@@ -187,7 +187,7 @@ class ImapAdapter:
 
             return json.dumps(messages, ensure_ascii=False)
 
-    def fetch_message(self, uid: int, folder: str = "INBOX") -> str:
+    def fetch_message(self, uid: int | str, folder: str = "INBOX") -> str:
         """Fetch the full message identified by *uid*.
 
         Returns JSON with ``{uid, subject, from, to, date, body, flags}``.
@@ -218,7 +218,7 @@ class ImapAdapter:
                 "flags": flags_str,
             }, ensure_ascii=False)
 
-    def move_message(self, uid: int, destination: str, folder: str = "INBOX") -> str:
+    def move_message(self, uid: int | str, destination: str, folder: str = "INBOX") -> str:
         """Move a message to *destination* folder via COPY + delete."""
         with self._connection() as conn:
             conn.select(f'"{folder}"')
@@ -229,7 +229,7 @@ class ImapAdapter:
             conn.expunge()
             return json.dumps({"moved": uid, "from": folder, "to": destination})
 
-    def set_flags(self, uid: int, flags: str, *, remove: bool = False, folder: str = "INBOX") -> str:
+    def set_flags(self, uid: int | str, flags: str, *, remove: bool = False, folder: str = "INBOX") -> str:
         """Add or remove IMAP flags on a message.
 
         *flags* is a space-separated string, e.g. ``\\Seen \\Flagged``.

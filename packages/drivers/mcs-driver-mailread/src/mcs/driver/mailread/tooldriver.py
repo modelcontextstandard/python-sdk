@@ -73,7 +73,7 @@ _TOOLS: list[Tool] = [
             "Fetch the full message identified by its UID, including body text."
         ),
         parameters=[
-            ToolParameter(name="uid", description="Message UID.", required=True, schema={"type": "integer"}),
+            ToolParameter(name="uid", description="Message UID.", required=True, schema={"type": "string"}),
             ToolParameter(
                 name="folder",
                 description="Folder containing the message (default: INBOX).",
@@ -115,7 +115,7 @@ _TOOLS: list[Tool] = [
         title="Move a message to another folder",
         description="Move a message from one folder to another.",
         parameters=[
-            ToolParameter(name="uid", description="Message UID.", required=True, schema={"type": "integer"}),
+            ToolParameter(name="uid", description="Message UID.", required=True, schema={"type": "string"}),
             ToolParameter(name="destination", description="Target folder name.", required=True, schema={"type": "string"}),
             ToolParameter(
                 name="folder",
@@ -133,7 +133,7 @@ _TOOLS: list[Tool] = [
             r"\Seen, \Flagged, \Answered, \Deleted."
         ),
         parameters=[
-            ToolParameter(name="uid", description="Message UID.", required=True, schema={"type": "integer"}),
+            ToolParameter(name="uid", description="Message UID.", required=True, schema={"type": "string"}),
             ToolParameter(
                 name="flags",
                 description=r"Space-separated flags, e.g. '\Seen \Flagged'.",
@@ -211,7 +211,7 @@ class MailreadToolDriver(MCSToolDriver):
 
         if tool_name == "fetch_message":
             return self._adapter.fetch_message(
-                uid=int(arguments["uid"]),
+                uid=arguments["uid"],
                 folder=arguments.get("folder", "INBOX"),
             )
 
@@ -224,14 +224,14 @@ class MailreadToolDriver(MCSToolDriver):
 
         if tool_name == "move_message":
             return self._adapter.move_message(
-                uid=int(arguments["uid"]),
+                uid=arguments["uid"],
                 destination=arguments["destination"],
                 folder=arguments.get("folder", "INBOX"),
             )
 
         if tool_name == "set_flags":
             return self._adapter.set_flags(
-                uid=int(arguments["uid"]),
+                uid=arguments["uid"],
                 flags=arguments["flags"],
                 remove=bool(arguments.get("remove", False)),
                 folder=arguments.get("folder", "INBOX"),
