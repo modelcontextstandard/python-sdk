@@ -1,21 +1,38 @@
-"""Pluggable resolution strategies for orchestrators.
+"""Pluggable resolution strategies and composable layers for orchestrators.
 
-Shipped strategies:
+Shipped layers:
 
-- ``NamespacingStrategy`` -- prefix tool names with driver labels
-- ``ToolSwitchingStrategy`` -- only one driver active at a time
+- ``NamespacingLayer`` -- prefix tool names with driver labels
+- ``ToolSwitchingLayer`` -- only one driver active at a time
+- ``PaginationLayer`` -- paginate large tool lists
+- ``DetailLoadingLayer`` -- abbreviated descriptions with on-demand detail
 
-Planned (not yet implemented):
+Composition helpers:
 
-- **PriorityRoutingStrategy** -- resolve name collisions by driver priority
-- **ContextRoutingStrategy** -- auto-select driver based on request context
+- ``ToolPipeline`` -- immutable decorator chain of ``ToolLayer`` instances
+- ``FlatCollector`` -- innermost base that collects tools from all drivers
 
-To add a custom strategy, subclass ``ResolutionStrategy`` and implement
-``list_tools()`` and ``resolve()``.
+To add a custom layer, subclass ``ToolLayer`` and override
+``list_tools()``, ``execute_tool()``, and optionally
+``get_instructions()``.
 """
 
 from .strategy import ResolutionStrategy
-from .namespacing import NamespacingStrategy
-from .tool_switching import ToolSwitchingStrategy
+from .layer import ToolLayer
+from .flat_collector import FlatCollector
+from .pipeline import ToolPipeline
+from .namespacing import NamespacingLayer
+from .tool_switching import ToolSwitchingLayer
+from .pagination import PaginationLayer
+from .detail_loading import DetailLoadingLayer
 
-__all__ = ["ResolutionStrategy", "NamespacingStrategy", "ToolSwitchingStrategy"]
+__all__ = [
+    "ResolutionStrategy",
+    "ToolLayer",
+    "FlatCollector",
+    "ToolPipeline",
+    "NamespacingLayer",
+    "ToolSwitchingLayer",
+    "PaginationLayer",
+    "DetailLoadingLayer",
+]
