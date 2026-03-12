@@ -1,4 +1,4 @@
-"""MCS Hybrid Driver for IMAP mailbox access.
+"""MCS Hybrid Driver for sending e-mail.
 
 Inherits prompt generation and LLM response parsing from ``DriverBase``.
 Only adds ToolDriver delegation.
@@ -22,40 +22,36 @@ from mcs.driver.core import (
 
 
 @dataclass(frozen=True)
-class _ImapDriverMeta(DriverMeta):
-    id: str = "c4e8f1a2-imap-4002-9000-imapdriver0001"
-    name: str = "IMAP MCS Driver"
+class _MailsendDriverMeta(DriverMeta):
+    id: str = "c4e8f1a2-mail-4004-9000-mailsenddrv001"
+    name: str = "Mailsend MCS Driver"
     version: str = "0.1.0"
     bindings: tuple[DriverBinding, ...] = (
-        DriverBinding(capability="imap", adapter="imap", spec_format="Custom"),
+        DriverBinding(capability="mailsend", adapter="*", spec_format="Custom"),
     )
     supported_llms: tuple[str, ...] = ("*",)
     capabilities: tuple[str, ...] = ("standalone", "orchestratable")
 
 
-class ImapDriver(DriverBase):
-    """Hybrid IMAP driver: ``DriverBase`` prompt engine + ``ImapToolDriver``.
+class MailsendDriver(DriverBase):
+    """Hybrid mail-sending driver: ``DriverBase`` prompt engine + ``MailsendToolDriver``.
 
     Use this driver standalone (with ``get_driver_system_message()`` and
     ``process_llm_response()``) or plug it into an Orchestrator as a
     composable ToolDriver.
     """
 
-    meta: DriverMeta = _ImapDriverMeta()
+    meta: DriverMeta = _MailsendDriverMeta()
 
     def __init__(
         self,
         *,
-        host: str | None = None,
-        user: str | None = None,
-        password: str | None = None,
-        port: int | None = None,
-        ssl: bool = True,
-        starttls: bool = False,
+        adapter: str = "smtp",
         custom_tool_description: str | None = None,
         custom_driver_system_message: str | None = None,
         prompt_strategy: PromptStrategy | None = None,
         _tooldriver: MCSToolDriver | None = None,
+        **adapter_kwargs: Any,
     ) -> None:
         super().__init__(
             prompt_strategy=prompt_strategy,
@@ -65,16 +61,9 @@ class ImapDriver(DriverBase):
         if _tooldriver is not None:
             self._td = _tooldriver
         else:
-            from mcs.driver.imap.tooldriver import ImapToolDriver
+            from mcs.driver.mailsend.tooldriver import MailsendToolDriver
 
-            self._td = ImapToolDriver(
-                host=host,
-                user=user,
-                password=password,
-                port=port,
-                ssl=ssl,
-                starttls=starttls,
-            )
+            self._td = MailsendToolDriver(adapter=adapter, **adapter_kwargs)
 
     def list_tools(self) -> list[Tool]:
         return self._td.list_tools()

@@ -5,7 +5,12 @@ from __future__ import annotations
 import argparse
 import sys
 
-from mcs.inspector import imap_cli, rest_cli
+from mcs.inspector import (
+    mail_cli,
+    mailread_cli,
+    mailsend_cli,
+    rest_cli,
+)
 
 
 def main() -> None:
@@ -15,7 +20,9 @@ def main() -> None:
     )
     subparsers = parser.add_subparsers(dest="driver", help="Driver to inspect")
 
-    imap_cli.add_parser(subparsers)
+    mailread_cli.add_parser(subparsers)
+    mailsend_cli.add_parser(subparsers)
+    mail_cli.add_parser(subparsers)
     rest_cli.add_parser(subparsers)
 
     args = parser.parse_args()
@@ -25,7 +32,9 @@ def main() -> None:
         sys.exit(0)
 
     dispatch = {
-        "imap": imap_cli.run,
+        "mailread": mailread_cli.run,
+        "mailsend": mailsend_cli.run,
+        "mail": mail_cli.run,
         "rest": rest_cli.run,
     }
 

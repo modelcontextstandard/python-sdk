@@ -3,13 +3,13 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "mcs-driver-imap"
+name            = "mcs-driver-mailread"
 version         = "0.1.0"
-description     = "IMAP driver for the Model Context Standard -- lets an LLM read and organise e-mail."
+description     = "Mail-reading driver for the Model Context Standard -- lets an LLM read and organise e-mail."
 readme          = "README.md"
 requires-python = ">=3.9"
 license         = "Apache-2.0"
-keywords        = ["mcs", "modelcontextstandard", "driver", "imap", "email"]
+keywords        = ["mcs", "modelcontextstandard", "driver", "mail", "email", "imap"]
 authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
 license-files   = ["LICENSE"]
 classifiers     = [
@@ -21,7 +21,7 @@ classifiers     = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Topic :: Communications :: Email :: Post-Office :: IMAP",
+    "Topic :: Communications :: Email",
     "Topic :: Software Development :: Libraries",
     "Typing :: Typed",
 ]
@@ -30,10 +30,10 @@ urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://
 
 dependencies = [
     "mcs-driver-core>=0.2",
-    "mcs-adapter-imap>=0.1",
 ]
 
 [project.optional-dependencies]
+imap      = ["mcs-adapter-imap>=0.1"]
 inspector = ["mcs-inspector>=0.1"]
 
 [tool.uv.sources]

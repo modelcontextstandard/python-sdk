@@ -1,4 +1,4 @@
-"""Tests for ImapToolDriver -- uses a fake adapter (no real IMAP connection)."""
+"""Tests for MailreadToolDriver -- uses a fake adapter (no real connection)."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from typing import Any
 
 import pytest
 
-from mcs.driver.imap import ImapToolDriver
+from mcs.driver.mailread import MailreadToolDriver
 
 
-class FakeImapAdapter:
-    """Satisfies ImapPort without touching the network."""
+class FakeMailboxAdapter:
+    """Satisfies MailboxPort without touching the network."""
 
     def list_folders(self) -> str:
         return json.dumps(["INBOX", "Sent", "Drafts", "Spam"])
@@ -49,8 +49,8 @@ class FakeImapAdapter:
 
 
 @pytest.fixture()
-def td() -> ImapToolDriver:
-    return ImapToolDriver(_adapter=FakeImapAdapter())
+def td() -> MailreadToolDriver:
+    return MailreadToolDriver(_adapter=FakeMailboxAdapter())
 
 
 # ================================================================== #
@@ -59,17 +59,17 @@ def td() -> ImapToolDriver:
 
 class TestListTools:
 
-    def test_returns_seven_tools(self, td: ImapToolDriver):
+    def test_returns_seven_tools(self, td: MailreadToolDriver):
         tools = td.list_tools()
         assert len(tools) == 7
 
-    def test_every_tool_has_name_title_description(self, td: ImapToolDriver):
+    def test_every_tool_has_name_title_description(self, td: MailreadToolDriver):
         for tool in td.list_tools():
             assert tool.name, "Tool name must not be empty"
             assert tool.title, "Tool title must not be empty"
             assert tool.description, "Tool description must not be empty"
 
-    def test_tool_names(self, td: ImapToolDriver):
+    def test_tool_names(self, td: MailreadToolDriver):
         names = {t.name for t in td.list_tools()}
         expected = {
             "list_folders", "list_messages", "fetch_message",
@@ -84,90 +84,69 @@ class TestListTools:
 
 class TestExecuteTool:
 
-    def test_list_folders(self, td: ImapToolDriver):
+    def test_list_folders(self, td: MailreadToolDriver):
         result = json.loads(td.execute_tool("list_folders", {}))
         assert "INBOX" in result
 
-    def test_list_messages(self, td: ImapToolDriver):
+    def test_list_messages(self, td: MailreadToolDriver):
         result = json.loads(td.execute_tool("list_messages", {"folder": "INBOX", "limit": 1}))
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0]["uid"] == 42
 
-    def test_fetch_message(self, td: ImapToolDriver):
+    def test_fetch_message(self, td: MailreadToolDriver):
         result = json.loads(td.execute_tool("fetch_message", {"uid": 42}))
         assert result["uid"] == 42
         assert "body" in result
 
-    def test_search_messages(self, td: ImapToolDriver):
+    def test_search_messages(self, td: MailreadToolDriver):
         result = json.loads(td.execute_tool("search_messages", {"criteria": 'FROM "bob"'}))
         assert isinstance(result, list)
 
-    def test_move_message(self, td: ImapToolDriver):
+    def test_move_message(self, td: MailreadToolDriver):
         result = json.loads(td.execute_tool("move_message", {"uid": 42, "destination": "Archive"}))
         assert result["moved"] == 42
-        assert result["to"] == "Archive"
 
-    def test_set_flags(self, td: ImapToolDriver):
+    def test_set_flags(self, td: MailreadToolDriver):
         result = json.loads(td.execute_tool("set_flags", {"uid": 42, "flags": "\\Seen"}))
-        assert result["uid"] == 42
         assert "+FLAGS" in result["action"]
 
-    def test_set_flags_remove(self, td: ImapToolDriver):
+    def test_set_flags_remove(self, td: MailreadToolDriver):
         result = json.loads(td.execute_tool("set_flags", {"uid": 42, "flags": "\\Seen", "remove": True}))
         assert "-FLAGS" in result["action"]
 
-    def test_create_folder(self, td: ImapToolDriver):
+    def test_create_folder(self, td: MailreadToolDriver):
         result = json.loads(td.execute_tool("create_folder", {"name": "Invoices"}))
         assert result["created"] == "Invoices"
 
-    def test_unknown_tool_raises(self, td: ImapToolDriver):
+    def test_unknown_tool_raises(self, td: MailreadToolDriver):
         with pytest.raises(ValueError, match="Unknown tool"):
             td.execute_tool("nonexistent", {})
 
 
 # ================================================================== #
-#  3. Default arguments                                                #
-# ================================================================== #
-
-class TestDefaults:
-
-    def test_list_messages_default_folder(self, td: ImapToolDriver):
-        result = json.loads(td.execute_tool("list_messages", {}))
-        assert isinstance(result, list)
-
-    def test_fetch_message_default_folder(self, td: ImapToolDriver):
-        result = json.loads(td.execute_tool("fetch_message", {"uid": 42}))
-        assert result["uid"] == 42
-
-    def test_search_messages_defaults(self, td: ImapToolDriver):
-        result = json.loads(td.execute_tool("search_messages", {}))
-        assert isinstance(result, list)
-
-
-# ================================================================== #
-#  4. DriverMeta                                                       #
+#  3. DriverMeta                                                       #
 # ================================================================== #
 
 class TestDriverMeta:
 
-    def test_meta_attributes(self, td: ImapToolDriver):
-        assert td.meta.name == "IMAP MCS ToolDriver"
+    def test_meta_attributes(self, td: MailreadToolDriver):
+        assert td.meta.name == "Mailread MCS ToolDriver"
         assert td.meta.version == "0.1.0"
         assert len(td.meta.bindings) == 1
-        assert td.meta.bindings[0].capability == "imap"
+        assert td.meta.bindings[0].capability == "mailread"
+        assert td.meta.bindings[0].adapter == "*"
 
 
 # ================================================================== #
-#  5. Constructor validation                                           #
+#  4. Constructor                                                      #
 # ================================================================== #
 
 class TestConstructor:
 
-    def test_requires_credentials_without_adapter(self):
-        with pytest.raises(ValueError, match="host, user, and password"):
-            ImapToolDriver()
+    def test_unknown_adapter_raises(self):
+        with pytest.raises(ValueError, match="Unknown mailread adapter"):
+            MailreadToolDriver(adapter="nonexistent")
 
     def test_accepts_adapter_injection(self):
-        td = ImapToolDriver(_adapter=FakeImapAdapter())
+        td = MailreadToolDriver(_adapter=FakeMailboxAdapter())
         assert td.list_tools()

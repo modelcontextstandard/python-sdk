@@ -12,10 +12,13 @@ members = [
     "mcs-adapter-imap",
     "mcs-adapter-localfs",
     "mcs-adapter-smb",
+    "mcs-adapter-smtp",
     "mcs-driver-core",
     "mcs-driver-csv",
     "mcs-driver-filesystem",
-    "mcs-driver-imap",
+    "mcs-driver-mail",
+    "mcs-driver-mailread",
+    "mcs-driver-mailsend",
     "mcs-driver-rest",
     "mcs-examples",
     "mcs-inspector",
@@ -1530,6 +1533,11 @@ dependencies = [
 requires-dist = [{ name = "smbprotocol", specifier = ">=1.0" }]
 
 [[package]]
+name = "mcs-adapter-smtp"
+version = "0.1.0"
+source = { editable = "packages/adapters/mcs-adapter-smtp" }
+
+[[package]]
 name = "mcs-driver-core"
 version = "0.2.1"
 source = { editable = "packages/core" }
@@ -1584,11 +1592,72 @@ dependencies = [
 requires-dist = [{ name = "mcs-driver-core", editable = "packages/core" }]
 
 [[package]]
-name = "mcs-driver-imap"
+name = "mcs-driver-mail"
 version = "0.1.0"
-source = { editable = "packages/drivers/mcs-driver-imap" }
+source = { editable = "packages/drivers/mcs-driver-mail" }
 dependencies = [
+    { name = "mcs-driver-core" },
+    { name = "mcs-driver-mailread" },
+    { name = "mcs-driver-mailsend" },
+]
+
+[package.optional-dependencies]
+all = [
     { name = "mcs-adapter-imap" },
+    { name = "mcs-adapter-smtp" },
+    { name = "mcs-inspector" },
+]
+imap = [
+    { name = "mcs-adapter-imap" },
+]
+inspector = [
+    { name = "mcs-inspector" },
+]
+smtp = [
+    { name = "mcs-adapter-smtp" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcs-adapter-imap", marker = "extra == 'imap'", editable = "packages/adapters/mcs-adapter-imap" },
+    { name = "mcs-adapter-smtp", marker = "extra == 'smtp'", editable = "packages/adapters/mcs-adapter-smtp" },
+    { name = "mcs-driver-core", editable = "packages/core" },
+    { name = "mcs-driver-mail", extras = ["imap", "smtp", "inspector"], marker = "extra == 'all'", editable = "packages/drivers/mcs-driver-mail" },
+    { name = "mcs-driver-mailread", editable = "packages/drivers/mcs-driver-mailread" },
+    { name = "mcs-driver-mailsend", editable = "packages/drivers/mcs-driver-mailsend" },
+    { name = "mcs-inspector", marker = "extra == 'inspector'", editable = "packages/inspector" },
+]
+provides-extras = ["imap", "smtp", "inspector", "all"]
+
+[[package]]
+name = "mcs-driver-mailread"
+version = "0.1.0"
+source = { editable = "packages/drivers/mcs-driver-mailread" }
+dependencies = [
+    { name = "mcs-driver-core" },
+]
+
+[package.optional-dependencies]
+imap = [
+    { name = "mcs-adapter-imap" },
+]
+inspector = [
+    { name = "mcs-inspector" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcs-adapter-imap", marker = "extra == 'imap'", editable = "packages/adapters/mcs-adapter-imap" },
+    { name = "mcs-driver-core", editable = "packages/core" },
+    { name = "mcs-inspector", marker = "extra == 'inspector'", editable = "packages/inspector" },
+]
+provides-extras = ["imap", "inspector"]
+
+[[package]]
+name = "mcs-driver-mailsend"
+version = "0.1.0"
+source = { editable = "packages/drivers/mcs-driver-mailsend" }
+dependencies = [
     { name = "mcs-driver-core" },
 ]
 
@@ -1596,14 +1665,17 @@ dependencies = [
 inspector = [
     { name = "mcs-inspector" },
 ]
+smtp = [
+    { name = "mcs-adapter-smtp" },
+]
 
 [package.metadata]
 requires-dist = [
-    { name = "mcs-adapter-imap", editable = "packages/adapters/mcs-adapter-imap" },
+    { name = "mcs-adapter-smtp", marker = "extra == 'smtp'", editable = "packages/adapters/mcs-adapter-smtp" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-inspector", marker = "extra == 'inspector'", editable = "packages/inspector" },
 ]
-provides-extras = ["inspector"]
+provides-extras = ["smtp", "inspector"]
 
 [[package]]
 name = "mcs-driver-rest"
@@ -1672,11 +1744,17 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
-    { name = "mcs-driver-imap" },
+    { name = "mcs-driver-mail" },
     { name = "mcs-driver-rest" },
 ]
-imap = [
-    { name = "mcs-driver-imap" },
+mail = [
+    { name = "mcs-driver-mail" },
+]
+mailread = [
+    { name = "mcs-driver-mailread" },
+]
+mailsend = [
+    { name = "mcs-driver-mailsend" },
 ]
 rest = [
     { name = "mcs-driver-rest" },
@@ -1685,12 +1763,14 @@ rest = [
 [package.metadata]
 requires-dist = [
     { name = "mcs-driver-core", editable = "packages/core" },
-    { name = "mcs-driver-imap", marker = "extra == 'imap'", editable = "packages/drivers/mcs-driver-imap" },
+    { name = "mcs-driver-mail", marker = "extra == 'mail'", editable = "packages/drivers/mcs-driver-mail" },
+    { name = "mcs-driver-mailread", marker = "extra == 'mailread'", editable = "packages/drivers/mcs-driver-mailread" },
+    { name = "mcs-driver-mailsend", marker = "extra == 'mailsend'", editable = "packages/drivers/mcs-driver-mailsend" },
     { name = "mcs-driver-rest", marker = "extra == 'rest'", editable = "packages/drivers/mcs-driver-rest" },
-    { name = "mcs-inspector", extras = ["imap", "rest"], marker = "extra == 'all'", editable = "packages/inspector" },
+    { name = "mcs-inspector", extras = ["mail", "rest"], marker = "extra == 'all'", editable = "packages/inspector" },
     { name = "rich", specifier = ">=13" },
 ]
-provides-extras = ["imap", "rest", "all"]
+provides-extras = ["mailread", "mailsend", "mail", "rest", "all"]
 
 [[package]]
 name = "mcs-orchestrator-base"
@@ -1731,10 +1811,13 @@ dependencies = [
     { name = "mcs-adapter-imap" },
     { name = "mcs-adapter-localfs" },
     { name = "mcs-adapter-smb" },
+    { name = "mcs-adapter-smtp" },
     { name = "mcs-driver-core" },
     { name = "mcs-driver-csv" },
     { name = "mcs-driver-filesystem" },
-    { name = "mcs-driver-imap" },
+    { name = "mcs-driver-mail" },
+    { name = "mcs-driver-mailread" },
+    { name = "mcs-driver-mailsend" },
     { name = "mcs-driver-rest" },
     { name = "mcs-inspector" },
     { name = "mcs-orchestrator-base" },
@@ -1778,10 +1861,13 @@ requires-dist = [
     { name = "mcs-adapter-imap", editable = "packages/adapters/mcs-adapter-imap" },
     { name = "mcs-adapter-localfs", editable = "packages/adapters/mcs-adapter-localfs" },
     { name = "mcs-adapter-smb", editable = "packages/adapters/mcs-adapter-smb" },
+    { name = "mcs-adapter-smtp", editable = "packages/adapters/mcs-adapter-smtp" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-driver-csv", editable = "packages/drivers/mcs-driver-csv" },
     { name = "mcs-driver-filesystem", editable = "packages/drivers/mcs-driver-filesystem" },
-    { name = "mcs-driver-imap", editable = "packages/drivers/mcs-driver-imap" },
+    { name = "mcs-driver-mail", editable = "packages/drivers/mcs-driver-mail" },
+    { name = "mcs-driver-mailread", editable = "packages/drivers/mcs-driver-mailread" },
+    { name = "mcs-driver-mailsend", editable = "packages/drivers/mcs-driver-mailsend" },
     { name = "mcs-driver-rest", editable = "packages/drivers/mcs-driver-rest" },
     { name = "mcs-inspector", editable = "packages/inspector" },
     { name = "mcs-orchestrator-base", editable = "packages/orchestrators/mcs-orchestrator-base" },

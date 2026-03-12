@@ -9,10 +9,13 @@ dependencies = [
   "mcs-adapter-localfs>=0.1",
   "mcs-adapter-smb>=0.1",
   "mcs-adapter-imap>=0.1",
+  "mcs-adapter-smtp>=0.1",
   "mcs-driver-rest>=0.2",
   "mcs-driver-filesystem>=0.2",
   "mcs-driver-csv>=0.1",
-  "mcs-driver-imap>=0.1",
+  "mcs-driver-mailread>=0.1",
+  "mcs-driver-mailsend>=0.1",
+  "mcs-driver-mail>=0.1",
   "mcs-orchestrator-base>=0.1",
   "mcs-orchestrator-rest>=0.2",
   "mcs-inspector>=0.1",
@@ -24,10 +27,13 @@ mcs-adapter-http = { workspace = true }
 mcs-adapter-localfs = { workspace = true }
 mcs-adapter-smb = { workspace = true }
 mcs-adapter-imap = { workspace = true }
+mcs-adapter-smtp = { workspace = true }
 mcs-driver-rest = { workspace = true }
 mcs-driver-filesystem = { workspace = true }
 mcs-driver-csv = { workspace = true }
-mcs-driver-imap = { workspace = true }
+mcs-driver-mailread = { workspace = true }
+mcs-driver-mailsend = { workspace = true }
+mcs-driver-mail = { workspace = true }
 mcs-orchestrator-base = { workspace = true }
 mcs-orchestrator-rest = { workspace = true }
 mcs-inspector = { workspace = true }

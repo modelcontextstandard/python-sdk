@@ -1,8 +1,12 @@
-"""Adapter port for IMAP drivers.
+"""Adapter port for mail-reading drivers.
 
-Defines the contract that any IMAP adapter must satisfy.
+Defines the contract that any mailbox adapter must satisfy.
 Adapters fulfil this protocol through structural subtyping -- they do
 **not** need to import or inherit from this module.
+
+The reference implementation is ``ImapAdapter`` from ``mcs-adapter-imap``.
+Future adapters (Gmail API, Microsoft Graph, ...) only need to implement
+these methods.
 """
 
 from __future__ import annotations
@@ -11,13 +15,8 @@ from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
-class ImapPort(Protocol):
-    """Contract that any IMAP adapter must satisfy.
-
-    The reference implementation is ``ImapAdapter`` from
-    ``mcs-adapter-imap``.  Alternative adapters (Exchange Web Services,
-    test stubs, ...) only need to implement these methods.
-    """
+class MailboxPort(Protocol):
+    """Contract that any mail-reading adapter must satisfy."""
 
     def list_folders(self) -> str: ...
 

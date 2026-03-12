@@ -1,8 +1,9 @@
-"""MCS ToolDriver for IMAP mailbox access.
+"""MCS ToolDriver for reading and organising e-mail.
 
 Provides seven tools for reading, searching, and organising e-mail.
 Delegates all I/O to the injected adapter so the same driver works
-with any backend that satisfies ``ImapPort``.
+with any backend that satisfies ``MailboxPort`` (IMAP, Gmail API,
+Microsoft Graph, ...).
 """
 
 from __future__ import annotations
@@ -19,18 +20,18 @@ from mcs.driver.core import (
     ToolParameter,
 )
 
-from .ports import ImapPort
+from .ports import MailboxPort
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class _ImapToolDriverMeta(DriverMeta):
-    id: str = "c4e8f1a2-imap-4001-9000-imaptooldrv001"
-    name: str = "IMAP MCS ToolDriver"
+class _MailreadToolDriverMeta(DriverMeta):
+    id: str = "c4e8f1a2-mail-4001-9000-mailreadtd0001"
+    name: str = "Mailread MCS ToolDriver"
     version: str = "0.1.0"
     bindings: tuple[DriverBinding, ...] = (
-        DriverBinding(capability="imap", adapter="imap", spec_format="Custom"),
+        DriverBinding(capability="mailread", adapter="*", spec_format="Custom"),
     )
     supported_llms: None = None
     capabilities: tuple[str, ...] = ("orchestratable",)
@@ -40,7 +41,7 @@ _TOOLS: list[Tool] = [
     Tool(
         name="list_folders",
         title="List mailbox folders",
-        description="List all folders (mailboxes) available on the IMAP server.",
+        description="List all folders (mailboxes) available on the mail server.",
         parameters=[],
     ),
     Tool(
@@ -85,13 +86,13 @@ _TOOLS: list[Tool] = [
         name="search_messages",
         title="Search messages by criteria",
         description=(
-            "Search messages matching IMAP criteria such as "
+            "Search messages matching criteria such as "
             'FROM "alice", SUBJECT "invoice", UNSEEN, SINCE 01-Jan-2025, etc.'
         ),
         parameters=[
             ToolParameter(
                 name="criteria",
-                description='IMAP search criteria string (default: "ALL").',
+                description='Search criteria string (default: "ALL").',
                 required=False,
                 schema={"type": "string", "default": "ALL"},
             ),
@@ -112,7 +113,7 @@ _TOOLS: list[Tool] = [
     Tool(
         name="move_message",
         title="Move a message to another folder",
-        description="Move a message from one folder to another (COPY + delete).",
+        description="Move a message from one folder to another.",
         parameters=[
             ToolParameter(name="uid", description="Message UID.", required=True, schema={"type": "integer"}),
             ToolParameter(name="destination", description="Target folder name.", required=True, schema={"type": "string"}),
@@ -128,7 +129,7 @@ _TOOLS: list[Tool] = [
         name="set_flags",
         title="Set or remove message flags",
         description=(
-            r"Add or remove IMAP flags on a message.  Common flags: "
+            r"Add or remove flags on a message.  Common flags: "
             r"\Seen, \Flagged, \Answered, \Deleted."
         ),
         parameters=[
@@ -156,7 +157,7 @@ _TOOLS: list[Tool] = [
     Tool(
         name="create_folder",
         title="Create a new mailbox folder",
-        description="Create a new folder on the IMAP server for organising mail.",
+        description="Create a new folder on the mail server for organising mail.",
         parameters=[
             ToolParameter(name="name", description="Name of the folder to create.", required=True, schema={"type": "string"}),
         ],
@@ -164,41 +165,32 @@ _TOOLS: list[Tool] = [
 ]
 
 
-class ImapToolDriver(MCSToolDriver):
-    """Provides IMAP mailbox operations as structured tools.
+class MailreadToolDriver(MCSToolDriver):
+    """Provides mail-reading operations as structured tools.
 
-    The adapter can be injected via ``_adapter`` for testing.
-    Otherwise, supply IMAP connection parameters and the default
-    ``ImapAdapter`` from ``mcs-adapter-imap`` will be used.
+    The adapter can be selected by name (``adapter="imap"``) or injected
+    directly via ``_adapter`` for testing.  Any object satisfying
+    ``MailboxPort`` works.
     """
 
-    meta: DriverMeta = _ImapToolDriverMeta()
+    meta: DriverMeta = _MailreadToolDriverMeta()
 
     def __init__(
         self,
         *,
-        host: str | None = None,
-        user: str | None = None,
-        password: str | None = None,
-        port: int | None = None,
-        ssl: bool = True,
-        starttls: bool = False,
-        _adapter: ImapPort | None = None,
+        adapter: str = "imap",
+        _adapter: MailboxPort | None = None,
+        **adapter_kwargs: Any,
     ) -> None:
         if _adapter is not None:
-            self._adapter: ImapPort = _adapter
-        else:
-            if not all([host, user, password]):
-                raise ValueError("host, user, and password are required when no _adapter is injected")
+            self._adapter: MailboxPort = _adapter
+        elif adapter == "imap":
             from mcs.adapter.imap import ImapAdapter
-
-            self._adapter = ImapAdapter(
-                host=host,  # type: ignore[arg-type]
-                user=user,  # type: ignore[arg-type]
-                password=password,  # type: ignore[arg-type]
-                port=port,
-                ssl=ssl,
-                starttls=starttls,
+            self._adapter = ImapAdapter(**adapter_kwargs)
+        else:
+            raise ValueError(
+                f"Unknown mailread adapter: {adapter!r}.  "
+                f"Available: 'imap'.  Or inject a custom adapter via _adapter=..."
             )
 
     def list_tools(self) -> List[Tool]:

@@ -158,16 +158,16 @@ class TestExecuteTool:
 
 class TestCLIParsing:
 
-    def test_main_module_parses_imap_subcommand(self):
-        from mcs.inspector.imap_cli import add_parser
+    def test_main_module_parses_mailread_subcommand(self):
+        from mcs.inspector.mailread_cli import add_parser
         import argparse
         p = argparse.ArgumentParser()
         sub = p.add_subparsers(dest="driver")
         add_parser(sub)
-        args = p.parse_args(["imap", "--host", "mail.test", "--user", "me"])
+        args = p.parse_args(["mailread", "--host", "mail.test", "--user", "me"])
         assert args.host == "mail.test"
         assert args.user == "me"
-        assert args.driver == "imap"
+        assert args.driver == "mailread"
 
     def test_main_module_parses_rest_subcommand(self):
         from mcs.inspector.rest_cli import add_parser

@@ -3,53 +3,32 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "mcs-inspector"
+name            = "mcs-adapter-smtp"
 version         = "0.1.0"
-description     = "Interactive CLI inspector for any MCS driver -- inspect tools, test connections, execute calls."
+description     = "SMTP adapter for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"
 license         = "Apache-2.0"
-keywords        = ["mcs", "modelcontextstandard", "inspector", "cli", "debug"]
+keywords        = ["mcs", "modelcontextstandard", "adapter", "smtp", "email"]
 authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
 license-files   = ["LICENSE"]
 classifiers     = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "Environment :: Console",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Email",
     "Topic :: Software Development :: Libraries",
-    "Topic :: Software Development :: Testing",
     "Typing :: Typed",
 ]
 
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
 
-dependencies = [
-    "mcs-driver-core>=0.2",
-    "rich>=13",
-]
-
-[project.optional-dependencies]
-mailread = ["mcs-driver-mailread>=0.1"]
-mailsend = ["mcs-driver-mailsend>=0.1"]
-mail     = ["mcs-driver-mail>=0.1"]
-rest     = ["mcs-driver-rest>=0.2"]
-all      = ["mcs-inspector[mail,rest]"]
-
-[project.scripts]
-mcs-inspect = "mcs.inspector.__main__:main"
-
-[tool.uv.sources]
-mcs-driver-core     = { workspace = true }
-mcs-driver-mailread = { workspace = true }
-mcs-driver-mailsend = { workspace = true }
-mcs-driver-mail     = { workspace = true }
-mcs-driver-rest     = { workspace = true }
+dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["src"]
