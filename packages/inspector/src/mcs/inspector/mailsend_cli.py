@@ -52,17 +52,7 @@ def run(args: argparse.Namespace) -> None:
         console.print(f"[red bold]Failed to create driver:[/red bold] {exc}")
         sys.exit(1)
 
-    import json
-    try:
-        result = json.loads(td.execute_tool("check_connection", {}))
-        if result.get("status") == "ok":
-            console.print(f"[green]Connected.[/green] Server: {result['server']}:{result['port']}")
-        else:
-            console.print(f"[red bold]Connection check failed:[/red bold] {result.get('detail', 'unknown error')}")
-            sys.exit(1)
-    except Exception as exc:
-        console.print(f"[red bold]Connection check failed:[/red bold] {exc}")
-        sys.exit(1)
+    console.print(f"[green]Driver created.[/green] Ready to inspect {args.host}.")
 
     from mcs.inspector import run_inspector
     run_inspector(td, title="Mailsend Inspector")

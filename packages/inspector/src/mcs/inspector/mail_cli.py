@@ -78,16 +78,5 @@ def run(args: argparse.Namespace) -> None:
         console.print(f"[red bold]Mailbox connection failed:[/red bold] {exc}")
         sys.exit(1)
 
-    try:
-        result = json.loads(td.execute_tool("check_connection", {}))
-        if result.get("status") == "ok":
-            console.print(f"[green]Send server connected.[/green] {result['server']}:{result['port']}")
-        else:
-            console.print(f"[red bold]Send connection failed:[/red bold] {result.get('detail', 'unknown')}")
-            sys.exit(1)
-    except Exception as exc:
-        console.print(f"[red bold]Send connection failed:[/red bold] {exc}")
-        sys.exit(1)
-
     from mcs.inspector import run_inspector
     run_inspector(td, title="Mail Inspector (read + send)")

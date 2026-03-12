@@ -31,8 +31,7 @@ class FakeMailsendAdapter:
             "recipients": recipients, "subject": subject,
         })
 
-    def check_connection(self) -> str:
-        return json.dumps({"status": "ok", "server": "smtp.test.local", "port": 587})
+
 
 
 @pytest.fixture()
@@ -42,12 +41,12 @@ def td() -> MailsendToolDriver:
 
 class TestListTools:
 
-    def test_returns_three_tools(self, td: MailsendToolDriver):
-        assert len(td.list_tools()) == 3
+    def test_returns_two_tools(self, td: MailsendToolDriver):
+        assert len(td.list_tools()) == 2
 
     def test_tool_names(self, td: MailsendToolDriver):
         names = {t.name for t in td.list_tools()}
-        assert names == {"send_message", "send_html_message", "check_connection"}
+        assert names == {"send_message", "send_html_message"}
 
 
 class TestExecuteTool:
@@ -70,10 +69,6 @@ class TestExecuteTool:
             "to": "alice@example.com", "subject": "News", "html_body": "<h1>Hi</h1>",
         }))
         assert result["status"] == "sent"
-
-    def test_check_connection(self, td: MailsendToolDriver):
-        result = json.loads(td.execute_tool("check_connection", {}))
-        assert result["status"] == "ok"
 
     def test_unknown_tool_raises(self, td: MailsendToolDriver):
         with pytest.raises(ValueError, match="Unknown tool"):

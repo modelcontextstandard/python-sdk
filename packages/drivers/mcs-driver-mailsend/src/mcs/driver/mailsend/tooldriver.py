@@ -1,9 +1,9 @@
 """MCS ToolDriver for sending e-mail.
 
-Provides three tools for sending plain-text and HTML e-mail and for
-testing connectivity.  Delegates all I/O to the injected adapter so
-the same driver works with any backend that satisfies ``MailsendPort``
-(SMTP, Gmail API, Microsoft Graph, ...).
+Provides two tools for sending plain-text and HTML e-mail.
+Delegates all I/O to the injected adapter so the same driver works
+with any backend that satisfies ``MailsendPort`` (SMTP, Gmail API,
+Microsoft Graph, ...).
 """
 
 from __future__ import annotations
@@ -136,15 +136,6 @@ _TOOLS: list[Tool] = [
             ),
         ],
     ),
-    Tool(
-        name="check_connection",
-        title="Test mail-sending connection",
-        description=(
-            "Test mail server connectivity and authentication.  "
-            "Returns connection status, server hostname, and port."
-        ),
-        parameters=[],
-    ),
 ]
 
 
@@ -200,8 +191,5 @@ class MailsendToolDriver(MCSToolDriver):
                 bcc=arguments.get("bcc", ""),
                 reply_to=arguments.get("reply_to", ""),
             )
-
-        if tool_name == "check_connection":
-            return self._adapter.check_connection()
 
         raise ValueError(f"Unknown tool: {tool_name}")

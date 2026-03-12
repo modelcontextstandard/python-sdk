@@ -62,16 +62,7 @@ def main() -> None:
         print(f"Failed to create driver: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        result = json.loads(td.execute_tool("check_connection", {}))
-        if result.get("status") == "ok":
-            print(f"Connected to {result['server']}:{result['port']}")
-        else:
-            print(f"Connection check failed: {result.get('detail', 'unknown error')}", file=sys.stderr)
-            sys.exit(1)
-    except Exception as exc:
-        print(f"Connection check failed: {exc}", file=sys.stderr)
-        sys.exit(1)
+    print(f"Driver created. Ready to inspect {args.host}.")
 
     if has_inspector:
         run_inspector(td, title="Mailsend Inspector")

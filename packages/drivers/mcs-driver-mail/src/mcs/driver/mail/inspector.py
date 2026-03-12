@@ -98,18 +98,6 @@ def main() -> None:
         print(f"Mailbox connection failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    # Test send connection
-    try:
-        result = json.loads(td.execute_tool("check_connection", {}))
-        if result.get("status") == "ok":
-            print(f"Send server connected: {result['server']}:{result['port']}")
-        else:
-            print(f"Send connection check failed: {result.get('detail', 'unknown')}", file=sys.stderr)
-            sys.exit(1)
-    except Exception as exc:
-        print(f"Send connection check failed: {exc}", file=sys.stderr)
-        sys.exit(1)
-
     if has_inspector:
         run_inspector(td, title="Mail Inspector (read + send)")
     else:

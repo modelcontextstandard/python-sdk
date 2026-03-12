@@ -21,8 +21,7 @@ class FakeMailsendAdapter:
         return json.dumps({"status": "sent", "from": "test@example.com",
                            "recipients": [to], "subject": subject})
 
-    def check_connection(self) -> str:
-        return json.dumps({"status": "ok", "server": "smtp.test", "port": 587})
+
 
 
 @pytest.fixture()
@@ -39,10 +38,9 @@ class TestHybridDriver:
     def test_function_description_contains_tool_names(self, driver: MailsendDriver):
         desc = driver.get_function_description()
         assert "send_message" in desc
-        assert "check_connection" in desc
 
     def test_list_tools_delegates(self, driver: MailsendDriver):
-        assert len(driver.list_tools()) == 3
+        assert len(driver.list_tools()) == 2
 
     def test_execute_tool_delegates(self, driver: MailsendDriver):
         result = json.loads(driver.execute_tool("send_message", {
