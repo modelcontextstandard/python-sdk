@@ -20,6 +20,8 @@ dependencies = [
   "mcs-orchestrator-base>=0.1",
   "mcs-orchestrator-rest>=0.2",
   "mcs-inspector>=0.1",
+  "mcs-auth>=0.1",
+  "mcs-auth-auth0>=0.1",
 ]
 
 [tool.uv.sources]
@@ -39,6 +41,8 @@ mcs-driver-mail = { workspace = true }
 mcs-orchestrator-base = { workspace = true }
 mcs-orchestrator-rest = { workspace = true }
 mcs-inspector = { workspace = true }
+mcs-auth = { workspace = true }
+mcs-auth-auth0 = { workspace = true }
 mcs-examples = { workspace = true }
 
 [tool.uv.workspace]
@@ -48,6 +52,7 @@ members = [
   "packages/drivers/*",
   "packages/adapters/*",
   "packages/orchestrators/*",
+  "packages/auth/*",
   "mcs-examples",
 ]
 

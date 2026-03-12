@@ -166,3 +166,18 @@ class TestCallableToken:
         adapter = GmailAdapter(access_token=token_provider, _http=http)
         adapter.list_folders()
         assert call_count >= 1
+
+    def test_credential_provider(self, http: FakeHttp):
+        """A CredentialProvider can replace access_token."""
+
+        class FakeCredential:
+            def get_token(self, scope: str) -> str:
+                assert scope == "gmail"
+                return "cred-provider-token"
+
+        adapter = GmailAdapter(_credential=FakeCredential(), _http=http)
+        adapter.list_folders()
+
+    def test_neither_token_nor_credential_raises(self):
+        with pytest.raises(ValueError, match="Either 'access_token' or '_credential'"):
+            GmailAdapter()

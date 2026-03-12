@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=63", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name            = "mcs-auth-auth0"
+version         = "0.1.0"
+description     = "Auth0 Token Vault credential provider for the Model Context Standard."
+readme          = "README.md"
+requires-python = ">=3.9"
+license         = "Apache-2.0"
+keywords        = ["mcs", "modelcontextstandard", "auth", "auth0", "oauth2", "token-vault", "credentials"]
+authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
+license-files   = ["LICENSE"]
+classifiers     = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+
+urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
+
+dependencies = [
+    "mcs-auth>=0.1",
+    "mcs-adapter-http>=0.2",
+]
+
+[tool.uv.sources]
+mcs-auth         = { workspace = true }
+mcs-adapter-http = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]

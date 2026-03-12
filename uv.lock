@@ -14,6 +14,8 @@ members = [
     "mcs-adapter-localfs",
     "mcs-adapter-smb",
     "mcs-adapter-smtp",
+    "mcs-auth",
+    "mcs-auth-auth0",
     "mcs-driver-core",
     "mcs-driver-csv",
     "mcs-driver-filesystem",
@@ -1550,6 +1552,26 @@ version = "0.1.0"
 source = { editable = "packages/adapters/mcs-adapter-smtp" }
 
 [[package]]
+name = "mcs-auth"
+version = "0.1.0"
+source = { editable = "packages/auth/mcs-auth" }
+
+[[package]]
+name = "mcs-auth-auth0"
+version = "0.1.0"
+source = { editable = "packages/auth/mcs-auth-auth0" }
+dependencies = [
+    { name = "mcs-adapter-http" },
+    { name = "mcs-auth" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
+    { name = "mcs-auth", editable = "packages/auth/mcs-auth" },
+]
+
+[[package]]
 name = "mcs-driver-core"
 version = "0.2.1"
 source = { editable = "packages/core" }
@@ -1838,6 +1860,8 @@ dependencies = [
     { name = "mcs-adapter-localfs" },
     { name = "mcs-adapter-smb" },
     { name = "mcs-adapter-smtp" },
+    { name = "mcs-auth" },
+    { name = "mcs-auth-auth0" },
     { name = "mcs-driver-core" },
     { name = "mcs-driver-csv" },
     { name = "mcs-driver-filesystem" },
@@ -1889,6 +1913,8 @@ requires-dist = [
     { name = "mcs-adapter-localfs", editable = "packages/adapters/mcs-adapter-localfs" },
     { name = "mcs-adapter-smb", editable = "packages/adapters/mcs-adapter-smb" },
     { name = "mcs-adapter-smtp", editable = "packages/adapters/mcs-adapter-smtp" },
+    { name = "mcs-auth", editable = "packages/auth/mcs-auth" },
+    { name = "mcs-auth-auth0", editable = "packages/auth/mcs-auth-auth0" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-driver-csv", editable = "packages/drivers/mcs-driver-csv" },
     { name = "mcs-driver-filesystem", editable = "packages/drivers/mcs-driver-filesystem" },

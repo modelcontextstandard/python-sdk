@@ -44,30 +44,40 @@ class GmailAdapter:
     Parameters
     ----------
     access_token :
-        A Google OAuth2 access token (string) **or** a zero-argument
-        callable that returns a fresh token on every call.  The callable
-        form supports automatic token refresh via a CredentialProvider.
+        A Google OAuth2 access token (string), a zero-argument callable
+        that returns a fresh token, **or** *None* when ``_credential``
+        is provided instead.
     sender_name :
         Optional display name for the ``From`` header (e.g. ``"Danny Gerst"``).
+    timeout :
+        HTTP request timeout in seconds (used when creating the default
+        ``HttpAdapter``).
+    _credential :
+        Any object satisfying ``CredentialProvider`` (``get_token(scope) -> str``).
+        When provided, ``access_token`` may be omitted -- the adapter calls
+        ``_credential.get_token("gmail")`` automatically.
     _http :
         Any object satisfying ``HttpPort`` (e.g. ``HttpAdapter`` from
         ``mcs-adapter-http``).  When *None*, a default ``HttpAdapter``
         is created.  Pass your own to configure proxies, SSL settings,
         or to swap in a different HTTP backend (e.g. httpx).
-    timeout :
-        HTTP request timeout in seconds (used when creating the default
-        ``HttpAdapter``).
     """
 
     def __init__(
         self,
         *,
-        access_token: Union[str, Callable[[], str]],
+        access_token: Union[str, Callable[[], str], None] = None,
         sender_name: str | None = None,
         timeout: int = 30,
+        _credential: Any | None = None,
         _http: HttpPort | None = None,
     ) -> None:
-        self._token = access_token
+        if _credential is not None:
+            self._token: Union[str, Callable[[], str]] = lambda: _credential.get_token("gmail")
+        elif access_token is not None:
+            self._token = access_token
+        else:
+            raise ValueError("Either 'access_token' or '_credential' must be provided")
         self._sender_name = sender_name
         if _http is not None:
             self._http: HttpPort = _http
