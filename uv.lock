@@ -9,13 +9,16 @@ resolution-markers = [
 [manifest]
 members = [
     "mcs-adapter-http",
+    "mcs-adapter-imap",
     "mcs-adapter-localfs",
     "mcs-adapter-smb",
     "mcs-driver-core",
     "mcs-driver-csv",
     "mcs-driver-filesystem",
+    "mcs-driver-imap",
     "mcs-driver-rest",
     "mcs-examples",
+    "mcs-inspector",
     "mcs-orchestrator-base",
     "mcs-orchestrator-rest",
     "mcs-python-sdk",
@@ -1506,6 +1509,11 @@ dependencies = [
 requires-dist = [{ name = "requests", specifier = ">=2.32" }]
 
 [[package]]
+name = "mcs-adapter-imap"
+version = "0.1.0"
+source = { editable = "packages/adapters/mcs-adapter-imap" }
+
+[[package]]
 name = "mcs-adapter-localfs"
 version = "0.2.0"
 source = { editable = "packages/adapters/mcs-adapter-localfs" }
@@ -1576,6 +1584,28 @@ dependencies = [
 requires-dist = [{ name = "mcs-driver-core", editable = "packages/core" }]
 
 [[package]]
+name = "mcs-driver-imap"
+version = "0.1.0"
+source = { editable = "packages/drivers/mcs-driver-imap" }
+dependencies = [
+    { name = "mcs-adapter-imap" },
+    { name = "mcs-driver-core" },
+]
+
+[package.optional-dependencies]
+inspector = [
+    { name = "mcs-inspector" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcs-adapter-imap", editable = "packages/adapters/mcs-adapter-imap" },
+    { name = "mcs-driver-core", editable = "packages/core" },
+    { name = "mcs-inspector", marker = "extra == 'inspector'", editable = "packages/inspector" },
+]
+provides-extras = ["inspector"]
+
+[[package]]
 name = "mcs-driver-rest"
 version = "0.2.0"
 source = { editable = "packages/drivers/mcs-driver-rest" }
@@ -1586,14 +1616,14 @@ dependencies = [
 
 [package.optional-dependencies]
 inspector = [
-    { name = "rich" },
+    { name = "mcs-inspector" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
     { name = "mcs-driver-core", editable = "packages/core" },
-    { name = "rich", marker = "extra == 'inspector'", specifier = ">=13" },
+    { name = "mcs-inspector", marker = "extra == 'inspector'", editable = "packages/inspector" },
 ]
 provides-extras = ["inspector"]
 
@@ -1632,6 +1662,37 @@ requires-dist = [
 provides-extras = ["quickstart"]
 
 [[package]]
+name = "mcs-inspector"
+version = "0.1.0"
+source = { editable = "packages/inspector" }
+dependencies = [
+    { name = "mcs-driver-core" },
+    { name = "rich" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "mcs-driver-imap" },
+    { name = "mcs-driver-rest" },
+]
+imap = [
+    { name = "mcs-driver-imap" },
+]
+rest = [
+    { name = "mcs-driver-rest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcs-driver-core", editable = "packages/core" },
+    { name = "mcs-driver-imap", marker = "extra == 'imap'", editable = "packages/drivers/mcs-driver-imap" },
+    { name = "mcs-driver-rest", marker = "extra == 'rest'", editable = "packages/drivers/mcs-driver-rest" },
+    { name = "mcs-inspector", extras = ["imap", "rest"], marker = "extra == 'all'", editable = "packages/inspector" },
+    { name = "rich", specifier = ">=13" },
+]
+provides-extras = ["imap", "rest", "all"]
+
+[[package]]
 name = "mcs-orchestrator-base"
 version = "0.1.0"
 source = { editable = "packages/orchestrators/mcs-orchestrator-base" }
@@ -1667,12 +1728,15 @@ version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "mcs-adapter-http" },
+    { name = "mcs-adapter-imap" },
     { name = "mcs-adapter-localfs" },
     { name = "mcs-adapter-smb" },
     { name = "mcs-driver-core" },
     { name = "mcs-driver-csv" },
     { name = "mcs-driver-filesystem" },
+    { name = "mcs-driver-imap" },
     { name = "mcs-driver-rest" },
+    { name = "mcs-inspector" },
     { name = "mcs-orchestrator-base" },
     { name = "mcs-orchestrator-rest" },
 ]
@@ -1711,12 +1775,15 @@ requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "litellm", marker = "extra == 'examples'", specifier = ">=1.40" },
     { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
+    { name = "mcs-adapter-imap", editable = "packages/adapters/mcs-adapter-imap" },
     { name = "mcs-adapter-localfs", editable = "packages/adapters/mcs-adapter-localfs" },
     { name = "mcs-adapter-smb", editable = "packages/adapters/mcs-adapter-smb" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-driver-csv", editable = "packages/drivers/mcs-driver-csv" },
     { name = "mcs-driver-filesystem", editable = "packages/drivers/mcs-driver-filesystem" },
+    { name = "mcs-driver-imap", editable = "packages/drivers/mcs-driver-imap" },
     { name = "mcs-driver-rest", editable = "packages/drivers/mcs-driver-rest" },
+    { name = "mcs-inspector", editable = "packages/inspector" },
     { name = "mcs-orchestrator-base", editable = "packages/orchestrators/mcs-orchestrator-base" },
     { name = "mcs-orchestrator-rest", editable = "packages/orchestrators/mcs-orchestrator-rest" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8" },

@@ -3,18 +3,19 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "mcs-driver-rest"
-version         = "0.2.0"
-description     = "REST/OpenAPI driver for the Model Context Standard."
+name            = "mcs-inspector"
+version         = "0.1.0"
+description     = "Interactive CLI inspector for any MCS driver -- inspect tools, test connections, execute calls."
 readme          = "README.md"
 requires-python = ">=3.9"
 license         = "Apache-2.0"
-keywords        = ["mcs", "modelcontextstandard", "driver", "rest", "openapi", "http"]
+keywords        = ["mcs", "modelcontextstandard", "inspector", "cli", "debug"]
 authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
 license-files   = ["LICENSE"]
 classifiers     = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "Environment :: Console",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -22,6 +23,7 @@ classifiers     = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Testing",
     "Typing :: Typed",
 ]
 
@@ -29,15 +31,21 @@ urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://
 
 dependencies = [
     "mcs-driver-core>=0.2",
-    "mcs-adapter-http>=0.2",
+    "rich>=13",
 ]
 
 [project.optional-dependencies]
-inspector = ["mcs-inspector>=0.1"]
+imap = ["mcs-driver-imap>=0.1"]
+rest = ["mcs-driver-rest>=0.2"]
+all  = ["mcs-inspector[imap,rest]"]
+
+[project.scripts]
+mcs-inspect = "mcs.inspector.__main__:main"
 
 [tool.uv.sources]
 mcs-driver-core = { workspace = true }
-mcs-adapter-http = { workspace = true }
+mcs-driver-imap = { workspace = true }
+mcs-driver-rest = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

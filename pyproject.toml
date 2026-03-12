@@ -8,11 +8,14 @@ dependencies = [
   "mcs-adapter-http>=0.2",
   "mcs-adapter-localfs>=0.1",
   "mcs-adapter-smb>=0.1",
+  "mcs-adapter-imap>=0.1",
   "mcs-driver-rest>=0.2",
   "mcs-driver-filesystem>=0.2",
   "mcs-driver-csv>=0.1",
+  "mcs-driver-imap>=0.1",
   "mcs-orchestrator-base>=0.1",
   "mcs-orchestrator-rest>=0.2",
+  "mcs-inspector>=0.1",
 ]
 
 [tool.uv.sources]
@@ -20,16 +23,20 @@ mcs-driver-core = { workspace = true }
 mcs-adapter-http = { workspace = true }
 mcs-adapter-localfs = { workspace = true }
 mcs-adapter-smb = { workspace = true }
+mcs-adapter-imap = { workspace = true }
 mcs-driver-rest = { workspace = true }
 mcs-driver-filesystem = { workspace = true }
 mcs-driver-csv = { workspace = true }
+mcs-driver-imap = { workspace = true }
 mcs-orchestrator-base = { workspace = true }
 mcs-orchestrator-rest = { workspace = true }
+mcs-inspector = { workspace = true }
 mcs-examples = { workspace = true }
 
 [tool.uv.workspace]
 members = [
   "packages/core",
+  "packages/inspector",
   "packages/drivers/*",
   "packages/adapters/*",
   "packages/orchestrators/*",
