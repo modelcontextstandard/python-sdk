@@ -161,10 +161,13 @@ class MailsendToolDriver(MCSToolDriver):
         elif adapter == "smtp":
             from mcs.adapter.smtp import SmtpAdapter
             self._adapter = SmtpAdapter(**adapter_kwargs)
+        elif adapter == "gmail":
+            from mcs.adapter.gmail import GmailAdapter
+            self._adapter = GmailAdapter(**adapter_kwargs)
         else:
             raise ValueError(
                 f"Unknown mailsend adapter: {adapter!r}.  "
-                f"Available: 'smtp'.  Or inject a custom adapter via _adapter=..."
+                f"Available: 'smtp', 'gmail'.  Or inject a custom adapter via _adapter=..."
             )
 
     def list_tools(self) -> List[Tool]:

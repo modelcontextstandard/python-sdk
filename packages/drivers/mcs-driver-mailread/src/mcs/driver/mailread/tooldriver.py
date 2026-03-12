@@ -187,10 +187,13 @@ class MailreadToolDriver(MCSToolDriver):
         elif adapter == "imap":
             from mcs.adapter.imap import ImapAdapter
             self._adapter = ImapAdapter(**adapter_kwargs)
+        elif adapter == "gmail":
+            from mcs.adapter.gmail import GmailAdapter
+            self._adapter = GmailAdapter(**adapter_kwargs)
         else:
             raise ValueError(
                 f"Unknown mailread adapter: {adapter!r}.  "
-                f"Available: 'imap'.  Or inject a custom adapter via _adapter=..."
+                f"Available: 'imap', 'gmail'.  Or inject a custom adapter via _adapter=..."
             )
 
     def list_tools(self) -> List[Tool]:

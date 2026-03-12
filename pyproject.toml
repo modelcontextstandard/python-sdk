@@ -10,6 +10,7 @@ dependencies = [
   "mcs-adapter-smb>=0.1",
   "mcs-adapter-imap>=0.1",
   "mcs-adapter-smtp>=0.1",
+  "mcs-adapter-gmail>=0.1",
   "mcs-driver-rest>=0.2",
   "mcs-driver-filesystem>=0.2",
   "mcs-driver-csv>=0.1",
@@ -28,6 +29,7 @@ mcs-adapter-localfs = { workspace = true }
 mcs-adapter-smb = { workspace = true }
 mcs-adapter-imap = { workspace = true }
 mcs-adapter-smtp = { workspace = true }
+mcs-adapter-gmail = { workspace = true }
 mcs-driver-rest = { workspace = true }
 mcs-driver-filesystem = { workspace = true }
 mcs-driver-csv = { workspace = true }

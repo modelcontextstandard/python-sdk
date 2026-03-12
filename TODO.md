@@ -142,6 +142,57 @@ error reason).
 
 ---
 
+## CredentialProvider -- universelle Auth-Abstraktion für Adapter
+
+**Affects:** alle Adapter-Pakete, neuer `mcs-credential-core` oder Teil von `mcs-driver-core`
+
+**Status:** Open / Design Phase
+
+**Problem:**
+Jeder Adapter löst Authentifizierung aktuell selbst: IMAP/SMTP nehmen
+`user + password`, HTTP nimmt `headers`, LocalFS braucht nichts. Mit
+OAuth2-basierten Backends (Gmail API, Microsoft Graph, Slack, GitHub, ...)
+kommt ein ganz anderer Auth-Flow hinzu: Token Vault, OAuth2 Refresh,
+Service Accounts, etc.
+
+Ohne gemeinsame Abstraktion müsste jeder Adapter seinen eigenen
+OAuth-Code mitbringen -- oder fest an einen Anbieter (Auth0, Azure AD)
+gebunden sein.
+
+**Gewünschter Zustand:**
+Ein `CredentialProvider`-Protocol (structural typing, wie `MailboxPort`),
+das Adaptern eine einheitliche Schnittstelle für Credentials bietet:
+
+```python
+@runtime_checkable
+class CredentialProvider(Protocol):
+    def get_access_token(self) -> str: ...
+```
+
+Konkrete Implementierungen:
+- `StaticCredentials(user, password)` -- für IMAP, SMTP, SMB
+- `Auth0TokenVaultProvider(domain, client_id, ...)` -- OAuth2 via Auth0
+- `OAuthRefreshProvider(client_id, secret, refresh_token)` -- direkter OAuth2
+- `EnvCredentials(env_var)` -- aus Umgebungsvariablen
+
+Adapter akzeptieren dann optional `credentials: CredentialProvider` als
+Alternative zu expliziten `user + password` Parametern.
+
+**Offene Fragen:**
+- Gehört das in `mcs-driver-core` oder ein eigenes `mcs-credential-core`?
+- Brauchen wir neben `get_access_token()` auch `get_username()`,
+  `get_headers()`, etc.?
+- Wie geht man mit Token-Refresh (Expiry, Retry) um?
+- Soll der Provider synchron oder async sein?
+- Zusammenspiel mit Auth0 Token Vault: Token Exchange vs. Direct Token.
+
+**Kontext:**
+Auth0 Hackathon "Authorized to Act" (Deadline: 2026-04-06) ist ein guter
+Anlass, das Pattern in einem Beispielprojekt (`mcs-examples/gmail_agent`)
+zu validieren, bevor es in die Core-Library wandert.
+
+---
+
 ## Deprecate / yank `mcs-drivers-core` on PyPI
 
 **Affects:** PyPI

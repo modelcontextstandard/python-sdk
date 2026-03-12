@@ -24,7 +24,8 @@ from urllib.parse import urljoin, urlparse
 
 from mcs.driver.core import MCSToolDriver, Tool, ToolParameter, DriverMeta, DriverBinding
 from mcs.driver.core.mixins import SupportsHealthcheck, HealthCheckResult, HealthStatus
-from mcs.adapter.http import HttpAdapter
+
+from .ports import HttpPort
 
 try:
     import yaml
@@ -63,13 +64,17 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
         *,
         include_tags: List[str] | None = None,
         include_paths: List[str] | None = None,
-        _http: HttpAdapter | None = None,
+        _http: HttpPort | None = None,
         **http_kwargs: Any,
     ) -> None:
         self.spec_url = url
         self._include_tags = {t.lower() for t in include_tags} if include_tags else None
         self._include_paths = set(include_paths) if include_paths else None
-        self._http = _http or HttpAdapter(**http_kwargs)
+        if _http is not None:
+            self._http: HttpPort = _http
+        else:
+            from mcs.adapter.http import HttpAdapter
+            self._http = HttpAdapter(**http_kwargs)
         self._tools: List[Tool] | None = None
         self._tool_map: Dict[str, Dict[str, Any]] = {}
         self._base_url: str | None = None

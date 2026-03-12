@@ -15,13 +15,24 @@ import sys
 from pathlib import Path
 
 PACKAGES = [
+    # Core (no MCS dependencies)
     "packages/core",
-    "packages/drivers/mcs-driver-rest",
-    "packages/drivers/mcs-driver-csv",
-    "packages/drivers/mcs-driver-filesystem",
+    # Adapters (depend on core at most)
     "packages/adapters/mcs-adapter-http",
     "packages/adapters/mcs-adapter-localfs",
     "packages/adapters/mcs-adapter-smb",
+    "packages/adapters/mcs-adapter-imap",
+    "packages/adapters/mcs-adapter-smtp",
+    # Drivers (depend on core + adapters)
+    "packages/drivers/mcs-driver-rest",
+    "packages/drivers/mcs-driver-csv",
+    "packages/drivers/mcs-driver-filesystem",
+    "packages/drivers/mcs-driver-mailread",
+    "packages/drivers/mcs-driver-mailsend",
+    "packages/drivers/mcs-driver-mail",
+    # Inspector (depends on drivers)
+    "packages/inspector",
+    # Orchestrators
     "packages/orchestrators/mcs-orchestrator-base",
     "packages/orchestrators/mcs-orchestrator-rest",
 ]
