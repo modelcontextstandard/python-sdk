@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=63", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name            = "mcs-adapter-mcp"
+version         = "0.1.0"
+description     = "MCP bridge adapter for MCS — connects to remote and local MCP servers, exposing their tools through the MCS driver ecosystem."
+requires-python = ">=3.9"
+license         = "Apache-2.0"
+dependencies    = []
+
+[tool.setuptools.packages.find]
+where = ["src"]

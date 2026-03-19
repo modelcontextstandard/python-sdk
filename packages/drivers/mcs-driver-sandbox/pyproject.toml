@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=63", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name            = "mcs-driver-sandbox"
+version         = "0.1.0"
+description     = "MCS Sandbox Driver — gives AI agents an isolated compute environment with shell, file upload and download."
+requires-python = ">=3.9"
+license         = "Apache-2.0"
+dependencies    = ["mcs-driver-core>=0.2"]
+
+[tool.uv.sources]
+mcs-driver-core = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
