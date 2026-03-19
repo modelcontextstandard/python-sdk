@@ -172,7 +172,7 @@ class GmailAdapter:
         messages = []
         for msg_stub in data.get("messages", []):
             msg = self._get(f"/messages/{msg_stub['id']}", params={"format": "metadata",
-                            "metadataHeaders": "From,Subject,Date"})
+                            "metadataHeaders": ["From", "Subject", "Date"]})
             headers = msg.get("payload", {}).get("headers", [])
             messages.append({
                 "uid": msg["id"],
@@ -217,7 +217,7 @@ class GmailAdapter:
         messages = []
         for msg_stub in data.get("messages", []):
             msg = self._get(f"/messages/{msg_stub['id']}", params={"format": "metadata",
-                            "metadataHeaders": "From,Subject,Date"})
+                            "metadataHeaders": ["From", "Subject", "Date"]})
             headers = msg.get("payload", {}).get("headers", [])
             messages.append({
                 "uid": msg["id"],

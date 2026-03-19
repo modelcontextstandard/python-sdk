@@ -21,7 +21,6 @@ import webbrowser
 from base64 import urlsafe_b64encode
 from typing import Any
 
-
 class OAuthAdapter:
     """Auth transport adapter that performs OAuth 2.0 Authorization Code Flow.
 
@@ -62,6 +61,7 @@ class OAuthAdapter:
         callback_port: int = 3000,
         callback_path: str = "/callback",
         extra_params: dict[str, str] | None = None,
+        on_auth_start: Any | None = None,
     ) -> None:
         self._authorize_url = authorize_url
         self._token_url = token_url
@@ -71,6 +71,7 @@ class OAuthAdapter:
         self._callback_port = callback_port
         self._callback_path = callback_path
         self._extra_params = extra_params or {}
+        self._on_auth_start = on_auth_start
 
         # Cache: scope → token dict
         self._tokens: dict[str, dict[str, Any]] = {}
@@ -78,12 +79,18 @@ class OAuthAdapter:
     def authenticate(self, scope: str) -> str:
         """Run OAuth Authorization Code Flow and return the token.
 
+        Opens a browser window for the user to log in, blocks until
+        the callback is received, then returns the token.
+
         Returns the ``refresh_token`` if available, otherwise the
         ``access_token``.
         """
         if scope in self._tokens:
             tokens = self._tokens[scope]
             return tokens.get("refresh_token", tokens["access_token"])
+
+        if self._on_auth_start:
+            self._on_auth_start(scope)
 
         # Resolve OAuth scopes
         if isinstance(self._scopes, dict):
