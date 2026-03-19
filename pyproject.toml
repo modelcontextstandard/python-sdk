@@ -22,6 +22,8 @@ dependencies = [
   "mcs-inspector>=0.1",
   "mcs-auth>=0.1",
   "mcs-auth-auth0>=0.1",
+  "mcs-auth-oauth>=0.1",
+  "mcs-auth-linkauth>=0.1",
 ]
 
 [tool.uv.sources]
@@ -43,6 +45,8 @@ mcs-orchestrator-rest = { workspace = true }
 mcs-inspector = { workspace = true }
 mcs-auth = { workspace = true }
 mcs-auth-auth0 = { workspace = true }
+mcs-auth-oauth = { workspace = true }
+mcs-auth-linkauth = { workspace = true }
 mcs-examples = { workspace = true }
 
 [tool.uv.workspace]

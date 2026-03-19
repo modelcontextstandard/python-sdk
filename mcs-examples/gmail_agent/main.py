@@ -1,29 +1,30 @@
-"""MCS Gmail Agent -- streaming chat client for e-mail via Auth0 Device Flow.
+"""MCS Gmail Agent -- streaming chat client for e-mail.
 
-Demonstrates the full MCS auth stack:
-- Auth0 Device Authorization (RFC 8628) for credential acquisition
-- Auth0 Token Vault (RFC 8693) for token exchange
-- AuthMixin for transparent auth challenges during tool execution
-- MailDriver composite driver for read + send e-mail
+Demonstrates the MCS auth stack with pluggable credential providers:
+- Auth0 Token Vault (RFC 8693) for federated token exchange
+- LinkAuth broker for device-flow-like credential acquisition
+- Direct OAuth 2.0 Authorization Code Flow
+- Static tokens for quick testing
 
 The client has no knowledge of authentication -- when a tool needs
 credentials, the AuthMixin intercepts the challenge and the LLM
 presents the login URL to the user.
 
 Usage:
-    # Auth0 Device Flow (recommended):
+    # Auth0 Token Vault (with refresh token from auth_setup.py):
     python main.py --auth0
+
+    # Auth0 via LinkAuth broker (device-flow UX):
+    python main.py --linkauth-auth0
+
+    # Direct OAuth (opens browser, localhost callback):
+    python main.py --oauth
+
+    # LinkAuth broker (any credential type):
+    python main.py --linkauth
 
     # Quick test with a static Google OAuth2 token:
     python main.py --token ya29.xxx
-
-    # With custom model:
-    python main.py --auth0 --model anthropic/claude-sonnet-4-20250514
-
-Auth0 mode reads from environment variables:
-    AUTH0_DOMAIN        e.g. my-tenant.auth0.com
-    AUTH0_CLIENT_ID     your Auth0 application client ID
-    AUTH0_CLIENT_SECRET your Auth0 application client secret
 
 Requires:
     pip install mcs-driver-mail[gmail] mcs-auth-auth0 litellm rich python-dotenv
@@ -56,7 +57,10 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="MCS Gmail Agent (streaming)")
     auth = p.add_mutually_exclusive_group(required=True)
     auth.add_argument("--token", help="Google OAuth2 access token (quick test)")
-    auth.add_argument("--auth0", action="store_true", help="Use Auth0 Device Flow")
+    auth.add_argument("--auth0", action="store_true", help="Auth0 Token Vault (needs AUTH0_REFRESH_TOKEN)")
+    auth.add_argument("--linkauth-auth0", action="store_true", help="Auth0 Token Vault via LinkAuth broker")
+    auth.add_argument("--oauth", action="store_true", help="Direct OAuth (opens browser)")
+    auth.add_argument("--linkauth", action="store_true", help="LinkAuth broker (device-flow UX)")
 
     p.add_argument("--model", default="gpt-4o", help="LiteLLM model identifier (default: gpt-4o)")
     p.add_argument("--sender-name", default=None, help="Display name for outgoing e-mails")
@@ -68,25 +72,80 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _build_credential(args: argparse.Namespace):
+    """Build the appropriate CredentialProvider based on CLI args."""
+    if args.token:
+        return None  # Static token handled separately
+
+    if args.auth0:
+        from mcs.auth.auth0 import Auth0Provider
+
+        for var in ("AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET", "AUTH0_REFRESH_TOKEN"):
+            if not os.environ.get(var):
+                raise SystemExit(f"Missing environment variable: {var}")
+
+        return Auth0Provider(
+            domain=os.environ["AUTH0_DOMAIN"],
+            client_id=os.environ["AUTH0_CLIENT_ID"],
+            client_secret=os.environ["AUTH0_CLIENT_SECRET"],
+            refresh_token=os.environ["AUTH0_REFRESH_TOKEN"],
+        )
+
+    if getattr(args, "linkauth_auth0", False):
+        from mcs.auth.auth0 import Auth0Provider
+        from mcs.auth.linkauth import LinkAuthAdapter
+
+        for var in ("AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"):
+            if not os.environ.get(var):
+                raise SystemExit(f"Missing environment variable: {var}")
+
+        broker_url = os.environ.get("LINKAUTH_BROKER_URL", "http://localhost:8000")
+        auth_adapter = LinkAuthAdapter(
+            broker_url=broker_url,
+            template="auth0",
+            display_name="Auth0 Login (Gmail)",
+        )
+        return Auth0Provider(
+            domain=os.environ["AUTH0_DOMAIN"],
+            client_id=os.environ["AUTH0_CLIENT_ID"],
+            client_secret=os.environ["AUTH0_CLIENT_SECRET"],
+            _auth=auth_adapter,
+        )
+
+    if args.oauth:
+        from mcs.auth.oauth import OAuthProvider
+
+        domain = os.environ.get("AUTH0_DOMAIN", "")
+        return OAuthProvider(
+            authorize_url=f"https://{domain}/authorize" if domain else os.environ["OAUTH_AUTHORIZE_URL"],
+            token_url=f"https://{domain}/oauth/token" if domain else os.environ["OAUTH_TOKEN_URL"],
+            client_id=os.environ.get("AUTH0_CLIENT_ID", os.environ.get("OAUTH_CLIENT_ID", "")),
+            client_secret=os.environ.get("AUTH0_CLIENT_SECRET", os.environ.get("OAUTH_CLIENT_SECRET", "")),
+            scopes={"gmail": "openid email offline_access https://mail.google.com/"},
+            extra_params={"connection": "google-oauth2"} if domain else {},
+        )
+
+    if args.linkauth:
+        from mcs.auth.linkauth import LinkAuthProvider
+
+        broker_url = os.environ.get("LINKAUTH_BROKER_URL", "http://localhost:8000")
+        return LinkAuthProvider(
+            broker_url=broker_url,
+            template="google_mail",
+            display_name="Gmail Access",
+        )
+
+    raise SystemExit("No authentication method specified.")
+
+
 def _build_driver(args: argparse.Namespace) -> AuthMailDriver:
     """Build an AuthMailDriver with gmail adapters."""
     gmail_kwargs: dict = {}
     if args.sender_name:
         gmail_kwargs["sender_name"] = args.sender_name
 
-    if args.auth0:
-        from mcs.auth.auth0 import Auth0Provider
-
-        for var in ("AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"):
-            if not os.environ.get(var):
-                raise SystemExit(f"Missing environment variable: {var}")
-
-        credential = Auth0Provider(
-            domain=os.environ["AUTH0_DOMAIN"],
-            client_id=os.environ["AUTH0_CLIENT_ID"],
-            client_secret=os.environ["AUTH0_CLIENT_SECRET"],
-            audience=os.environ.get("AUTH0_AUDIENCE"),
-        )
+    credential = _build_credential(args)
+    if credential is not None:
         gmail_kwargs["_credential"] = credential
     else:
         gmail_kwargs["access_token"] = args.token

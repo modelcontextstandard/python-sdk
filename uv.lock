@@ -16,6 +16,8 @@ members = [
     "mcs-adapter-smtp",
     "mcs-auth",
     "mcs-auth-auth0",
+    "mcs-auth-linkauth",
+    "mcs-auth-oauth",
     "mcs-driver-core",
     "mcs-driver-csv",
     "mcs-driver-filesystem",
@@ -1572,6 +1574,32 @@ requires-dist = [
 ]
 
 [[package]]
+name = "mcs-auth-linkauth"
+version = "0.1.0"
+source = { editable = "packages/auth/mcs-auth-linkauth" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "mcs-auth" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cryptography", specifier = ">=41.0" },
+    { name = "mcs-auth", editable = "packages/auth/mcs-auth" },
+]
+
+[[package]]
+name = "mcs-auth-oauth"
+version = "0.1.0"
+source = { editable = "packages/auth/mcs-auth-oauth" }
+dependencies = [
+    { name = "mcs-auth" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "mcs-auth", editable = "packages/auth/mcs-auth" }]
+
+[[package]]
 name = "mcs-driver-core"
 version = "0.2.1"
 source = { editable = "packages/core" }
@@ -1759,6 +1787,14 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+gmail = [
+    { name = "mcs-adapter-gmail" },
+    { name = "mcs-auth" },
+    { name = "mcs-auth-auth0" },
+    { name = "mcs-auth-linkauth" },
+    { name = "mcs-auth-oauth" },
+    { name = "mcs-driver-mail" },
+]
 quickstart = [
     { name = "fastapi", version = "0.128.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "fastapi", version = "0.133.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
@@ -1771,14 +1807,20 @@ quickstart = [
 requires-dist = [
     { name = "fastapi", marker = "extra == 'quickstart'", specifier = ">=0.110" },
     { name = "litellm", specifier = ">=1.73" },
+    { name = "mcs-adapter-gmail", marker = "extra == 'gmail'", editable = "packages/adapters/mcs-adapter-gmail" },
+    { name = "mcs-auth", marker = "extra == 'gmail'", editable = "packages/auth/mcs-auth" },
+    { name = "mcs-auth-auth0", marker = "extra == 'gmail'", editable = "packages/auth/mcs-auth-auth0" },
+    { name = "mcs-auth-linkauth", marker = "extra == 'gmail'", editable = "packages/auth/mcs-auth-linkauth" },
+    { name = "mcs-auth-oauth", marker = "extra == 'gmail'", editable = "packages/auth/mcs-auth-oauth" },
     { name = "mcs-driver-core", editable = "packages/core" },
+    { name = "mcs-driver-mail", marker = "extra == 'gmail'", editable = "packages/drivers/mcs-driver-mail" },
     { name = "pydantic", marker = "extra == 'quickstart'", specifier = ">=2.7" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "requests", specifier = ">=2.32" },
     { name = "rich", specifier = ">=13.0" },
     { name = "uvicorn", marker = "extra == 'quickstart'", specifier = ">=0.29" },
 ]
-provides-extras = ["quickstart"]
+provides-extras = ["quickstart", "gmail"]
 
 [[package]]
 name = "mcs-inspector"
@@ -1862,6 +1904,8 @@ dependencies = [
     { name = "mcs-adapter-smtp" },
     { name = "mcs-auth" },
     { name = "mcs-auth-auth0" },
+    { name = "mcs-auth-linkauth" },
+    { name = "mcs-auth-oauth" },
     { name = "mcs-driver-core" },
     { name = "mcs-driver-csv" },
     { name = "mcs-driver-filesystem" },
@@ -1915,6 +1959,8 @@ requires-dist = [
     { name = "mcs-adapter-smtp", editable = "packages/adapters/mcs-adapter-smtp" },
     { name = "mcs-auth", editable = "packages/auth/mcs-auth" },
     { name = "mcs-auth-auth0", editable = "packages/auth/mcs-auth-auth0" },
+    { name = "mcs-auth-linkauth", editable = "packages/auth/mcs-auth-linkauth" },
+    { name = "mcs-auth-oauth", editable = "packages/auth/mcs-auth-oauth" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-driver-csv", editable = "packages/drivers/mcs-driver-csv" },
     { name = "mcs-driver-filesystem", editable = "packages/drivers/mcs-driver-filesystem" },

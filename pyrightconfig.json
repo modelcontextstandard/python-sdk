@@ -10,6 +10,17 @@
     "packages/drivers/mcs-driver-filesystem/src",
     "packages/drivers/mcs-driver-csv/src",
     "packages/orchestrators/mcs-orchestrator-base/src",
-    "packages/orchestrators/mcs-orchestrator-rest/src"
+    "packages/orchestrators/mcs-orchestrator-rest/src",
+    "packages/adapters/mcs-adapter-imap/src",
+    "packages/adapters/mcs-adapter-smtp/src",
+    "packages/adapters/mcs-adapter-gmail/src",
+    "packages/drivers/mcs-driver-mailread/src",
+    "packages/drivers/mcs-driver-mailsend/src",
+    "packages/drivers/mcs-driver-mail/src",
+    "packages/inspector/src",
+    "packages/auth/mcs-auth/src",
+    "packages/auth/mcs-auth-auth0/src",
+    "packages/auth/mcs-auth-oauth/src",
+    "packages/auth/mcs-auth-linkauth/src"
   ]
 }

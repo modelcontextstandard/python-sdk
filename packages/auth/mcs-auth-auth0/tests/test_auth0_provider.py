@@ -133,199 +133,86 @@ class TestTokenExchange:
         assert token == "pass-tok"
 
 
-class TestDeviceFlow:
-    """Tests for the device authorization flow (no refresh_token)."""
+class TestAuthPort:
+    """Tests for AuthPort-based token acquisition (no refresh_token)."""
 
-    def test_first_call_raises_auth_challenge(
-        self, provider_no_token: Auth0Provider, http: FakeHttp
-    ):
-        """First get_token() starts device flow and raises AuthChallenge."""
-        http.push_response({
-            "device_code": "dev_abc",
-            "user_code": "ABCD-1234",
-            "verification_uri": "https://test.auth0.com/activate",
-            "verification_uri_complete": "https://test.auth0.com/activate?user_code=ABCD-1234",
-            "interval": 5,
-            "expires_in": 900,
-        })
-
-        with pytest.raises(AuthChallenge) as exc_info:
-            provider_no_token.get_token("gmail")
-
-        challenge = exc_info.value
-        assert challenge.url == "https://test.auth0.com/activate?user_code=ABCD-1234"
-        assert challenge.code == "ABCD-1234"
-        assert challenge.scope == "gmail"
-
-    def test_second_call_polls_and_succeeds(
-        self, provider_no_token: Auth0Provider, http: FakeHttp
-    ):
-        """After user authenticates, second call polls and gets tokens."""
-        # First call: device code response
-        http.push_response({
-            "device_code": "dev_abc",
-            "user_code": "ABCD-1234",
-            "verification_uri": "https://test.auth0.com/activate",
-            "interval": 0,
-            "expires_in": 900,
-        })
-
-        with pytest.raises(AuthChallenge):
-            provider_no_token.get_token("gmail")
-
-        # Second call: poll succeeds → returns tokens + then token exchange
-        http.push_response({
-            "access_token": "auth0-access",
-            "refresh_token": "rt_new",
-            "token_type": "Bearer",
-            "expires_in": 86400,
-        })
-        http.push_response({
-            "access_token": "google-tok-456",
-            "token_type": "Bearer",
-            "expires_in": 3600,
-        })
-
-        token = provider_no_token.get_token("gmail")
-        assert token == "google-tok-456"
-
-    def test_poll_authorization_pending_then_success(
-        self, provider_no_token: Auth0Provider, http: FakeHttp
-    ):
-        """Polling with authorization_pending before eventual success."""
-        # Start device flow
-        http.push_response({
-            "device_code": "dev_abc",
-            "user_code": "WXYZ-5678",
-            "verification_uri": "https://test.auth0.com/activate",
-            "interval": 0,  # No delay for tests
-            "expires_in": 900,
-        })
-
-        with pytest.raises(AuthChallenge):
-            provider_no_token.get_token("gmail")
-
-        # Polling: first pending, then success
-        http.push_response({"error": "authorization_pending"})
-        http.push_response({
-            "access_token": "auth0-access",
-            "refresh_token": "rt_polled",
-            "token_type": "Bearer",
-            "expires_in": 86400,
-        })
-        http.push_response({
-            "access_token": "google-tok-polled",
-            "token_type": "Bearer",
-            "expires_in": 3600,
-        })
-
-        # Use short poll timeout for the test
-        provider_no_token._poll_timeout = 5
-        provider_no_token._device_interval = 0
-
-        token = provider_no_token.get_token("gmail")
-        assert token == "google-tok-polled"
-
-    def test_poll_timeout_raises_auth_challenge_again(
-        self, provider_no_token: Auth0Provider, http: FakeHttp
-    ):
-        """If polling times out, AuthChallenge is raised again."""
-        # Start device flow
-        http.push_response({
-            "device_code": "dev_abc",
-            "user_code": "TMOT-0000",
-            "verification_uri": "https://test.auth0.com/activate",
-            "interval": 0,
-            "expires_in": 900,
-        })
-
-        with pytest.raises(AuthChallenge):
-            provider_no_token.get_token("gmail")
-
-        # All polls return pending → timeout
-        for _ in range(20):
-            http.push_response({"error": "authorization_pending"})
-
-        provider_no_token._poll_timeout = 0  # Immediate timeout
-        provider_no_token._device_interval = 0
-
-        with pytest.raises(AuthChallenge) as exc_info:
-            provider_no_token.get_token("gmail")
-
-        assert exc_info.value.code == "TMOT-0000"
-
-    def test_device_flow_error_raises_runtime(
-        self, provider_no_token: Auth0Provider, http: FakeHttp
-    ):
-        """Auth0 returning an error from /oauth/device/code raises RuntimeError."""
-        http.push_response({
-            "error": "unauthorized_client",
-            "error_description": "Device flow not enabled",
-        })
-
-        with pytest.raises(RuntimeError, match="device authorization failed"):
-            provider_no_token.get_token("gmail")
-
-    def test_access_denied_during_poll(
-        self, provider_no_token: Auth0Provider, http: FakeHttp
-    ):
-        """User denies access during device flow."""
-        http.push_response({
-            "device_code": "dev_abc",
-            "user_code": "DENY-0001",
-            "verification_uri": "https://test.auth0.com/activate",
-            "interval": 0,
-            "expires_in": 900,
-        })
-
-        with pytest.raises(AuthChallenge):
-            provider_no_token.get_token("gmail")
-
-        http.push_response({"error": "access_denied"})
-        provider_no_token._poll_timeout = 5
-
-        with pytest.raises(RuntimeError, match="denied by user"):
-            provider_no_token.get_token("gmail")
-
-    def test_poll_handles_http_403_authorization_pending(
-        self, provider_no_token: Auth0Provider, http: FakeHttp
-    ):
-        """Auth0 sends authorization_pending as HTTP 403 -- must be handled."""
-        http.push_response({
-            "device_code": "dev_abc",
-            "user_code": "HTTP-4030",
-            "verification_uri": "https://test.auth0.com/activate",
-            "interval": 0,
-            "expires_in": 900,
-        })
-
-        with pytest.raises(AuthChallenge):
-            provider_no_token.get_token("gmail")
-
-        # Auth0 returns authorization_pending as HTTP 403 (raises in adapter)
-        http.push_response(
-            {"error": "authorization_pending"},
-            as_http_error=True,
+    def test_no_auth_no_token_raises_lookup(self, http: FakeHttp):
+        """Without refresh_token or _auth, get_token raises LookupError."""
+        provider = Auth0Provider(
+            domain="test.auth0.com",
+            client_id="c",
+            client_secret="s",
+            _http=http,
         )
-        # Then user completes → success
-        http.push_response({
-            "access_token": "auth0-tok",
-            "refresh_token": "rt_403",
-            "token_type": "Bearer",
-            "expires_in": 86400,
-        })
-        # Token exchange
-        http.push_response({
-            "access_token": "google-tok-403",
-            "token_type": "Bearer",
-            "expires_in": 3600,
-        })
+        with pytest.raises(LookupError, match="No refresh token"):
+            provider.get_token("gmail")
 
-        provider_no_token._poll_timeout = 5
-        provider_no_token._device_interval = 0
+    def test_auth_adapter_provides_refresh_token(self, http: FakeHttp):
+        """AuthPort adapter provides refresh token, then Token Vault exchange works."""
 
-        token = provider_no_token.get_token("gmail")
-        assert token == "google-tok-403"
+        class FakeAuth:
+            def authenticate(self, scope: str) -> str:
+                return "rt_from_adapter"
+
+        http.push_response({"access_token": "google-tok-via-adapter", "expires_in": 3600})
+        provider = Auth0Provider(
+            domain="test.auth0.com",
+            client_id="c",
+            client_secret="s",
+            _auth=FakeAuth(),
+            _http=http,
+        )
+        token = provider.get_token("gmail")
+        assert token == "google-tok-via-adapter"
+
+    def test_auth_adapter_raises_auth_challenge(self, http: FakeHttp):
+        """AuthPort raising AuthChallenge propagates to caller."""
+
+        class ChallengeAuth:
+            def authenticate(self, scope: str) -> str:
+                raise AuthChallenge(
+                    "Please login",
+                    url="https://example.com/login",
+                    code="ABCD",
+                    scope=scope,
+                )
+
+        provider = Auth0Provider(
+            domain="test.auth0.com",
+            client_id="c",
+            client_secret="s",
+            _auth=ChallengeAuth(),
+            _http=http,
+        )
+        with pytest.raises(AuthChallenge) as exc_info:
+            provider.get_token("gmail")
+        assert exc_info.value.url == "https://example.com/login"
+        assert exc_info.value.code == "ABCD"
+
+    def test_auth_adapter_called_only_once(self, http: FakeHttp):
+        """Once refresh token is obtained, adapter is not called again."""
+        call_count = 0
+
+        class CountingAuth:
+            def authenticate(self, scope: str) -> str:
+                nonlocal call_count
+                call_count += 1
+                return "rt_counted"
+
+        http.push_response({"access_token": "tok1", "expires_in": 3600})
+        http.push_response({"access_token": "tok2", "expires_in": 3600})
+
+        provider = Auth0Provider(
+            domain="test.auth0.com",
+            client_id="c",
+            client_secret="s",
+            _auth=CountingAuth(),
+            _http=http,
+        )
+        provider.get_token("gmail")
+        # Second call for different scope — should reuse refresh token
+        provider.get_token("google-drive")
+        assert call_count == 1
 
     def test_refresh_token_optional(self, http: FakeHttp):
         """Constructor works without refresh_token."""

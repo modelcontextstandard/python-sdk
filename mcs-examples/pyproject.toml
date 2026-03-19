@@ -21,9 +21,23 @@ quickstart = [
   "uvicorn>=0.29",
   "pydantic>=2.7",
 ]
+gmail = [
+  "mcs-driver-mail>=0.1",
+  "mcs-adapter-gmail>=0.1",
+  "mcs-auth>=0.1",
+  "mcs-auth-auth0>=0.1",
+  "mcs-auth-oauth>=0.1",
+  "mcs-auth-linkauth>=0.1",
+]
 
 [tool.uv.sources]
-mcs-driver-core = { workspace = true }
+mcs-driver-core    = { workspace = true }
+mcs-driver-mail    = { workspace = true }
+mcs-adapter-gmail  = { workspace = true }
+mcs-auth           = { workspace = true }
+mcs-auth-auth0     = { workspace = true }
+mcs-auth-oauth     = { workspace = true }
+mcs-auth-linkauth  = { workspace = true }
 
 [tool.setuptools.packages.find]
 where   = ["."]
