@@ -23,7 +23,7 @@ quickstart = [
 ]
 gmail = [
   "mcs-driver-mail>=0.1",
-  "mcs-adapter-gmail>=0.1",
+  "mcs-adapter-http>=0.2",
   "mcs-auth>=0.1",
   "mcs-auth-auth0>=0.1",
   "mcs-auth-oauth>=0.1",
@@ -33,7 +33,7 @@ gmail = [
 [tool.uv.sources]
 mcs-driver-core    = { workspace = true }
 mcs-driver-mail    = { workspace = true }
-mcs-adapter-gmail  = { workspace = true }
+mcs-adapter-http   = { workspace = true }
 mcs-auth           = { workspace = true }
 mcs-auth-auth0     = { workspace = true }
 mcs-auth-oauth     = { workspace = true }

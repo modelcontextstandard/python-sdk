@@ -188,8 +188,8 @@ class MailreadToolDriver(MCSToolDriver):
             from mcs.adapter.imap import ImapAdapter
             self._adapter = ImapAdapter(**adapter_kwargs)
         elif adapter == "gmail":
-            from mcs.adapter.gmail import GmailAdapter
-            self._adapter = GmailAdapter(**adapter_kwargs)
+            from .gmail_connector import GmailMailboxConnector
+            self._adapter = GmailMailboxConnector(**adapter_kwargs)
         else:
             raise ValueError(
                 f"Unknown mailread adapter: {adapter!r}.  "

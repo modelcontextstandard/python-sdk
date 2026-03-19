@@ -34,13 +34,13 @@ dependencies = [
 
 [project.optional-dependencies]
 imap      = ["mcs-adapter-imap>=0.1"]
-gmail     = ["mcs-adapter-gmail>=0.1"]
+gmail     = ["mcs-adapter-http>=0.2"]
 inspector = ["mcs-inspector>=0.1"]
 
 [tool.uv.sources]
 mcs-driver-core   = { workspace = true }
 mcs-adapter-imap  = { workspace = true }
-mcs-adapter-gmail = { workspace = true }
+mcs-adapter-http  = { workspace = true }
 mcs-inspector     = { workspace = true }
 
 [tool.setuptools.packages.find]

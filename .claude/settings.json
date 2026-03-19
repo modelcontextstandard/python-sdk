@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Development/Projekte/modelcontextstandard/python-sdk/$USERPROFILE/.claude/projects/c--Development-Projekte-modelcontextstandard-python-sdk/**)",
+      "Bash(uv sync:*)"
+    ]
+  }
+}
