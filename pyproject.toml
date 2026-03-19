@@ -23,6 +23,11 @@ dependencies = [
   "mcs-auth-auth0>=0.1",
   "mcs-auth-oauth>=0.1",
   "mcs-auth-linkauth>=0.1",
+  "mcs-adapter-docker>=0.1",
+  "mcs-adapter-ssh>=0.1",
+  "mcs-adapter-mcp>=0.1",
+  "mcs-driver-sandbox>=0.1",
+  "mcs-driver-mcp>=0.1",
 ]
 
 [tool.uv.sources]
@@ -45,6 +50,11 @@ mcs-auth = { workspace = true }
 mcs-auth-auth0 = { workspace = true }
 mcs-auth-oauth = { workspace = true }
 mcs-auth-linkauth = { workspace = true }
+mcs-adapter-docker = { workspace = true }
+mcs-adapter-ssh = { workspace = true }
+mcs-adapter-mcp = { workspace = true }
+mcs-driver-sandbox = { workspace = true }
+mcs-driver-mcp = { workspace = true }
 mcs-examples = { workspace = true }
 
 [tool.uv.workspace]
