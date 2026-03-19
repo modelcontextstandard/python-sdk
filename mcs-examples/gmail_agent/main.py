@@ -133,10 +133,13 @@ def _build_credential(args: argparse.Namespace):
             if not os.environ.get(var):
                 raise SystemExit(f"Missing environment variable: {var}")
 
-        broker_url = os.environ.get("LINKAUTH_BROKER_URL", "http://localhost:8000")
+        broker_url = os.environ.get("LINKAUTH_BROKER_URL", "http://localhost:8080")
+        audience = os.environ.get("AUTH0_AUDIENCE", "")
         auth_adapter = LinkAuthAdapter(
             broker_url=broker_url,
-            template="auth0",
+            oauth_provider="auth0",
+            oauth_scopes=["openid", "email", "offline_access"],
+            oauth_extra_params={"audience": audience, "connection": "google-oauth2"},
             display_name="Auth0 Login (Gmail)",
         )
         return Auth0Provider(

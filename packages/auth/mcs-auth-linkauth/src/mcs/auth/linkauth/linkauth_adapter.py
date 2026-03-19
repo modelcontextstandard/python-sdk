@@ -65,6 +65,9 @@ class LinkAuthAdapter:
         broker_url: str,
         template: dict[str, str] | str = "api_key",
         display_name: str | None = None,
+        oauth_provider: str | None = None,
+        oauth_scopes: list[str] | None = None,
+        oauth_extra_params: dict[str, str] | None = None,
         poll_interval: int = 5,
         poll_timeout: int = 0,
         token_field: str | None = None,
@@ -72,6 +75,9 @@ class LinkAuthAdapter:
         self._broker_url = broker_url.rstrip("/")
         self._template = template
         self._display_name = display_name
+        self._oauth_provider = oauth_provider
+        self._oauth_scopes = oauth_scopes
+        self._oauth_extra_params = oauth_extra_params
         self._poll_interval = poll_interval
         self._poll_timeout = poll_timeout
         self._token_field = token_field
@@ -151,11 +157,18 @@ class LinkAuthAdapter:
     def _create_session(self, scope: str) -> _SessionState:
         """POST /v1/sessions to create a new LinkAuth session."""
         url = f"{self._broker_url}/v1/sessions"
-        body = json.dumps({
+        payload: dict[str, Any] = {
             "public_key": self._public_key_b64,
             "template": self._resolve_template(scope),
             "display_name": self._display_name or f"Access for {scope}",
-        }).encode()
+        }
+        if self._oauth_provider:
+            payload["oauth_provider"] = self._oauth_provider
+        if self._oauth_scopes:
+            payload["oauth_scopes"] = self._oauth_scopes
+        if self._oauth_extra_params:
+            payload["oauth_extra_params"] = self._oauth_extra_params
+        body = json.dumps(payload).encode()
 
         req = urllib.request.Request(
             url, data=body, headers={"Content-Type": "application/json"}
