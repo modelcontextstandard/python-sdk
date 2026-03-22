@@ -162,8 +162,8 @@ class MailsendToolDriver(MCSToolDriver):
             from mcs.adapter.smtp import SmtpAdapter
             self._adapter = SmtpAdapter(**adapter_kwargs)
         elif adapter == "gmail":
-            from mcs.adapter.gmail import GmailAdapter
-            self._adapter = GmailAdapter(**adapter_kwargs)
+            from .gmail_connector import GmailMailsendConnector
+            self._adapter = GmailMailsendConnector(**adapter_kwargs)
         else:
             raise ValueError(
                 f"Unknown mailsend adapter: {adapter!r}.  "

@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=63", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name            = "mcs-adapter-docker"
+version         = "0.1.0"
+description     = "Docker adapter for the MCS Sandbox Driver — runs commands in isolated containers."
+requires-python = ">=3.9"
+license         = "Apache-2.0"
+dependencies    = ["docker>=7.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

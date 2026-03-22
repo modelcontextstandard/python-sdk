@@ -10,7 +10,6 @@ dependencies = [
   "mcs-adapter-smb>=0.1",
   "mcs-adapter-imap>=0.1",
   "mcs-adapter-smtp>=0.1",
-  "mcs-adapter-gmail>=0.1",
   "mcs-driver-rest>=0.2",
   "mcs-driver-filesystem>=0.2",
   "mcs-driver-csv>=0.1",
@@ -24,6 +23,11 @@ dependencies = [
   "mcs-auth-auth0>=0.1",
   "mcs-auth-oauth>=0.1",
   "mcs-auth-linkauth>=0.1",
+  "mcs-adapter-docker>=0.1",
+  "mcs-adapter-ssh>=0.1",
+  "mcs-adapter-mcp>=0.1",
+  "mcs-driver-sandbox>=0.1",
+  "mcs-driver-mcp>=0.1",
 ]
 
 [tool.uv.sources]
@@ -33,7 +37,6 @@ mcs-adapter-localfs = { workspace = true }
 mcs-adapter-smb = { workspace = true }
 mcs-adapter-imap = { workspace = true }
 mcs-adapter-smtp = { workspace = true }
-mcs-adapter-gmail = { workspace = true }
 mcs-driver-rest = { workspace = true }
 mcs-driver-filesystem = { workspace = true }
 mcs-driver-csv = { workspace = true }
@@ -47,6 +50,11 @@ mcs-auth = { workspace = true }
 mcs-auth-auth0 = { workspace = true }
 mcs-auth-oauth = { workspace = true }
 mcs-auth-linkauth = { workspace = true }
+mcs-adapter-docker = { workspace = true }
+mcs-adapter-ssh = { workspace = true }
+mcs-adapter-mcp = { workspace = true }
+mcs-driver-sandbox = { workspace = true }
+mcs-driver-mcp = { workspace = true }
 mcs-examples = { workspace = true }
 
 [tool.uv.workspace]
@@ -82,3 +90,6 @@ examples = [
   "rich>=13.0",
   "python-dotenv>=1.0",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
