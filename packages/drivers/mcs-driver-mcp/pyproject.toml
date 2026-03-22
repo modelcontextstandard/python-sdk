@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "mcs-driver-mcp"
-version         = "0.1.0"
+version         = "0.1.1"
 description     = "MCS Driver that bridges MCP (Model Context Protocol) servers — exposing any MCP tool server as native MCS tools."
 requires-python = ">=3.9"
 license         = "Apache-2.0"
-dependencies    = ["mcs-driver-core>=0.2", "mcs-adapter-mcp>=0.1"]
+dependencies    = ["mcs-driver-core>=0.2.2", "mcs-adapter-mcp>=0.1"]
 
 [tool.uv.sources]
 mcs-driver-core = { workspace = true }

@@ -1,10 +1,10 @@
 [project]
 name = "mcs-python-sdk"
-version = "0.2.0"
+version = "0.2.1"
 description = "Model Context Standard – Python SDK workspace root."
 requires-python = ">=3.9"
 dependencies = [
-  "mcs-driver-core>=0.2",
+  "mcs-driver-core>=0.2.2",
   "mcs-adapter-http>=0.2",
   "mcs-adapter-localfs>=0.1",
   "mcs-adapter-smb>=0.1",

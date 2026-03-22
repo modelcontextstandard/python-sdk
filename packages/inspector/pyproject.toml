@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "mcs-inspector"
-version         = "0.1.0"
+version         = "0.1.2"
 description     = "Interactive CLI inspector for any MCS driver -- inspect tools, test connections, execute calls."
 readme          = "README.md"
 requires-python = ">=3.9"
@@ -30,7 +30,7 @@ classifiers     = [
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
 
 dependencies = [
-    "mcs-driver-core>=0.2",
+    "mcs-driver-core>=0.2.2",
     "rich>=13",
 ]
 
