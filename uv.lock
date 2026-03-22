@@ -1688,7 +1688,7 @@ requires-dist = [
 
 [[package]]
 name = "mcs-auth-linkauth"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/auth/mcs-auth-linkauth" }
 dependencies = [
     { name = "cryptography" },

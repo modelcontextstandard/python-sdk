@@ -68,6 +68,7 @@ class LinkAuthAdapter:
         oauth_provider: str | None = None,
         oauth_scopes: list[str] | None = None,
         oauth_extra_params: dict[str, str] | None = None,
+        api_key: str | None = None,
         poll_interval: int = 5,
         poll_timeout: int = 0,
         token_field: str | None = None,
@@ -78,6 +79,7 @@ class LinkAuthAdapter:
         self._oauth_provider = oauth_provider
         self._oauth_scopes = oauth_scopes
         self._oauth_extra_params = oauth_extra_params
+        self._api_key = api_key
         self._poll_interval = poll_interval
         self._poll_timeout = poll_timeout
         self._token_field = token_field
@@ -170,9 +172,10 @@ class LinkAuthAdapter:
             payload["oauth_extra_params"] = self._oauth_extra_params
         body = json.dumps(payload).encode()
 
-        req = urllib.request.Request(
-            url, data=body, headers={"Content-Type": "application/json"}
-        )
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["X-API-Key"] = self._api_key
+        req = urllib.request.Request(url, data=body, headers=headers)
         resp = urllib.request.urlopen(req)
         data = json.loads(resp.read())
 
@@ -195,9 +198,12 @@ class LinkAuthAdapter:
         deadline = time.time() + self._poll_timeout
 
         while True:
-            req = urllib.request.Request(
-                url, headers={"Authorization": f"Bearer {session.poll_token}"}
-            )
+            poll_headers: dict[str, str] = {
+                "Authorization": f"Bearer {session.poll_token}",
+            }
+            if self._api_key:
+                poll_headers["X-API-Key"] = self._api_key
+            req = urllib.request.Request(url, headers=poll_headers)
             try:
                 resp = urllib.request.urlopen(req)
                 data = json.loads(resp.read())

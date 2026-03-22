@@ -137,6 +137,7 @@ def _build_credential(args: argparse.Namespace):
         audience = os.environ.get("AUTH0_AUDIENCE", "")
         auth_adapter = LinkAuthAdapter(
             broker_url=broker_url,
+            api_key=os.environ.get("LINKAUTH_API_KEY"),
             oauth_provider="auth0",
             oauth_scopes=["openid", "email", "offline_access"],
             oauth_extra_params={"audience": audience, "connection": "google-oauth2"},
@@ -155,6 +156,7 @@ def _build_credential(args: argparse.Namespace):
         broker_url = os.environ.get("LINKAUTH_BROKER_URL", "http://localhost:8000")
         return LinkAuthProvider(
             broker_url=broker_url,
+            api_key=os.environ.get("LINKAUTH_API_KEY"),
             template="google_mail",
             display_name="Gmail Access",
         )
