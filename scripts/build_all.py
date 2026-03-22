@@ -23,10 +23,11 @@ PACKAGES = [
     "packages/adapters/mcs-adapter-smb",
     "packages/adapters/mcs-adapter-imap",
     "packages/adapters/mcs-adapter-smtp",
-    "packages/adapters/mcs-adapter-gmail",
     # Auth (mcs-auth first, then providers)
     "packages/auth/mcs-auth",
     "packages/auth/mcs-auth-auth0",
+    "packages/auth/mcs-auth-oauth",
+    "packages/auth/mcs-auth-linkauth",
     "packages/auth/mcs-auth-oauth",
     "packages/auth/mcs-auth-linkauth",
     # Drivers (depend on core + adapters)
