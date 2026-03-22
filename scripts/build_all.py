@@ -23,6 +23,12 @@ PACKAGES = [
     "packages/adapters/mcs-adapter-smb",
     "packages/adapters/mcs-adapter-imap",
     "packages/adapters/mcs-adapter-smtp",
+    "packages/adapters/mcs-adapter-gmail",
+    # Auth (mcs-auth first, then providers)
+    "packages/auth/mcs-auth",
+    "packages/auth/mcs-auth-auth0",
+    "packages/auth/mcs-auth-oauth",
+    "packages/auth/mcs-auth-linkauth",
     # Drivers (depend on core + adapters)
     "packages/drivers/mcs-driver-rest",
     "packages/drivers/mcs-driver-csv",
@@ -37,6 +43,9 @@ PACKAGES = [
     "packages/orchestrators/mcs-orchestrator-rest",
 ]
 
+# Required files for PyPI publishing
+REQUIRED_FILES = ["LICENSE", "README.md"]
+
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "dist_all"
 
@@ -48,6 +57,26 @@ def _collect_artifacts() -> list[Path]:
         p for p in OUT_DIR.iterdir()
         if p.suffix == ".whl" or p.name.endswith(".tar.gz")
     )
+
+
+def _preflight_check(packages: list[str]) -> list[str]:
+    """Check all packages for required files before building.
+
+    Returns list of error messages. Empty list means all checks passed.
+    """
+    errors = []
+    for pkg in packages:
+        pkg_path = ROOT / pkg
+        if not pkg_path.exists():
+            errors.append(f"{pkg}: package directory does not exist")
+            continue
+        if not (pkg_path / "pyproject.toml").exists():
+            errors.append(f"{pkg}: missing pyproject.toml")
+            continue
+        for required in REQUIRED_FILES:
+            if not (pkg_path / required).exists():
+                errors.append(f"{pkg}: missing {required}")
+    return errors
 
 
 def main() -> int:
@@ -62,6 +91,17 @@ def main() -> int:
         return 1
 
     if args.build:
+        # Preflight: check all packages before building any
+        print(f"Preflight check for {len(PACKAGES)} packages ...")
+        errors = _preflight_check(PACKAGES)
+        if errors:
+            print(f"\nPreflight FAILED — {len(errors)} issue(s):\n")
+            for err in errors:
+                print(f"  - {err}")
+            print(f"\nFix these issues before building. Aborting.")
+            return 1
+        print("Preflight OK.\n")
+
         if args.clean and OUT_DIR.exists():
             shutil.rmtree(OUT_DIR)
             print(f"Cleaned {OUT_DIR}")
