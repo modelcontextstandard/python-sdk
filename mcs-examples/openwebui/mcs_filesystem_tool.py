@@ -37,7 +37,7 @@ class Tools:
 
         self.driver = FilesystemDriver(
             adapter=self.valves.adapter,
-            root=self.valves.root_path,
+            base_dir=self.valves.root_path,
         )
 
     def _dynamically_generate_tools(self):

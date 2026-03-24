@@ -48,7 +48,7 @@ class Tools:
         )
 
         rest_driver = RestDriver(url=self.valves.spec_url, include_tags=tags)
-        fs_driver = FilesystemDriver(adapter="localfs", root=self.valves.root_path)
+        fs_driver = FilesystemDriver(adapter="localfs", base_dir=self.valves.root_path)
 
         self.orchestrator = BaseOrchestrator(
             resolution_strategy=ToolPipeline(layers=[NamespacingLayer()]),
