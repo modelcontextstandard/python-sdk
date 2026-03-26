@@ -30,7 +30,7 @@ urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://
 dependencies = [
     "mcs-driver-core>=0.2.2",
     "mcs-orchestrator-base>=0.1",
-    "mcs-adapter-http>=0.2",
+    "mcs-adapter-http>=0.3",
     "mcs-driver-rest>=0.2",
 ]
 

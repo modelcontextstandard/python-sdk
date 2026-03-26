@@ -37,7 +37,7 @@ dependencies = [
 [project.optional-dependencies]
 imap      = ["mcs-adapter-imap>=0.1"]
 smtp      = ["mcs-adapter-smtp>=0.1"]
-gmail     = ["mcs-adapter-http>=0.2"]
+gmail     = ["mcs-adapter-http>=0.3"]
 inspector = ["mcs-inspector>=0.1"]
 all       = ["mcs-driver-mail[imap,smtp,gmail,inspector]"]
 

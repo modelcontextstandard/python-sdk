@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "mcs-driver-mailsend"
-version         = "0.1.2"
+version         = "0.2.0"
 description     = "Mail-sending driver for the Model Context Standard -- lets an LLM send e-mail."
 readme          = "README.md"
 requires-python = ">=3.9"
@@ -34,7 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 smtp      = ["mcs-adapter-smtp>=0.1"]
-gmail     = ["mcs-adapter-http>=0.2"]
+gmail     = ["mcs-adapter-http>=0.3"]
 inspector = ["mcs-inspector>=0.1"]
 
 [tool.uv.sources]

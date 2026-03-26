@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "mcs-auth-auth0"
-version         = "0.1.0"
+version         = "0.2.0"
 description     = "Auth0 Token Vault credential provider for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"
@@ -30,7 +30,7 @@ urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://
 
 dependencies = [
     "mcs-auth>=0.1",
-    "mcs-adapter-http>=0.2",
+    "mcs-adapter-http>=0.3",
 ]
 
 [tool.uv.sources]

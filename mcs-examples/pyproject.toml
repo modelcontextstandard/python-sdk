@@ -23,7 +23,7 @@ quickstart = [
 ]
 gmail = [
   "mcs-driver-mail>=0.1",
-  "mcs-adapter-http>=0.2",
+  "mcs-adapter-http>=0.3",
   "mcs-auth>=0.1",
   "mcs-auth-auth0>=0.1",
   "mcs-auth-oauth>=0.1",
