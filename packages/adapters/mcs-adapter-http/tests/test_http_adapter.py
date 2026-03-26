@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcs.adapter.http import HttpAdapter
+from mcs.adapter.http import HttpAdapter, HttpError, HttpResponse
 
 
 # ================================================================== #
@@ -78,14 +78,22 @@ class TestRequest:
     @patch("mcs.adapter.http.http_adapter.requests.request")
     def test_get_request(self, mock_req):
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.text = '{"ok": true}'
-        mock_resp.raise_for_status = MagicMock()
+        mock_resp.content = b'{"ok": true}'
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.reason = "OK"
+        mock_resp.encoding = "utf-8"
         mock_req.return_value = mock_resp
 
         adapter = HttpAdapter()
         result = adapter.request("GET", "https://example.com/api")
 
-        assert result == '{"ok": true}'
+        assert isinstance(result, HttpResponse)
+        assert result.status_code == 200
+        assert result.text == '{"ok": true}'
+        assert result.ok is True
+        assert result.json() == {"ok": True}
         mock_req.assert_called_once_with(
             "GET",
             "https://example.com/api",
@@ -100,21 +108,30 @@ class TestRequest:
     @patch("mcs.adapter.http.http_adapter.requests.request")
     def test_post_with_json_body(self, mock_req):
         mock_resp = MagicMock()
+        mock_resp.status_code = 201
         mock_resp.text = '{"id": 1}'
-        mock_resp.raise_for_status = MagicMock()
+        mock_resp.content = b'{"id": 1}'
+        mock_resp.headers = {}
+        mock_resp.reason = "Created"
+        mock_resp.encoding = "utf-8"
         mock_req.return_value = mock_resp
 
         adapter = HttpAdapter()
-        adapter.request("POST", "https://example.com/api", json_body={"name": "test"})
+        result = adapter.request("POST", "https://example.com/api", json_body={"name": "test"})
 
+        assert result.ok is True
         call_kwargs = mock_req.call_args
         assert call_kwargs.kwargs["json"] == {"name": "test"}
 
     @patch("mcs.adapter.http.http_adapter.requests.request")
     def test_headers_merged(self, mock_req):
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.text = "{}"
-        mock_resp.raise_for_status = MagicMock()
+        mock_resp.content = b"{}"
+        mock_resp.headers = {}
+        mock_resp.reason = "OK"
+        mock_resp.encoding = "utf-8"
         mock_req.return_value = mock_resp
 
         adapter = HttpAdapter(default_headers={"X-Default": "yes"})
@@ -126,8 +143,12 @@ class TestRequest:
     @patch("mcs.adapter.http.http_adapter.requests.request")
     def test_custom_timeout_per_call(self, mock_req):
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.text = "{}"
-        mock_resp.raise_for_status = MagicMock()
+        mock_resp.content = b"{}"
+        mock_resp.headers = {}
+        mock_resp.reason = "OK"
+        mock_resp.encoding = "utf-8"
         mock_req.return_value = mock_resp
 
         adapter = HttpAdapter(timeout=10)
@@ -136,14 +157,41 @@ class TestRequest:
         assert mock_req.call_args.kwargs["timeout"] == 30
 
     @patch("mcs.adapter.http.http_adapter.requests.request")
-    def test_raise_for_status_called(self, mock_req):
+    def test_non_2xx_does_not_raise(self, mock_req):
         mock_resp = MagicMock()
-        mock_resp.raise_for_status.side_effect = Exception("404")
+        mock_resp.status_code = 404
+        mock_resp.text = '{"error": "not_found"}'
+        mock_resp.content = b'{"error": "not_found"}'
+        mock_resp.headers = {}
+        mock_resp.reason = "Not Found"
+        mock_resp.encoding = "utf-8"
         mock_req.return_value = mock_resp
 
         adapter = HttpAdapter()
-        with pytest.raises(Exception, match="404"):
-            adapter.request("GET", "https://example.com/missing")
+        result = adapter.request("GET", "https://example.com/missing")
+
+        assert result.status_code == 404
+        assert result.ok is False
+        assert result.reason == "Not Found"
+
+    @patch("mcs.adapter.http.http_adapter.requests.request")
+    def test_raise_for_status_opt_in(self, mock_req):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_resp.text = "Unauthorized"
+        mock_resp.content = b"Unauthorized"
+        mock_resp.headers = {}
+        mock_resp.reason = "Unauthorized"
+        mock_resp.encoding = "utf-8"
+        mock_req.return_value = mock_resp
+
+        adapter = HttpAdapter()
+        result = adapter.request("GET", "https://example.com/secret")
+
+        with pytest.raises(HttpError, match="401 Unauthorized") as exc_info:
+            result.raise_for_status()
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.response is result
 
 
 # ================================================================== #

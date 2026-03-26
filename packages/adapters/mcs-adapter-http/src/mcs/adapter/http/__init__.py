@@ -1,3 +1,3 @@
-from .http_adapter import HttpAdapter
+from .http_adapter import HttpAdapter, HttpError, HttpResponse
 
-__all__ = ["HttpAdapter"]
+__all__ = ["HttpAdapter", "HttpError", "HttpResponse"]

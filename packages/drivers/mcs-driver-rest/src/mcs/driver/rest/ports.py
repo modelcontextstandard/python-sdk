@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from mcs.adapter.http import HttpResponse
+
 
 @runtime_checkable
 class HttpPort(Protocol):
@@ -28,6 +30,6 @@ class HttpPort(Protocol):
         json_body: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         timeout: int | None = None,
-    ) -> str: ...
+    ) -> HttpResponse: ...
 
     def head(self, url: str, *, timeout: int | None = None) -> int: ...

@@ -194,8 +194,9 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
             return
         logger.info("Fetching OpenAPI spec from %s", self.spec_url)
         try:
-            spec_text = self._http.request("GET", self.spec_url)
-            spec = self._parse_raw_spec(spec_text)
+            resp = self._http.request("GET", self.spec_url)
+            resp.raise_for_status()
+            spec = self._parse_raw_spec(resp.text)
         except Exception as e:
             logger.error("Failed to fetch or parse OpenAPI spec: %s", e)
             self._tools = []
@@ -365,13 +366,16 @@ class RestToolDriver(MCSToolDriver, SupportsHealthcheck):
         logger.info("Executing '%s': %s %s", tool_name, method, full_url)
 
         if method == "GET":
-            return self._http.request(
+            resp = self._http.request(
                 "GET", full_url, params=query_params, headers=extra_headers
             )
-        return self._http.request(
-            method,
-            full_url,
-            params=query_params,
-            json_body=body_params,
-            headers=extra_headers,
-        )
+        else:
+            resp = self._http.request(
+                method,
+                full_url,
+                params=query_params,
+                json_body=body_params,
+                headers=extra_headers,
+            )
+        resp.raise_for_status()
+        return resp.text

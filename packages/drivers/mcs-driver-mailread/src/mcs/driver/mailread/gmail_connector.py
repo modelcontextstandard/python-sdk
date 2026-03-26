@@ -16,6 +16,8 @@ import json
 import logging
 from typing import Any, Callable, Protocol, Union, runtime_checkable
 
+from mcs.adapter.http import HttpResponse
+
 logger = logging.getLogger(__name__)
 
 _BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -41,7 +43,7 @@ class HttpPort(Protocol):
         json_body: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         timeout: int | None = None,
-    ) -> str: ...
+    ) -> HttpResponse: ...
 
 
 class GmailMailboxConnector:
@@ -92,20 +94,22 @@ class GmailMailboxConnector:
         return {"Authorization": f"Bearer {self._get_token()}"}
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        raw = self._http.request(
+        resp = self._http.request(
             "GET", f"{_BASE}{path}",
             params=params,
             headers=self._auth_headers(),
         )
-        return json.loads(raw)
+        resp.raise_for_status()
+        return resp.json()
 
     def _post(self, path: str, body: dict[str, Any]) -> Any:
-        raw = self._http.request(
+        resp = self._http.request(
             "POST", f"{_BASE}{path}",
             json_body=body,
             headers=self._auth_headers(),
         )
-        return json.loads(raw)
+        resp.raise_for_status()
+        return resp.json()
 
     @staticmethod
     def _extract_header(headers: list[dict[str, str]], name: str) -> str:
