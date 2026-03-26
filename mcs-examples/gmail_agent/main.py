@@ -11,8 +11,8 @@ credentials, the AuthMixin intercepts the challenge and the LLM
 presents the login URL to the user.
 
 Usage:
-    # Auth0 Token Vault (with refresh token in .env):
-    python main.py --auth0
+    # Auth0 with pre-existing refresh token (from .env):
+    python main.py --auth0-token
 
     # Auth0 via browser login (Authorization Code Flow):
     python main.py --auth0-oauth
@@ -23,8 +23,8 @@ Usage:
     # LinkAuth broker direct (no Auth0):
     python main.py --linkauth
 
-    # Quick test with a static Google OAuth2 token:
-    python main.py --token ya29.xxx
+    # Quick test with a static Google OAuth2 access token:
+    python main.py --gmail-token ya29.xxx
 
 Requires:
     pip install mcs-driver-mail[gmail] mcs-auth-auth0 litellm rich python-dotenv
@@ -56,8 +56,8 @@ class AuthMailDriver(AuthMixin, MailDriver):
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="MCS Gmail Agent (streaming)")
     auth = p.add_mutually_exclusive_group(required=True)
-    auth.add_argument("--token", help="Static Google OAuth2 access token (quick test)")
-    auth.add_argument("--auth0", action="store_true", help="Auth0 Token Vault (needs AUTH0_REFRESH_TOKEN in .env)")
+    auth.add_argument("--gmail-token", help="Static Google OAuth2 access token (quick test)")
+    auth.add_argument("--auth0-token", action="store_true", help="Auth0 with pre-existing refresh token (needs AUTH0_REFRESH_TOKEN in .env)")
     auth.add_argument("--auth0-oauth", action="store_true", help="Auth0 via browser login (Authorization Code Flow)")
     auth.add_argument("--auth0-linkauth", action="store_true", help="Auth0 via LinkAuth broker (device-flow UX)")
     auth.add_argument("--linkauth", action="store_true", help="LinkAuth broker direct (no Auth0)")
@@ -74,10 +74,10 @@ def _parse_args() -> argparse.Namespace:
 
 def _build_credential(args: argparse.Namespace):
     """Build the appropriate CredentialProvider based on CLI args."""
-    if args.token:
+    if args.gmail_token:
         return None  # Static token handled separately
 
-    if args.auth0:
+    if args.auth0_token:
         from mcs.auth.auth0 import Auth0Provider
 
         for var in ("AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET", "AUTH0_REFRESH_TOKEN"):
@@ -89,6 +89,10 @@ def _build_credential(args: argparse.Namespace):
             client_id=os.environ["AUTH0_CLIENT_ID"],
             client_secret=os.environ["AUTH0_CLIENT_SECRET"],
             refresh_token=os.environ["AUTH0_REFRESH_TOKEN"],
+            connection_scopes={"gmail": [
+                "https://mail.google.com/",
+                "openid", "email", "profile",
+            ]},
         )
 
     if getattr(args, "auth0_oauth", False):
@@ -102,26 +106,27 @@ def _build_credential(args: argparse.Namespace):
         domain = os.environ["AUTH0_DOMAIN"]
         audience = os.environ.get("AUTH0_AUDIENCE", f"https://{domain}/api/v2/")
 
-        def _on_auth(scope: str) -> None:
-            console.print(Panel(
-                f"Authentication required for [bold]{scope}[/bold].\n"
-                f"Opening browser for login...",
-                title="Auth", border_style="cyan",
-            ))
-
         auth_adapter = OAuthAdapter(
             authorize_url=f"https://{domain}/authorize",
             token_url=f"https://{domain}/oauth/token",
             client_id=os.environ["AUTH0_CLIENT_ID"],
             client_secret=os.environ["AUTH0_CLIENT_SECRET"],
-            scopes={"gmail": "openid email offline_access https://mail.google.com/"},
-            extra_params={"connection": "google-oauth2", "audience": audience},
-            on_auth_start=_on_auth,
+            scopes={"gmail": "openid email offline_access"},
+            extra_params={
+                "connection": "google-oauth2",
+                "audience": audience,
+                "connection_scope": "https://mail.google.com/",
+                "prompt": "consent",
+            },
         )
         return Auth0Provider(
             domain=domain,
             client_id=os.environ["AUTH0_CLIENT_ID"],
             client_secret=os.environ["AUTH0_CLIENT_SECRET"],
+            connection_scopes={"gmail": [
+                "https://mail.google.com/",
+                "openid", "email", "profile",
+            ]},
             _auth=auth_adapter,
         )
 
@@ -147,6 +152,10 @@ def _build_credential(args: argparse.Namespace):
             domain=os.environ["AUTH0_DOMAIN"],
             client_id=os.environ["AUTH0_CLIENT_ID"],
             client_secret=os.environ["AUTH0_CLIENT_SECRET"],
+            connection_scopes={"gmail": [
+                "https://mail.google.com/",
+                "openid", "email", "profile",
+            ]},
             _auth=auth_adapter,
         )
 
@@ -174,7 +183,7 @@ def _build_driver(args: argparse.Namespace) -> AuthMailDriver:
     if credential is not None:
         gmail_kwargs["_credential"] = credential
     else:
-        gmail_kwargs["access_token"] = args.token
+        gmail_kwargs["access_token"] = args.gmail_token
 
     return AuthMailDriver(
         read_adapter="gmail",

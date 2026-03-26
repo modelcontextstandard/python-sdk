@@ -27,22 +27,25 @@ pip install mcs-driver-mail[gmail] mcs-auth-auth0 litellm rich python-dotenv
 # Copy and fill in .env
 cp .env.example .env
 
-# Run with a static Google OAuth2 token (for testing):
-python main.py --token ya29.xxx
+# Run with a static Google OAuth2 access token (for testing):
+python main.py --gmail-token ya29.xxx
 
-# Run with Auth0 Token Vault:
-python main.py --auth0
+# Run with Auth0 pre-existing refresh token:
+python main.py --auth0-token
 
 # Custom model + debug output:
-python main.py --auth0 --model anthropic/claude-sonnet-4-20250514 --debug
+python main.py --auth0-token --model anthropic/claude-sonnet-4-20250514 --debug
 ```
 
 ## Auth modes
 
 | Mode | Flag | Credential source |
 |------|------|-------------------|
-| Static token | `--token ya29.xxx` | Google OAuth Playground or gcloud CLI |
-| Auth0 | `--auth0` | Auth0 Token Vault (env vars) |
+| Static token | `--gmail-token ya29.xxx` | Google OAuth Playground or gcloud CLI |
+| Auth0 refresh token | `--auth0-token` | Auth0 with pre-existing refresh token (env vars) |
+| Auth0 browser login | `--auth0-oauth` | Authorization Code Flow via browser |
+| Auth0 + LinkAuth | `--auth0-linkauth` | Device-flow via LinkAuth broker |
+| LinkAuth direct | `--linkauth` | LinkAuth broker without Auth0 |
 
 ## Available tools
 
