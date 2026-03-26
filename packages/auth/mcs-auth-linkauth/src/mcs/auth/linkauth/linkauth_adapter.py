@@ -20,9 +20,10 @@ import base64
 import json
 import logging
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, cast
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -176,7 +177,21 @@ class LinkAuthAdapter:
         if self._api_key:
             headers["X-API-Key"] = self._api_key
         req = urllib.request.Request(url, data=body, headers=headers)
-        resp = urllib.request.urlopen(req)
+        try:
+            resp = urllib.request.urlopen(req)
+        except urllib.error.HTTPError as exc:
+            err_body = ""
+            try:
+                err_body = exc.read().decode()
+            except Exception:
+                pass
+            logger.error(
+                "LinkAuth session creation failed: %s %s — %s",
+                exc.code, exc.reason, err_body,
+            )
+            raise RuntimeError(
+                f"LinkAuth broker returned {exc.code}: {err_body or exc.reason}"
+            ) from exc
         data = json.loads(resp.read())
 
         logger.info(
@@ -211,7 +226,7 @@ class LinkAuthAdapter:
                 # 429 (slow_down) or transient error
                 read_fn = getattr(exc, "read", None)
                 if read_fn and callable(read_fn):
-                    err_body = read_fn().decode()
+                    err_body = cast(bytes, read_fn()).decode()
                     try:
                         err_data = json.loads(err_body)
                         if err_data.get("type", "").endswith("slow_down"):

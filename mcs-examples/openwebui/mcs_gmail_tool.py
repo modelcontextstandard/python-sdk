@@ -3,7 +3,7 @@ title: MCS Gmail Agent
 description: Gmail access via MCS. Reads, searches, and organises e-mail. Authenticates via Auth0 + LinkAuth device flow.
 author: MCS
 version: 2.0.0
-requirements: mcs-driver-core>=0.2.2, mcs-driver-mail[gmail], mcs-auth, mcs-auth-auth0, mcs-auth-linkauth
+requirements: mcs-driver-core>=0.2.2, mcs-driver-mail[gmail]>=0.1.2, mcs-driver-mailread>=0.1.2, mcs-driver-mailsend>=0.1.2, mcs-auth, mcs-auth-auth0, mcs-auth-linkauth
 """
 
 import json
@@ -149,16 +149,28 @@ class Tools:
             print(f"MCS Gmail Init Error: {e}")
 
     def mcs_status(self) -> str:
-        """Shows the status of the MCS Gmail Agent and available tools."""
+        """Shows the status of the MCS Gmail Agent, installed package versions, and available tools."""
+        import importlib.metadata as _meta
+        diag = {}
+        for pkg in ["mcs-driver-core", "mcs-driver-mail", "mcs-driver-mailread", "mcs-driver-mailsend"]:
+            try:
+                diag[pkg] = _meta.version(pkg)
+            except _meta.PackageNotFoundError:
+                diag[pkg] = "NOT INSTALLED"
+
+        from mcs.driver.core.mcs_tool_driver_interface import Tool as _T
+        diag["Tool_fields"] = [f.name for f in __import__("dataclasses").fields(_T)]
+
         try:
             if not self.driver:
                 self._ensure_driver()
             if not self.driver:
-                return json.dumps({"status": "not ready"})
+                return json.dumps({"status": "not ready", "packages": diag}, indent=2)
             tools = self.driver.list_tools()
             return json.dumps({
                 "status": "active",
+                "packages": diag,
                 "tools": [t.name for t in tools],
             }, indent=2)
         except Exception as e:
-            return json.dumps({"status": "error", "message": str(e)})
+            return json.dumps({"status": "error", "packages": diag, "message": str(e)}, indent=2)
