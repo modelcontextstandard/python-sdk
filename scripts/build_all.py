@@ -17,6 +17,8 @@ from pathlib import Path
 PACKAGES = [
     # Core (no MCS dependencies)
     "packages/core",
+    # Types (zero-dependency type packages)
+    "packages/types/mcs-types-http",
     # Adapters (depend on core at most)
     "packages/adapters/mcs-adapter-http",
     "packages/adapters/mcs-adapter-localfs",
@@ -26,8 +28,6 @@ PACKAGES = [
     # Auth (mcs-auth first, then providers)
     "packages/auth/mcs-auth",
     "packages/auth/mcs-auth-auth0",
-    "packages/auth/mcs-auth-oauth",
-    "packages/auth/mcs-auth-linkauth",
     "packages/auth/mcs-auth-oauth",
     "packages/auth/mcs-auth-linkauth",
     # Drivers (depend on core + adapters)
