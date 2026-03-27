@@ -19,6 +19,7 @@ PACKAGES = [
     "packages/core",
     # Types (zero-dependency type packages)
     "packages/types/mcs-types-http",
+    "packages/types/mcs-types-cache",
     # Adapters (depend on core at most)
     "packages/adapters/mcs-adapter-http",
     "packages/adapters/mcs-adapter-localfs",

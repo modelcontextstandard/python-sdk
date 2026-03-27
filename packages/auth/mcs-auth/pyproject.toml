@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "mcs-auth"
-version         = "0.2.0"
+version         = "0.3.0"
 description     = "Credential provider abstraction for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"
@@ -28,7 +28,12 @@ classifiers     = [
 
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
 
-dependencies = []
+dependencies = [
+    "mcs-types-cache>=0.1",
+]
+
+[tool.uv.sources]
+mcs-types-cache = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

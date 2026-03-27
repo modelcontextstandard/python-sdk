@@ -34,6 +34,7 @@ members = [
     "mcs-orchestrator-base",
     "mcs-orchestrator-rest",
     "mcs-python-sdk",
+    "mcs-types-cache",
     "mcs-types-http",
 ]
 
@@ -1673,12 +1674,18 @@ requires-dist = [{ name = "paramiko", specifier = ">=3.0" }]
 
 [[package]]
 name = "mcs-auth"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/auth/mcs-auth" }
+dependencies = [
+    { name = "mcs-types-cache" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "mcs-types-cache", editable = "packages/types/mcs-types-cache" }]
 
 [[package]]
 name = "mcs-auth-auth0"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "packages/auth/mcs-auth-auth0" }
 dependencies = [
     { name = "mcs-adapter-http" },
@@ -1693,7 +1700,7 @@ requires-dist = [
 
 [[package]]
 name = "mcs-auth-linkauth"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "packages/auth/mcs-auth-linkauth" }
 dependencies = [
     { name = "cryptography" },
@@ -2071,6 +2078,7 @@ dependencies = [
     { name = "mcs-inspector" },
     { name = "mcs-orchestrator-base" },
     { name = "mcs-orchestrator-rest" },
+    { name = "mcs-types-cache" },
     { name = "mcs-types-http" },
 ]
 
@@ -2132,6 +2140,7 @@ requires-dist = [
     { name = "mcs-inspector", editable = "packages/inspector" },
     { name = "mcs-orchestrator-base", editable = "packages/orchestrators/mcs-orchestrator-base" },
     { name = "mcs-orchestrator-rest", editable = "packages/orchestrators/mcs-orchestrator-rest" },
+    { name = "mcs-types-cache", editable = "packages/types/mcs-types-cache" },
     { name = "mcs-types-http", editable = "packages/types/mcs-types-http" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -2149,6 +2158,11 @@ dev = [
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "uvicorn", specifier = ">=0.39.0" },
 ]
+
+[[package]]
+name = "mcs-types-cache"
+version = "0.1.0"
+source = { editable = "packages/types/mcs-types-cache" }
 
 [[package]]
 name = "mcs-types-http"

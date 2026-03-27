@@ -111,21 +111,25 @@ _credential = StaticProvider({{
 
     "auth0": '''\
 from mcs.auth.auth0 import Auth0Provider
+from mcs.types.cache import FileCacheStore
 
 _credential = Auth0Provider(
     domain=_resolve("auth0_domain"),
     client_id=_resolve("auth0_client_id"),
     client_secret=_resolve("auth0_client_secret", secret=True),
     refresh_token=_resolve("auth0_refresh_token", secret=True),
+    _token_cache=FileCacheStore(_SKILL_DIR / ".mcs_token_cache"),
 )
 ''',
 
     "auth0-linkauth": '''\
 from mcs.auth.auth0 import Auth0Provider
 from mcs.auth.linkauth import LinkAuthConnector
+from mcs.types.cache import FileCacheStore
 
 _auth_connector = LinkAuthConnector(
     broker_url=_resolve("linkauth_broker_url"),
+    api_key=_resolve("linkauth_api_key", secret=True) or None,
     oauth_provider="auth0",
     oauth_scopes=["openid", "email", "offline_access"],
     oauth_extra_params={{
@@ -140,17 +144,20 @@ _credential = Auth0Provider(
     client_id=_resolve("auth0_client_id"),
     client_secret=_resolve("auth0_client_secret", secret=True),
     _auth=_auth_connector,
+    _token_cache=FileCacheStore(_SKILL_DIR / ".mcs_token_cache"),
 )
 ''',
 
     "linkauth": '''\
 from mcs.auth.linkauth import LinkAuthProvider
+from mcs.types.cache import FileCacheStore
 
 _credential = LinkAuthProvider(
     broker_url=_resolve("linkauth_broker_url"),
     api_key=_resolve("linkauth_api_key", secret=True),
     template=_resolve("linkauth_template"),
     display_name="{skill_name}",
+    _token_cache=FileCacheStore(_SKILL_DIR / ".mcs_token_cache"),
 )
 ''',
 }
@@ -169,8 +176,9 @@ AUTH_DEFAULT_PARAMS: dict[str, dict[str, str]] = {
         "auth0_domain": "your-tenant.us.auth0.com",
         "auth0_client_id": "",
         "auth0_client_secret": "",
-        "auth0_audience": "https://your-api/",
-        "linkauth_broker_url": "http://127.0.0.1:8080",
+        "auth0_audience": "",
+        "linkauth_broker_url": "https://broker.linkauth.io",
+        "linkauth_api_key": "",
     },
     "linkauth": {
         "linkauth_broker_url": "http://127.0.0.1:8080",
@@ -263,9 +271,9 @@ def _collect_pip_requirements(
     auth_packages: dict[str, list[str]] = {
         "none": [],
         "static": ["mcs-auth"],
-        "auth0": ["mcs-auth", "mcs-auth-auth0"],
-        "auth0-linkauth": ["mcs-auth", "mcs-auth-auth0", "mcs-auth-linkauth"],
-        "linkauth": ["mcs-auth", "mcs-auth-linkauth"],
+        "auth0": ["mcs-auth", "mcs-auth-auth0", "mcs-types-cache"],
+        "auth0-linkauth": ["mcs-auth", "mcs-auth-auth0", "mcs-auth-linkauth", "mcs-types-cache"],
+        "linkauth": ["mcs-auth", "mcs-auth-linkauth", "mcs-types-cache"],
     }
     for pkg in auth_packages.get(auth_method, []):
         _add(pkg)
@@ -414,8 +422,8 @@ def generate_env_example(skill_name: str, all_params: dict) -> str:
 
 
 def generate_gitignore() -> str:
-    """Generate a .gitignore that protects credential files."""
-    return "config.toml\nconfig.json\n.env\n"
+    """Generate a .gitignore that protects credential and cache files."""
+    return "config.toml\nconfig.json\n.env\n.mcs_token_cache\n"
 
 
 def generate_script(

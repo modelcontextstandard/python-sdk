@@ -135,6 +135,9 @@ class Auth0Provider(CredentialProvider):
         HTTP transport satisfying
         ``request(method, url, *, json_body, headers) -> HttpResponse``.
         Defaults to ``HttpAdapter`` from ``mcs-adapter-http``.
+    _token_cache :
+        ``CachePort`` implementation for persisting tokens across
+        process invocations.  ``None`` disables persistent caching.
     """
 
     def __init__(
@@ -150,7 +153,10 @@ class Auth0Provider(CredentialProvider):
         callback_path: str = "/callback",
         _auth: Any | None = None,
         _http: Any | None = None,
+        _token_cache: Any | None = None,
     ) -> None:
+        super().__init__(_token_cache=_token_cache)
+
         self._domain = domain.rstrip("/")
         self._client_id = client_id
         self._client_secret = client_secret
@@ -171,34 +177,48 @@ class Auth0Provider(CredentialProvider):
             from mcs.adapter.http import HttpAdapter
             self._http = HttpAdapter()
 
-        # Token cache: scope -> (access_token, expires_at)
-        self._cache: dict[str, tuple[str, float]] = {}
+        # In-memory token cache: scope -> (access_token, expires_at)
+        self._mem_cache: dict[str, tuple[str, float]] = {}
         # Pending Connected Accounts flow (at most one at a time)
         self._ca_pending: _ConnectState | None = None
         # My Account API token (cached for the duration of a setup flow)
         self._ma_token: str | None = None
+
+        # Restore refresh token from persistent cache if not provided
+        if not self._refresh_token:
+            cached_rt = self._cache_read(f"rt:{self._domain}")
+            if cached_rt:
+                self._refresh_token = cached_rt
+                logger.debug("Restored refresh token from cache for %s", self._domain)
 
     # -- Public API ----------------------------------------------------------
 
     def get_token(self, scope: str) -> str:
         """Return a valid access token for *scope* via Auth0 Token Vault.
 
-        1. Check cache.
-        2. If no refresh token, ask ``_auth`` connector (may raise
+        1. Check in-memory cache.
+        2. Check persistent cache.
+        3. If no refresh token, ask ``_auth`` connector (may raise
            ``AuthChallenge``).
-        3. Exchange refresh token for external token via Token Vault.
+        4. Exchange refresh token for external token via Token Vault.
            If Token Vault has no Connected Account, initiate the
            Connected Accounts setup (may raise ``AuthChallenge``).
 
         Tokens are cached until 60 s before expiry.
         """
-        # 1. Check cache
-        if scope in self._cache:
-            token, expires_at = self._cache[scope]
+        # 1. In-memory cache
+        if scope in self._mem_cache:
+            token, expires_at = self._mem_cache[scope]
             if time.time() < expires_at:
                 return token
 
-        # 2. Obtain refresh token if needed
+        # 2. Persistent cache (access tokens)
+        cached_at = self._cache_read(f"at:{scope}")
+        if cached_at is not None:
+            logger.debug("Restored access token from cache for scope=%s", scope)
+            return cached_at
+
+        # 3. Obtain refresh token if needed
         if not self._refresh_token:
             if self._auth is None:
                 raise LookupError(
@@ -207,8 +227,9 @@ class Auth0Provider(CredentialProvider):
                 )
             # AuthPort.authenticate may raise AuthChallenge
             self._refresh_token = self._auth.authenticate(scope)
+            self._cache_write(f"rt:{self._domain}", self._refresh_token)
 
-        # 3. Token Vault exchange (with automatic Connected Accounts setup)
+        # 4. Token Vault exchange (with automatic Connected Accounts setup)
         return self._exchange_and_cache(scope)
 
     # -- Token Exchange (RFC 8693) -------------------------------------------
@@ -286,7 +307,9 @@ class Auth0Provider(CredentialProvider):
 
         access_token = data["access_token"]
         expires_in = data.get("expires_in", 3600)
-        self._cache[scope] = (access_token, time.time() + expires_in - 60)
+        ttl = max(expires_in - 60, 0)
+        self._mem_cache[scope] = (access_token, time.time() + ttl)
+        self._cache_write(f"at:{scope}", access_token, ttl=ttl)
 
         logger.info(
             "Obtained token for scope=%s via connection=%s", scope, connection,
