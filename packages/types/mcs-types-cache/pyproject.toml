@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "mcs-types-cache"
-version         = "0.1.0"
+version         = "0.1.1"
 description     = "Shared cache types (CachePort, FileCacheStore) for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"

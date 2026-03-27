@@ -3,7 +3,7 @@ title: MCS Gmail Agent
 description: Gmail access via MCS. Reads, searches, and organises e-mail. Authenticates via Auth0 + LinkAuth device flow.
 author: MCS
 version: 2.0.0
-requirements: mcs-driver-core>=0.2.2, mcs-driver-mail[gmail]>=0.1.2, mcs-driver-mailread>=0.2, mcs-driver-mailsend>=0.2, mcs-types-http>=0.1, mcs-adapter-http>=0.3, mcs-auth>=0.2, mcs-auth-auth0==0.3.0, mcs-auth-oauth==0.3.0, mcs-auth-linkauth==0.3.0
+requirements: mcs-driver-core>=0.2.2, mcs-driver-mail[gmail]>=0.1.2, mcs-driver-mailread>=0.2, mcs-driver-mailsend>=0.2, mcs-types-http>=0.1, mcs-types-cache>=0.1, mcs-adapter-http>=0.3, mcs-auth>=0.3, mcs-auth-auth0==0.4.0, mcs-auth-oauth==0.3.0, mcs-auth-linkauth==0.4.1
 """
 
 import json

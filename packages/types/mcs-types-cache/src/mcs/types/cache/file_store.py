@@ -37,6 +37,7 @@ class FileCacheStore:
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
+        self._ensure_writable()
 
     def read(self, key: str) -> str | None:
         """Return the cached value, or ``None`` on miss / expiry."""
@@ -67,6 +68,27 @@ class FileCacheStore:
 
     # -- internal I/O --------------------------------------------------------
 
+    def _ensure_writable(self) -> None:
+        """Verify the cache directory is writable.  Raises early so
+        misconfigurations surface at construction time, not on the
+        first write minutes later."""
+        parent = self._path.parent
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise OSError(
+                f"Cache directory not writable: {parent} ({exc}). "
+                f"Set MCS_CACHE_DIR to a writable path or ensure "
+                f"the parent directory exists and is writable."
+            ) from exc
+
+        import os
+        if not os.access(parent, os.W_OK):
+            raise OSError(
+                f"Cache directory not writable: {parent}. "
+                f"Set MCS_CACHE_DIR to a writable path."
+            )
+
     def _load(self) -> dict[str, Any]:
         if not self._path.exists():
             return {}
@@ -78,9 +100,10 @@ class FileCacheStore:
 
     def _save(self, store: dict[str, Any]) -> None:
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
             self._path.write_text(
                 json.dumps(store, indent=2), encoding="utf-8",
             )
         except OSError as exc:
-            logger.warning("Could not write cache file: %s", exc)
+            raise OSError(
+                f"Could not write cache file {self._path}: {exc}"
+            ) from exc

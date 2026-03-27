@@ -1685,7 +1685,7 @@ requires-dist = [{ name = "mcs-types-cache", editable = "packages/types/mcs-type
 
 [[package]]
 name = "mcs-auth-auth0"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/auth/mcs-auth-auth0" }
 dependencies = [
     { name = "mcs-adapter-http" },
@@ -1700,7 +1700,7 @@ requires-dist = [
 
 [[package]]
 name = "mcs-auth-linkauth"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/auth/mcs-auth-linkauth" }
 dependencies = [
     { name = "cryptography" },
@@ -2161,7 +2161,7 @@ dev = [
 
 [[package]]
 name = "mcs-types-cache"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/types/mcs-types-cache" }
 
 [[package]]

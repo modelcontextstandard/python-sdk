@@ -127,6 +127,8 @@ from mcs.auth.auth0 import Auth0Provider
 from mcs.auth.linkauth import LinkAuthConnector
 from mcs.types.cache import FileCacheStore
 
+_token_cache = FileCacheStore(_SKILL_DIR / ".mcs_token_cache")
+
 _auth_connector = LinkAuthConnector(
     broker_url=_resolve("linkauth_broker_url"),
     api_key=_resolve("linkauth_api_key", secret=True) or None,
@@ -137,6 +139,7 @@ _auth_connector = LinkAuthConnector(
         "connection": "google-oauth2",
     }},
     display_name="{skill_name} via Auth0",
+    _token_cache=_token_cache,
 )
 
 _credential = Auth0Provider(
@@ -144,7 +147,7 @@ _credential = Auth0Provider(
     client_id=_resolve("auth0_client_id"),
     client_secret=_resolve("auth0_client_secret", secret=True),
     _auth=_auth_connector,
-    _token_cache=FileCacheStore(_SKILL_DIR / ".mcs_token_cache"),
+    _token_cache=_token_cache,
 )
 ''',
 

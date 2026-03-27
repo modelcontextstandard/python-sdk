@@ -1,0 +1,9 @@
+# MCS Skill Configuration
+# Copy this file to config.toml and fill in the values.
+
+auth0_domain = "your-tenant.us.auth0.com"
+auth0_client_id = ""
+# auth0_client_secret = ""  # secret -- consider using env var instead
+auth0_audience = ""
+linkauth_broker_url = "https://broker.linkauth.io"
+# linkauth_api_key = ""  # secret -- consider using env var instead
