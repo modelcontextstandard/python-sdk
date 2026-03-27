@@ -50,7 +50,7 @@ class LinkAuthProvider(CredentialProvider):
             self._auth = _auth
         else:
             from .linkauth_connector import LinkAuthConnector
-            self._auth = LinkAuthConnector(**kwargs)
+            self._auth = LinkAuthConnector(_token_cache=_token_cache, **kwargs)
 
     def get_token(self, scope: str) -> str:
         """Return a credential for *scope* via LinkAuth broker."""

@@ -76,6 +76,11 @@ class LinkAuthConnector:
         For OAuth templates this is typically ``"refresh_token"`` or
         ``"access_token"``.  For form templates it's the field name
         (e.g. ``"api_key"``).  Default: auto-detect.
+    _token_cache :
+        ``CachePort`` implementation for persisting session state and
+        RSA keys across process invocations.  Required for short-lived
+        processes (CLI skills) where ``AuthChallenge`` causes the
+        process to exit before the user completes authentication.
     """
 
     def __init__(
@@ -92,6 +97,7 @@ class LinkAuthConnector:
         poll_timeout: int = 0,
         token_field: str | None = None,
         _http: HttpPort | None = None,
+        _token_cache: Any | None = None,
     ) -> None:
         self._broker_url = broker_url.rstrip("/")
         self._template = template
@@ -103,6 +109,7 @@ class LinkAuthConnector:
         self._poll_interval = poll_interval
         self._poll_timeout = poll_timeout
         self._token_field = token_field
+        self._cache = _token_cache
 
         if _http is not None:
             self._http: HttpPort = _http
@@ -110,11 +117,26 @@ class LinkAuthConnector:
             from mcs.adapter.http import HttpAdapter
             self._http = HttpAdapter()
 
-        # RSA keypair (generated once per connector instance)
-        self._private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-        )
+        # RSA keypair -- restore from cache or generate fresh
+        cached_pem = self._cache.read("linkauth:privkey") if self._cache else None
+        if cached_pem is not None:
+            self._private_key = serialization.load_pem_private_key(
+                cached_pem.encode(), password=None,
+            )
+            logger.debug("Restored RSA key from cache")
+        else:
+            self._private_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+            )
+            if self._cache is not None:
+                pem = self._private_key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.PKCS8,
+                    serialization.NoEncryption(),
+                ).decode()
+                self._cache.write("linkauth:privkey", pem)
+
         self._public_key_b64 = base64.b64encode(
             self._private_key.public_key().public_bytes(
                 serialization.Encoding.DER,
@@ -122,10 +144,20 @@ class LinkAuthConnector:
             )
         ).decode()
 
-        # Session state per scope
+        # Session state per scope -- restore from cache
         self._sessions: dict[str, _SessionState] = {}
-        # Cached tokens
+        cached_sessions = self._cache.read("linkauth:sessions") if self._cache else None
+        if cached_sessions is not None:
+            for key, s in json.loads(cached_sessions).items():
+                self._sessions[key] = _SessionState(**s)
+            logger.debug("Restored %d session(s) from cache", len(self._sessions))
+
+        # Cached tokens -- restore from cache
         self._tokens: dict[str, str] = {}
+        cached_tokens = self._cache.read("linkauth:tokens") if self._cache else None
+        if cached_tokens is not None:
+            self._tokens = json.loads(cached_tokens)
+            logger.debug("Restored %d token(s) from cache", len(self._tokens))
 
     @property
     def callback_url(self) -> str:
@@ -208,6 +240,7 @@ class LinkAuthConnector:
             if token is not None:
                 self._tokens[cache_key] = token
                 del self._sessions[cache_key]
+                self._persist_state()
                 return token
             raise AuthChallenge(
                 f"Authentication pending for '{scope}'. "
@@ -225,6 +258,7 @@ class LinkAuthConnector:
             custom_state=state,
         )
         self._sessions[cache_key] = session
+        self._persist_state()
 
         # Try immediate poll if timeout > 0
         if self._poll_timeout > 0:
@@ -232,6 +266,7 @@ class LinkAuthConnector:
             if token is not None:
                 self._tokens[cache_key] = token
                 del self._sessions[cache_key]
+                self._persist_state()
                 return token
 
         raise AuthChallenge(
@@ -241,6 +276,18 @@ class LinkAuthConnector:
             code=session.code,
             scope=scope,
         )
+
+    # -- Cache persistence ---------------------------------------------------
+
+    def _persist_state(self) -> None:
+        """Write sessions and tokens to the persistent cache."""
+        if self._cache is None:
+            return
+        sessions_dict = {
+            k: s.to_dict() for k, s in self._sessions.items()
+        }
+        self._cache.write("linkauth:sessions", json.dumps(sessions_dict))
+        self._cache.write("linkauth:tokens", json.dumps(self._tokens))
 
     # -- Internal helpers ----------------------------------------------------
 
@@ -430,3 +477,12 @@ class _SessionState:
         self.url = url
         self.poll_token = poll_token
         self.interval = interval
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "code": self.code,
+            "url": self.url,
+            "poll_token": self.poll_token,
+            "interval": self.interval,
+        }

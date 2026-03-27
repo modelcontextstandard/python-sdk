@@ -249,9 +249,28 @@ class Auth0Provider(CredentialProvider):
     def _post_token_endpoint(self, body: dict[str, Any]) -> dict[str, Any]:
         """POST to ``/oauth/token`` and return parsed JSON.
 
+        Routes through the broker proxy when available (same as
+        ``_post_json_bearer``), so sandboxed environments don't need
+        ``*.auth0.com`` whitelisted.
+
         Always returns a dict -- the caller checks for ``"error"``.
         """
         url = f"https://{self._domain}/oauth/token"
+        proxy_fn = getattr(self._auth, "proxy_http", None) if self._auth else None
+
+        if proxy_fn is not None:
+            result = proxy_fn(
+                "POST",
+                url,
+                headers={"Content-Type": "application/json"},
+                json_body=body,
+            )
+            raw_body = result.get("body", "{}")
+            try:
+                return json.loads(raw_body)
+            except (ValueError, KeyError):
+                return {"error": f"proxy_status_{result.get('status_code', '?')}", "raw": raw_body}
+
         resp = self._http.request("POST", url, json_body=body)
         try:
             data = resp.json()
