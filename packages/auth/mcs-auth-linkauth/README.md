@@ -1,7 +1,7 @@
 # mcs-auth-linkauth
 
 **Authentication for agents that can't open a browser.** LinkAuth credential
-broker adapter for the **Model Context Standard (MCS)**.
+broker connector for the **Model Context Standard (MCS)**.
 
 CLI tools, Telegram bots, background workers, Docker containers -- your
 agent shows a URL and a code, the user authenticates on any device, and the
@@ -70,13 +70,13 @@ Token Vault:
 
 ```python
 from mcs.auth.auth0 import Auth0Provider
-from mcs.auth.linkauth import LinkAuthAdapter
+from mcs.auth.linkauth import LinkAuthConnector
 
 provider = Auth0Provider(
     domain="my-tenant.auth0.com",
     client_id="...",
     client_secret="...",
-    _auth=LinkAuthAdapter(
+    _auth=LinkAuthConnector(
         broker_url="https://auth.example.com",
         oauth_provider="auth0",
         oauth_scopes=["openid", "email", "offline_access"],

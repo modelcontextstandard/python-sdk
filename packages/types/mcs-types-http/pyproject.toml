@@ -3,13 +3,13 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "mcs-auth"
-version         = "0.2.0"
-description     = "Credential provider abstraction for the Model Context Standard."
+name            = "mcs-types-http"
+version         = "0.1.0"
+description     = "Shared HTTP types (HttpResponse, HttpError) for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"
 license         = "Apache-2.0"
-keywords        = ["mcs", "modelcontextstandard", "auth", "credentials", "oauth2", "token"]
+keywords        = ["mcs", "modelcontextstandard", "types", "http"]
 authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
 license-files   = ["LICENSE"]
 classifiers     = [
@@ -21,7 +21,6 @@ classifiers     = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Topic :: Security",
     "Topic :: Software Development :: Libraries",
     "Typing :: Typed",
 ]

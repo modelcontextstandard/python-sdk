@@ -13,7 +13,7 @@ from typing import Any
 
 from mcs.auth.mixin import AuthMixin
 from mcs.auth.auth0 import Auth0Provider
-from mcs.auth.linkauth import LinkAuthAdapter
+from mcs.auth.linkauth import LinkAuthConnector
 from mcs.driver.mail import MailDriver
 
 
@@ -54,7 +54,7 @@ class Tools:
         if self.driver:
             return
 
-        auth_adapter = LinkAuthAdapter(
+        auth_connector = LinkAuthConnector(
             broker_url=self.valves.linkauth_broker_url,
             oauth_provider="auth0",
             oauth_scopes=["openid", "email", "offline_access"],
@@ -69,7 +69,7 @@ class Tools:
             domain=self.valves.auth0_domain,
             client_id=self.valves.auth0_client_id,
             client_secret=self.valves.auth0_client_secret,
-            _auth=auth_adapter,
+            _auth=auth_connector,
         )
 
         self.driver = AuthMailDriver(

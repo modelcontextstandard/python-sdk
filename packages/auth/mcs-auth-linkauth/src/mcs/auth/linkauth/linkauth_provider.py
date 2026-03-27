@@ -1,10 +1,10 @@
 """LinkAuth credential provider for MCS.
 
-A simple ``CredentialProvider`` that delegates to a ``LinkAuthAdapter``
+A simple ``CredentialProvider`` that delegates to a ``LinkAuthConnector``
 (or any ``AuthPort``).  For direct credential access via a LinkAuth
 broker -- without a Token Vault intermediary.
 
-Use ``Auth0Provider(... _auth=LinkAuthAdapter(...))`` when you need
+Use ``Auth0Provider(... _auth=LinkAuthConnector(...))`` when you need
 Auth0 Token Vault exchange on top.
 """
 
@@ -16,16 +16,16 @@ from typing import Any
 class LinkAuthProvider:
     """Credential provider using a LinkAuth broker.
 
-    Wraps an ``AuthPort`` adapter (defaults to ``LinkAuthAdapter``)
+    Wraps an ``AuthPort`` connector (defaults to ``LinkAuthConnector``)
     and returns credentials directly.
 
     Parameters
     ----------
     _auth :
-        Auth transport adapter satisfying ``AuthPort``.  If not
-        provided, ``LinkAuthAdapter`` is created from ``**kwargs``.
+        Auth transport connector satisfying ``AuthPort``.  If not
+        provided, ``LinkAuthConnector`` is created from ``**kwargs``.
     **kwargs :
-        Keyword arguments forwarded to ``LinkAuthAdapter`` if ``_auth``
+        Keyword arguments forwarded to ``LinkAuthConnector`` if ``_auth``
         is not provided.
     """
 
@@ -33,8 +33,8 @@ class LinkAuthProvider:
         if _auth is not None:
             self._auth = _auth
         else:
-            from .linkauth_adapter import LinkAuthAdapter
-            self._auth = LinkAuthAdapter(**kwargs)
+            from .linkauth_connector import LinkAuthConnector
+            self._auth = LinkAuthConnector(**kwargs)
 
     def get_token(self, scope: str) -> str:
         """Return a credential for *scope* via LinkAuth broker."""

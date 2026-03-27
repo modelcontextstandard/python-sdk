@@ -1,4 +1,9 @@
-"""LinkAuth credential broker adapter for MCS.
+"""LinkAuth credential broker connector for MCS.
+
+This is a *Connector*, not a Transport Adapter: it translates between
+the LinkAuth broker REST API and the ``AuthPort`` contract.  The real
+transport is HTTP, handled by the injected ``_http`` backend (default:
+``HttpAdapter`` from ``mcs-adapter-http``).
 
 Implements ``AuthPort`` using the LinkAuth device-flow-like pattern:
 
@@ -20,22 +25,35 @@ import base64
 import json
 import logging
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
-from typing import Any, cast
+from typing import Any, Protocol, runtime_checkable
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from mcs.adapter.http import HttpResponse
 from mcs.auth.challenge import AuthChallenge
 
 logger = logging.getLogger(__name__)
 
 
-class LinkAuthAdapter:
-    """Auth transport adapter that uses a LinkAuth broker.
+@runtime_checkable
+class HttpPort(Protocol):
+    """Contract for HTTP transport (same pattern as GmailConnector)."""
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> HttpResponse: ...
+
+
+class LinkAuthConnector:
+    """LinkAuth broker connector for MCS auth flows.
 
     Satisfies ``AuthPort.authenticate(scope) -> str``.
 
@@ -73,6 +91,7 @@ class LinkAuthAdapter:
         poll_interval: int = 5,
         poll_timeout: int = 0,
         token_field: str | None = None,
+        _http: HttpPort | None = None,
     ) -> None:
         self._broker_url = broker_url.rstrip("/")
         self._template = template
@@ -85,7 +104,13 @@ class LinkAuthAdapter:
         self._poll_timeout = poll_timeout
         self._token_field = token_field
 
-        # RSA keypair (generated once per adapter instance)
+        if _http is not None:
+            self._http: HttpPort = _http
+        else:
+            from mcs.adapter.http import HttpAdapter
+            self._http = HttpAdapter()
+
+        # RSA keypair (generated once per connector instance)
         self._private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=2048,
@@ -102,26 +127,88 @@ class LinkAuthAdapter:
         # Cached tokens
         self._tokens: dict[str, str] = {}
 
-    def authenticate(self, scope: str) -> str:
+    @property
+    def callback_url(self) -> str:
+        """Broker's OAuth callback URL (usable as redirect_uri)."""
+        return f"{self._broker_url}/v1/oauth/callback"
+
+    def proxy_http(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        json_body: dict[str, Any] | None = None,
+        timeout: int = 30,
+    ) -> dict[str, Any]:
+        """Make an HTTP request through the broker's proxy endpoint.
+
+        Returns the parsed response as a dict with ``status_code``,
+        ``headers``, and ``body`` (raw string).  Raises ``RuntimeError``
+        on broker-level failures (proxy disabled, connection error, etc.).
+        """
+        proxy_url = f"{self._broker_url}/v1/proxy"
+        payload: dict[str, Any] = {
+            "method": method,
+            "url": url,
+            "timeout": timeout,
+        }
+        if headers:
+            payload["headers"] = headers
+        if json_body is not None:
+            payload["body"] = json.dumps(json_body)
+
+        req_headers: dict[str, str] = {}
+        if self._api_key:
+            req_headers["X-API-Key"] = self._api_key
+
+        resp = self._http.request(
+            "POST", proxy_url, json_body=payload, headers=req_headers,
+        )
+        if not resp.ok:
+            raise RuntimeError(
+                f"Broker proxy returned {resp.status_code}: {resp.text}"
+            )
+        return resp.json()
+
+    def authenticate(
+        self,
+        scope: str,
+        *,
+        url: str | None = None,
+        callback_params: list[str] | None = None,
+        state: str | None = None,
+    ) -> str:
         """Create a LinkAuth session and return the credential.
 
+        **Default mode** (``url`` is *None*):
         On first call, creates a session and raises ``AuthChallenge``
         with the URL for the user.  On subsequent calls, polls the
         broker.  When ready, decrypts and returns the token.
-        """
-        # Already have a token for this scope
-        if scope in self._tokens:
-            return self._tokens[scope]
 
-        # Existing session → poll
-        if scope in self._sessions:
-            session = self._sessions[scope]
-            token = self._poll_session(session, scope)
+        **Passthrough mode** (``url`` is set):
+        Creates a session with a custom authorize URL.  The broker
+        redirects the user there and captures the callback parameters
+        specified in *callback_params*.  Returns the first captured
+        value.
+        """
+        # Passthrough mode uses state as correlation key.  The second
+        # call (polling) may omit url while keeping the same state, so
+        # we key on state presence rather than url presence.
+        cache_key = f"{scope}:redirect:{state}" if (url is not None or state is not None) else scope
+
+        # Already have a token for this key
+        if cache_key in self._tokens:
+            return self._tokens[cache_key]
+
+        # Existing session -> poll
+        if cache_key in self._sessions:
+            session = self._sessions[cache_key]
+            token = self._poll_session(session, cache_key)
             if token is not None:
-                self._tokens[scope] = token
-                del self._sessions[scope]
+                self._tokens[cache_key] = token
+                del self._sessions[cache_key]
                 return token
-            # Still pending → raise challenge
             raise AuthChallenge(
                 f"Authentication pending for '{scope}'. "
                 f"Please open {session.url} and enter code: {session.code}",
@@ -131,15 +218,20 @@ class LinkAuthAdapter:
             )
 
         # New session
-        session = self._create_session(scope)
-        self._sessions[scope] = session
+        session = self._create_session(
+            scope,
+            custom_authorize_url=url,
+            custom_callback_params=callback_params,
+            custom_state=state,
+        )
+        self._sessions[cache_key] = session
 
         # Try immediate poll if timeout > 0
         if self._poll_timeout > 0:
-            token = self._poll_session(session, scope)
+            token = self._poll_session(session, cache_key)
             if token is not None:
-                self._tokens[scope] = token
-                del self._sessions[scope]
+                self._tokens[cache_key] = token
+                del self._sessions[cache_key]
                 return token
 
         raise AuthChallenge(
@@ -157,7 +249,14 @@ class LinkAuthAdapter:
             return self._template.get(scope, "api_key")
         return self._template
 
-    def _create_session(self, scope: str) -> _SessionState:
+    def _create_session(
+        self,
+        scope: str,
+        *,
+        custom_authorize_url: str | None = None,
+        custom_callback_params: list[str] | None = None,
+        custom_state: str | None = None,
+    ) -> _SessionState:
         """POST /v1/sessions to create a new LinkAuth session."""
         url = f"{self._broker_url}/v1/sessions"
         payload: dict[str, Any] = {
@@ -171,28 +270,27 @@ class LinkAuthAdapter:
             payload["oauth_scopes"] = self._oauth_scopes
         if self._oauth_extra_params:
             payload["oauth_extra_params"] = self._oauth_extra_params
-        body = json.dumps(payload).encode()
+        if custom_authorize_url:
+            payload["custom_authorize_url"] = custom_authorize_url
+        if custom_callback_params:
+            payload["custom_callback_params"] = custom_callback_params
+        if custom_state:
+            payload["custom_state"] = custom_state
 
-        headers: dict[str, str] = {"Content-Type": "application/json"}
+        headers: dict[str, str] = {}
         if self._api_key:
             headers["X-API-Key"] = self._api_key
-        req = urllib.request.Request(url, data=body, headers=headers)
-        try:
-            resp = urllib.request.urlopen(req)
-        except urllib.error.HTTPError as exc:
-            err_body = ""
-            try:
-                err_body = exc.read().decode()
-            except Exception:
-                pass
+
+        resp = self._http.request("POST", url, json_body=payload, headers=headers)
+        if not resp.ok:
             logger.error(
-                "LinkAuth session creation failed: %s %s — %s",
-                exc.code, exc.reason, err_body,
+                "LinkAuth session creation failed: %s — %s",
+                resp.status_code, resp.text,
             )
             raise RuntimeError(
-                f"LinkAuth broker returned {exc.code}: {err_body or exc.reason}"
-            ) from exc
-        data = json.loads(resp.read())
+                f"LinkAuth broker returned {resp.status_code}: {resp.text}"
+            )
+        data = resp.json()
 
         logger.info(
             "LinkAuth session created: url=%s code=%s",
@@ -218,28 +316,30 @@ class LinkAuthAdapter:
             }
             if self._api_key:
                 poll_headers["X-API-Key"] = self._api_key
-            req = urllib.request.Request(url, headers=poll_headers)
-            try:
-                resp = urllib.request.urlopen(req)
-                data = json.loads(resp.read())
-            except Exception as exc:
-                # 429 (slow_down) or transient error
-                read_fn = getattr(exc, "read", None)
-                if read_fn and callable(read_fn):
-                    err_body = cast(bytes, read_fn()).decode()
-                    try:
-                        err_data = json.loads(err_body)
-                        if err_data.get("type", "").endswith("slow_down"):
-                            session.interval = err_data.get(
-                                "interval", session.interval + 5
-                            )
-                    except (json.JSONDecodeError, KeyError):
-                        pass
+
+            resp = self._http.request("GET", url, headers=poll_headers)
+
+            if resp.status_code == 429:
+                try:
+                    err_data = resp.json()
+                    if err_data.get("type", "").endswith("slow_down"):
+                        session.interval = err_data.get(
+                            "interval", session.interval + 5
+                        )
+                except (ValueError, KeyError):
+                    pass
                 if time.time() >= deadline:
                     return None
                 time.sleep(session.interval)
                 continue
 
+            if not resp.ok:
+                if time.time() >= deadline:
+                    return None
+                time.sleep(session.interval)
+                continue
+
+            data = resp.json()
             status = data.get("status")
 
             if status == "ready":
@@ -252,7 +352,6 @@ class LinkAuthAdapter:
                     f"LinkAuth session {status} for scope '{scope}'"
                 )
 
-            # pending / confirmed → keep polling
             if time.time() >= deadline:
                 return None
             time.sleep(session.interval)
@@ -309,7 +408,7 @@ class LinkAuthAdapter:
         raise LookupError(
             f"Cannot determine which field to use as token for scope '{scope}'. "
             f"Available fields: {sorted(credentials.keys())}. "
-            f"Set token_field= in LinkAuthAdapter."
+            f"Set token_field= in LinkAuthConnector."
         )
 
 

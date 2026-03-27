@@ -1,17 +1,17 @@
 """Credential provider abstraction for MCS.
 
 Defines the contract that any credential provider must satisfy.
-Providers fulfil this protocol through structural subtyping -- they do
-**not** need to import or inherit from this module.
+Providers **must** inherit from ``CredentialProvider`` and implement
+``get_token``.  This is an ABC (not a Protocol) to enforce explicit
+inheritance and make the contract unambiguous.
 """
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from abc import ABC, abstractmethod
 
 
-@runtime_checkable
-class CredentialProvider(Protocol):
+class CredentialProvider(ABC):
     """Universal contract for retrieving credentials.
 
     A credential provider returns an access token (or API key) for a
@@ -26,6 +26,7 @@ class CredentialProvider(Protocol):
     wrap it in ``asyncio.to_thread``.
     """
 
+    @abstractmethod
     def get_token(self, scope: str) -> str:
         """Return a valid access token / API key for *scope*.
 

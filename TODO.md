@@ -193,6 +193,79 @@ zu validieren, bevor es in die Core-Library wandert.
 
 ---
 
+## Lazy adapter/connector initialization for tool discovery
+
+**Affects:** all ToolDrivers and Adapters/Connectors (especially `mcs-driver-mailread`, `mcs-driver-mailsend`)
+
+**Status:** Open
+
+**Priority:** Medium
+
+**Problem:**
+Adapters and connectors validate credentials eagerly in `__init__`, even though
+`list_tools()` returns static metadata that never touches the adapter.  This
+means callers must provide valid credentials just to discover available tools.
+
+**Example chain (Gmail):**
+```
+MailDriver.__init__
+  → MailToolDriver.__init__
+    → MailreadToolDriver.__init__
+      → GmailMailboxConnector.__init__
+        → raise ValueError("Either 'access_token' or '_credential' must be provided")
+```
+
+But `MailreadToolDriver.list_tools()` is just `return list(_TOOLS)` -- a static
+constant that does not need the adapter at all.
+
+**Impact:**
+- The Skill Generator (`scripts/skill_generator.py`) must inject a dummy
+  credential to instantiate auth-aware drivers for tool discovery.
+- Any tooling that wants to introspect tools (inspectors, registries, UIs)
+  hits the same problem.
+- Violates Interface Segregation: `list_tools()` and `execute_tool()` have
+  completely different resource requirements, but `__init__` validates for
+  the latter.
+
+**Fix:**
+Store credential parameters in `__init__` without validation.  Validate on
+first actual use (`_get_token()`, `connect()`, or first `execute_tool()` call).
+
+```python
+# Before (eager -- blocks tool discovery)
+def __init__(self, *, access_token=None, _credential=None):
+    if _credential is not None:
+        self._token = lambda: _credential.get_token("gmail")
+    elif access_token is not None:
+        self._token = access_token
+    else:
+        raise ValueError(...)
+
+# After (lazy -- list_tools() works without credentials)
+def __init__(self, *, access_token=None, _credential=None):
+    self._credential = _credential
+    self._access_token = access_token
+
+def _get_token(self) -> str:
+    if self._credential is not None:
+        return self._credential.get_token("gmail")
+    if self._access_token is not None:
+        return self._access_token if isinstance(self._access_token, str) else self._access_token()
+    raise ValueError("Either 'access_token' or '_credential' must be provided")
+```
+
+**Affected files (non-exhaustive):**
+- `packages/drivers/mcs-driver-mailread/src/mcs/driver/mailread/gmail_connector.py`
+- `packages/drivers/mcs-driver-mailsend/src/mcs/driver/mailsend/gmail_sender.py`
+- `packages/adapters/mcs-adapter-imap/src/mcs/adapter/imap/adapter.py`
+- `packages/adapters/mcs-adapter-smtp/src/mcs/adapter/smtp/adapter.py`
+- Any future adapter that validates credentials in `__init__`
+
+**Related:** `.cursor/rules/lazy-adapter-init.mdc` captures this as a design
+rule for new code.
+
+---
+
 ## Deprecate / yank `mcs-drivers-core` on PyPI
 
 **Affects:** PyPI

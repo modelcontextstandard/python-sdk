@@ -1,6 +1,6 @@
-"""LinkAuth credential broker adapter and provider for MCS."""
+"""LinkAuth credential broker connector and provider for MCS."""
 
-from .linkauth_adapter import LinkAuthAdapter
+from .linkauth_connector import LinkAuthConnector
 from .linkauth_provider import LinkAuthProvider
 
-__all__ = ["LinkAuthAdapter", "LinkAuthProvider"]
+__all__ = ["LinkAuthConnector", "LinkAuthProvider"]

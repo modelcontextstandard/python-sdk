@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import os
 
+from mcs.auth.provider import CredentialProvider
 
-class StaticProvider:
+
+class StaticProvider(CredentialProvider):
     """Credential provider backed by a plain dictionary.
 
     Parameters

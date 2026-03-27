@@ -229,13 +229,45 @@ class TestAuthPort:
         assert provider._refresh_token is None
 
 
+class _FakeAuthAdapter:
+    """Auth adapter that captures authenticate() calls and supports passthrough."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self._pending_challenge: bool = True
+        self._return_value: str | None = None
+
+    def authenticate(
+        self,
+        scope: str,
+        *,
+        url: str | None = None,
+        callback_params: list[str] | None = None,
+        state: str | None = None,
+    ) -> str:
+        self.calls.append({
+            "scope": scope, "url": url,
+            "callback_params": callback_params, "state": state,
+        })
+        if self._pending_challenge:
+            raise AuthChallenge(
+                "Please complete the consent",
+                scope=scope,
+            )
+        return self._return_value or ""
+
+
 class TestConnectedAccounts:
     """Tests for Connected Accounts auto-setup when Token Vault returns
     ``federated_connection_refresh_token_not_found``.
     """
 
     @staticmethod
-    def _make_provider(http: FakeHttp, **kw) -> Auth0Provider:
+    def _make_provider(
+        http: FakeHttp,
+        auth: _FakeAuthAdapter | None = None,
+        **kw,
+    ) -> Auth0Provider:
         defaults = dict(
             domain="test.auth0.com",
             client_id="c",
@@ -243,6 +275,7 @@ class TestConnectedAccounts:
             refresh_token="rt_test",
             connection_scopes={"gmail": ["https://mail.google.com/", "openid"]},
             _http=http,
+            _auth=auth or _FakeAuthAdapter(),
         )
         defaults.update(kw)
         return Auth0Provider(**defaults)
@@ -266,6 +299,7 @@ class TestConnectedAccounts:
             client_secret="s",
             refresh_token="rt",
             _http=http,
+            _auth=_FakeAuthAdapter(),
         )
         with pytest.raises(RuntimeError, match="no connection_scopes"):
             provider.get_token("gmail")
@@ -276,8 +310,9 @@ class TestConnectedAccounts:
         Call 1: Token Vault fails -> MRRT + /connect -> AuthChallenge
         Call 2: callback ready -> /complete -> Token Vault retry -> success
         """
-        from unittest.mock import patch, MagicMock
-        from mcs.auth.auth0.auth0_provider import _PendingConnect
+        from unittest.mock import patch
+
+        auth = _FakeAuthAdapter()
 
         # --- Call 1 ---
         # 1a. Token Vault exchange -> not_found
@@ -288,33 +323,35 @@ class TestConnectedAccounts:
         # 1b. MRRT exchange -> success
         http.push_response({"access_token": "ma_tok", "scope": "create:me:connected_accounts"})
 
-        provider = self._make_provider(http)
+        provider = self._make_provider(http, auth=auth)
 
-        # Mock _post_json_bearer for /connect and _PendingConnect.start
-        connect_resp = json.dumps({
+        connect_resp = {
             "connect_uri": "https://test.auth0.com/connected-accounts/connect",
             "connect_params": {"ticket": "tkt-123"},
             "auth_session": "session-abc",
             "expires_in": 300,
-        })
+        }
 
-        with patch.object(provider, "_post_json_bearer", return_value=connect_resp) as mock_post, \
-             patch.object(_PendingConnect, "start"):
-
-            with pytest.raises(AuthChallenge, match="One-time setup"):
+        with patch.object(provider, "_post_json_bearer", return_value=connect_resp) as mock_post:
+            with pytest.raises(AuthChallenge, match="Please complete the consent"):
                 provider.get_token("gmail")
 
-            # Verify /connect was called
             mock_post.assert_called_once()
             call_args = mock_post.call_args
             assert "/connected-accounts/connect" in call_args[0][0]
 
         assert provider._ca_pending is not None
 
+        # Verify authenticate was called with custom URL for redirect
+        assert len(auth.calls) == 1
+        assert auth.calls[0]["url"] is not None
+        assert "ticket=tkt-123" in auth.calls[0]["url"]
+        assert auth.calls[0]["callback_params"] == ["connect_code"]
+
         # --- Call 2 ---
-        # Simulate callback arrived
-        provider._ca_pending._result = {"code": "connect-code-xyz", "state": "s"}
-        provider._ca_pending._expected_state = "s"
+        # Simulate callback completed: adapter returns connect_code
+        auth._pending_challenge = False
+        auth._return_value = "connect-code-xyz"
 
         # 2a. Token Vault still fails (triggers _ensure_connected_account)
         http.push_response({
@@ -322,10 +359,10 @@ class TestConnectedAccounts:
             "error_description": "...",
         })
         # 2b. /complete -> success (mocked via _post_json_bearer)
-        complete_resp = json.dumps({
+        complete_resp = {
             "id": "cac_test123",
             "connection": "google-oauth2",
-        })
+        }
         # 2c. Token Vault exchange (retry after /complete) -> success
         http.push_response({"access_token": "ya29.final", "expires_in": 3600})
 
@@ -338,7 +375,8 @@ class TestConnectedAccounts:
     def test_pending_still_waiting_raises_challenge(self, http: FakeHttp):
         """While waiting for callback, repeated calls raise AuthChallenge."""
         from unittest.mock import patch
-        from mcs.auth.auth0.auth0_provider import _PendingConnect
+
+        auth = _FakeAuthAdapter()
 
         # Call 1: trigger setup
         http.push_response({
@@ -347,29 +385,25 @@ class TestConnectedAccounts:
         })
         http.push_response({"access_token": "ma_tok", "scope": "..."})
 
-        provider = self._make_provider(http)
+        provider = self._make_provider(http, auth=auth)
 
-        connect_resp = json.dumps({
+        connect_resp = {
             "connect_uri": "https://test.auth0.com/connected-accounts/connect",
             "connect_params": {"ticket": "tkt-123"},
             "auth_session": "session-abc",
             "expires_in": 300,
-        })
+        }
 
-        with patch.object(provider, "_post_json_bearer", return_value=connect_resp), \
-             patch.object(_PendingConnect, "start"):
-            with pytest.raises(AuthChallenge, match="One-time setup"):
+        with patch.object(provider, "_post_json_bearer", return_value=connect_resp):
+            with pytest.raises(AuthChallenge):
                 provider.get_token("gmail")
 
-        # Call 2: callback NOT ready -- pending still waiting
-        # The _PendingAuth thread mock: is_ready=False, is_waiting=True
-        provider._ca_pending._result = {}  # no callback yet
-
-        # Token Vault fails again
+        # Call 2: callback NOT ready -- adapter still raises challenge
+        # (auth._pending_challenge is still True)
         http.push_response({
             "error": "federated_connection_refresh_token_not_found",
             "error_description": "...",
         })
 
-        with pytest.raises(AuthChallenge, match="Waiting for Token Vault"):
+        with pytest.raises(AuthChallenge):
             provider.get_token("gmail")

@@ -1,7 +1,7 @@
 """OAuth credential provider for MCS.
 
 A simple ``CredentialProvider`` that delegates to an ``AuthPort``
-adapter (defaults to ``OAuthAdapter``).  For direct OAuth access
+connector (defaults to ``OAuthConnector``).  For direct OAuth access
 without a Token Vault intermediary (e.g. Google API directly).
 """
 
@@ -14,18 +14,18 @@ from typing import Any
 class OAuthProvider:
     """Credential provider using direct OAuth tokens.
 
-    Wraps an ``AuthPort`` adapter and caches the returned tokens.
+    Wraps an ``AuthPort`` connector and caches the returned tokens.
     Use this when you want to use OAuth tokens directly (no Auth0
     Token Vault exchange).
 
     Parameters
     ----------
     _auth :
-        Auth transport adapter satisfying ``AuthPort``.  If not
-        provided, you must supply ``OAuthAdapter`` kwargs to build
+        Auth transport connector satisfying ``AuthPort``.  If not
+        provided, you must supply ``OAuthConnector`` kwargs to build
         one automatically.
     **oauth_kwargs :
-        Keyword arguments forwarded to ``OAuthAdapter`` if ``_auth``
+        Keyword arguments forwarded to ``OAuthConnector`` if ``_auth``
         is not provided.
     """
 
@@ -33,8 +33,8 @@ class OAuthProvider:
         if _auth is not None:
             self._auth = _auth
         else:
-            from .oauth_adapter import OAuthAdapter
-            self._auth = OAuthAdapter(**oauth_kwargs)
+            from .oauth_connector import OAuthConnector
+            self._auth = OAuthConnector(**oauth_kwargs)
 
         # Cache: scope → (token, expires_at)
         self._cache: dict[str, tuple[str, float]] = {}

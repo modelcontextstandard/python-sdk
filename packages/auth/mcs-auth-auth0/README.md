@@ -23,7 +23,7 @@ provider = Auth0Provider(
     domain="my-tenant.auth0.com",
     client_id="...",
     client_secret="...",
-    refresh_token="...",  # from auth setup or AuthPort adapter
+    refresh_token="...",  # from auth setup or AuthPort connector
 )
 
 # One call -- Auth0 handles the Token Vault exchange (RFC 8693)
@@ -49,14 +49,14 @@ refresh token was obtained -- that's pluggable via `AuthPort`:
 
 ```python
 from mcs.auth.auth0 import Auth0Provider
-from mcs.auth.oauth import OAuthAdapter        # browser login
-from mcs.auth.linkauth import LinkAuthAdapter  # device-flow broker
+from mcs.auth.oauth import OAuthConnector        # browser login
+from mcs.auth.linkauth import LinkAuthConnector  # device-flow broker
 
 # Browser-based login
-provider = Auth0Provider(..., _auth=OAuthAdapter(...))
+provider = Auth0Provider(..., _auth=OAuthConnector(...))
 
 # LinkAuth device-flow (no browser callback needed)
-provider = Auth0Provider(..., _auth=LinkAuthAdapter(...))
+provider = Auth0Provider(..., _auth=LinkAuthConnector(...))
 ```
 
 ## Built-in scope mapping

@@ -28,8 +28,12 @@ classifiers     = [
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
 
 dependencies = [
+    "mcs-types-http>=0.1",
     "requests>=2.32",
 ]
+
+[tool.uv.sources]
+mcs-types-http = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

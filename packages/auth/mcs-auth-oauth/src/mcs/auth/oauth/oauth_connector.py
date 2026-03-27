@@ -1,30 +1,29 @@
-"""OAuth 2.0 Authorization Code Flow adapter for MCS.
+"""OAuth 2.0 Authorization Code Flow connector for MCS.
 
-Implements ``AuthPort`` using the standard Authorization Code Flow with
-PKCE (RFC 7636).  Opens the user's browser and starts a background
-callback server so that ``authenticate()`` returns immediately with an
-``AuthChallenge`` instead of blocking.  On the next call the adapter
-checks whether the callback has arrived and, if so, exchanges the code
-for tokens.
+This is a *Connector*, not a Transport Adapter: it implements the
+``AuthPort`` contract using the standard Authorization Code Flow with
+PKCE (RFC 7636).  HTTP transport is handled by the injected ``_http``
+backend (default: ``HttpAdapter`` from ``mcs-adapter-http``).
 
-This adapter uses only the Python standard library -- no external
-dependencies beyond ``mcs-auth``.
+Opens the user's browser and starts a background callback server so
+that ``authenticate()`` returns immediately with an ``AuthChallenge``
+instead of blocking.  On the next call the connector checks whether the
+callback has arrived and, if so, exchanges the code for tokens.
 """
 
 from __future__ import annotations
 
 import hashlib
 import http.server
-import json
 import logging
 import secrets
 import threading
 import urllib.parse
-import urllib.request
 import webbrowser
 from base64 import urlsafe_b64encode
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
+from mcs.adapter.http import HttpResponse
 from mcs.auth.challenge import AuthChallenge
 
 logger = logging.getLogger(__name__)
@@ -51,12 +50,14 @@ class _PendingAuth:
         expected_state: str,
         code_verifier: str,
         redirect_uri: str,
+        capture_params: list[str] | None = None,
     ) -> None:
         self._port = port
         self._path = path
         self._expected_state = expected_state
         self.code_verifier = code_verifier
         self.redirect_uri = redirect_uri
+        self._capture_params = capture_params
 
         self._result: dict[str, str] = {}
         self._thread: threading.Thread | None = None
@@ -67,20 +68,30 @@ class _PendingAuth:
     def start(self, auth_url: str) -> None:
         """Create the callback server, open the browser, return immediately."""
         result = self._result
+        capture = self._capture_params
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 params = urllib.parse.parse_qs(
                     urllib.parse.urlparse(self.path).query
                 )
+                # Capture custom params if specified (passthrough mode)
+                if capture:
+                    for p in capture:
+                        if p in params:
+                            result.setdefault("code", params[p][0])
+                            result[p] = params[p][0]
+                # Standard OAuth params
                 if "code" in params:
-                    result["code"] = params["code"][0]
+                    result.setdefault("code", params["code"][0])
                     result["state"] = params.get("state", [""])[0]
                 if "error" in params:
                     result["error"] = params["error"][0]
                     result["error_description"] = params.get(
                         "error_description", [""]
                     )[0]
+                if "state" in params and "state" not in result:
+                    result["state"] = params["state"][0]
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
                 self.end_headers()
@@ -119,26 +130,45 @@ class _PendingAuth:
             )
         if "code" not in self._result:
             raise RuntimeError("OAuth callback did not contain an authorization code.")
-        if self._result.get("state") != self._expected_state:
+        if self._expected_state and self._result.get("state") != self._expected_state:
             raise RuntimeError("OAuth state mismatch -- possible CSRF attack.")
         return self._result["code"]
 
 
 # ---------------------------------------------------------------------------
-# OAuthAdapter
+# HttpPort -- local protocol for DI
 # ---------------------------------------------------------------------------
 
-class OAuthAdapter:
-    """Non-blocking auth transport using OAuth 2.0 Authorization Code Flow.
+@runtime_checkable
+class HttpPort(Protocol):
+    """Contract for HTTP transport (same pattern as GmailConnector)."""
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> HttpResponse: ...
+
+
+# ---------------------------------------------------------------------------
+# OAuthConnector
+# ---------------------------------------------------------------------------
+
+class OAuthConnector:
+    """Non-blocking OAuth 2.0 Authorization Code Flow connector.
 
     Satisfies ``AuthPort.authenticate(scope) -> str``.
 
-    On the **first** call for a given scope the adapter opens a browser,
-    starts a background callback server, and raises ``AuthChallenge`` so
-    the caller (usually ``AuthMixin``) can inform the user.  On the
-    **next** call the adapter checks whether the callback arrived and,
-    if so, exchanges the code for tokens.  If the user has not yet
-    logged in, another ``AuthChallenge`` is raised.
+    On the **first** call for a given scope the connector opens a
+    browser, starts a background callback server, and raises
+    ``AuthChallenge`` so the caller (usually ``AuthMixin``) can inform
+    the user.  On the **next** call the connector checks whether the
+    callback arrived and, if so, exchanges the code for tokens.  If the
+    user has not yet logged in, another ``AuthChallenge`` is raised.
 
     Parameters
     ----------
@@ -160,6 +190,8 @@ class OAuthAdapter:
     extra_params :
         Extra query params to include in the authorization URL
         (e.g. ``{"connection": "google-oauth2"}`` for Auth0).
+    _http :
+        DI escape hatch for the HTTP transport (default: ``HttpAdapter``).
     """
 
     def __init__(
@@ -173,6 +205,7 @@ class OAuthAdapter:
         callback_port: int = 3000,
         callback_path: str = "/callback",
         extra_params: dict[str, str] | None = None,
+        _http: HttpPort | None = None,
     ) -> None:
         self._authorize_url = authorize_url
         self._token_url = token_url
@@ -183,15 +216,33 @@ class OAuthAdapter:
         self._callback_path = callback_path
         self._extra_params = extra_params or {}
 
+        if _http is not None:
+            self._http: HttpPort = _http
+        else:
+            from mcs.adapter.http import HttpAdapter
+            self._http = HttpAdapter()
+
         self._tokens: dict[str, dict[str, Any]] = {}
         self._pending: dict[str, _PendingAuth] = {}
 
+    @property
+    def callback_url(self) -> str:
+        """Local callback URL (usable as redirect_uri)."""
+        return f"http://localhost:{self._callback_port}{self._callback_path}"
+
     # -- public API ----------------------------------------------------------
 
-    def authenticate(self, scope: str) -> str:
+    def authenticate(
+        self,
+        scope: str,
+        *,
+        url: str | None = None,
+        callback_params: list[str] | None = None,
+        state: str | None = None,
+    ) -> str:
         """Return a token for *scope*, or raise ``AuthChallenge``.
 
-        The method implements a three-state machine per scope:
+        **Default mode** (``url`` is *None*):
 
         1. **Tokens cached** -- return immediately.
         2. **Pending flow, callback received** -- exchange code, cache
@@ -200,24 +251,43 @@ class OAuthAdapter:
         4. **No flow started** -- start background server, open browser,
            raise ``AuthChallenge``.
 
+        **Passthrough mode** (``url`` is set):
+
+        Opens the user's browser to *url*, starts a callback server
+        that captures the parameters listed in *callback_params*
+        (or ``code`` by default), and returns the first captured value.
+        No token exchange is performed.
+
         Returns the ``refresh_token`` if available, otherwise the
         ``access_token``.
         """
+        cache_key = f"{scope}:redirect:{state}" if (url is not None or state is not None) else scope
+
         # 1. Already have tokens
-        if scope in self._tokens:
-            tokens = self._tokens[scope]
-            return tokens.get("refresh_token", tokens["access_token"])
+        if cache_key in self._tokens:
+            tokens = self._tokens[cache_key]
+            if isinstance(tokens, dict):
+                return tokens.get("refresh_token", tokens["access_token"])
+            return tokens
 
         # 2. Pending flow -- callback arrived?
-        if scope in self._pending:
-            pending = self._pending[scope]
+        if cache_key in self._pending:
+            pending = self._pending[cache_key]
             if pending.is_ready():
                 code = pending.get_code()
+
+                # Passthrough: return the captured param directly
+                if url is not None or callback_params:
+                    self._tokens[cache_key] = code
+                    del self._pending[cache_key]
+                    logger.info("Passthrough redirect completed for scope=%s", scope)
+                    return code
+
                 tokens = self._exchange_code(
                     code, pending.redirect_uri, pending.code_verifier,
                 )
-                self._tokens[scope] = tokens
-                del self._pending[scope]
+                self._tokens[cache_key] = tokens
+                del self._pending[cache_key]
                 logger.info("OAuth flow completed for scope=%s", scope)
                 return tokens.get("refresh_token", tokens["access_token"])
 
@@ -228,6 +298,32 @@ class OAuthAdapter:
             )
 
         # 4. Start a new flow
+        redirect_uri = self.callback_url
+
+        if url is not None:
+            # Passthrough: use the provided URL, skip building our own
+            pending = _PendingAuth(
+                port=self._callback_port,
+                path=self._callback_path,
+                expected_state=state or "",
+                code_verifier="",
+                redirect_uri=redirect_uri,
+                capture_params=callback_params,
+            )
+            pending.start(url)
+            self._pending[cache_key] = pending
+
+            logger.info(
+                "Passthrough redirect started for scope=%s -- browser opened",
+                scope,
+            )
+            raise AuthChallenge(
+                "A browser window has been opened. "
+                "Please complete the process and try again.",
+                scope=scope,
+            )
+
+        # Standard OAuth flow
         oauth_scope = self._resolve_scopes(scope)
 
         code_verifier = secrets.token_urlsafe(64)
@@ -235,17 +331,14 @@ class OAuthAdapter:
             hashlib.sha256(code_verifier.encode()).digest()
         ).rstrip(b"=").decode()
 
-        redirect_uri = (
-            f"http://localhost:{self._callback_port}{self._callback_path}"
-        )
-        state = secrets.token_urlsafe(16)
+        auth_state = secrets.token_urlsafe(16)
 
         params: dict[str, str] = {
             "response_type": "code",
             "client_id": self._client_id,
             "redirect_uri": redirect_uri,
             "scope": oauth_scope,
-            "state": state,
+            "state": auth_state,
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
             **self._extra_params,
@@ -255,12 +348,12 @@ class OAuthAdapter:
         pending = _PendingAuth(
             port=self._callback_port,
             path=self._callback_path,
-            expected_state=state,
+            expected_state=auth_state,
             code_verifier=code_verifier,
             redirect_uri=redirect_uri,
         )
         pending.start(auth_url)
-        self._pending[scope] = pending
+        self._pending[cache_key] = pending
 
         logger.info("OAuth flow started for scope=%s -- browser opened", scope)
         raise AuthChallenge(
@@ -280,23 +373,17 @@ class OAuthAdapter:
         self, code: str, redirect_uri: str, code_verifier: str,
     ) -> dict[str, Any]:
         """Exchange authorization code for tokens."""
-        body = json.dumps({
+        payload = {
             "grant_type": "authorization_code",
             "client_id": self._client_id,
             "client_secret": self._client_secret,
             "code": code,
             "redirect_uri": redirect_uri,
             "code_verifier": code_verifier,
-        }).encode()
-        req = urllib.request.Request(
-            self._token_url,
-            data=body,
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            resp = urllib.request.urlopen(req)
-            return json.loads(resp.read())
-        except Exception as exc:
-            read_fn = getattr(exc, "read", None)
-            detail = read_fn().decode() if read_fn and callable(read_fn) else str(exc)
-            raise RuntimeError(f"OAuth token exchange failed: {detail}") from exc
+        }
+        resp = self._http.request("POST", self._token_url, json_body=payload)
+        if not resp.ok:
+            raise RuntimeError(
+                f"OAuth token exchange failed: {resp.status_code} {resp.text}"
+            )
+        return resp.json()

@@ -62,7 +62,7 @@ def _parse_args() -> argparse.Namespace:
     auth.add_argument("--auth0-linkauth", action="store_true", help="Auth0 via LinkAuth broker (device-flow UX)")
     auth.add_argument("--linkauth", action="store_true", help="LinkAuth broker direct (no Auth0)")
 
-    p.add_argument("--model", default="gpt-4o", help="LiteLLM model identifier (default: gpt-4o)")
+    p.add_argument("--model", default="gpt-5.4", help="LiteLLM model identifier (default: gpt-5.4)")
     p.add_argument("--sender-name", default=None, help="Display name for outgoing e-mails")
     p.add_argument("--api-base", default=None,
                    help="Custom OpenAI-compatible API base URL (e.g. http://localhost:8000/v1)")
@@ -97,7 +97,7 @@ def _build_credential(args: argparse.Namespace):
 
     if getattr(args, "auth0_oauth", False):
         from mcs.auth.auth0 import Auth0Provider
-        from mcs.auth.oauth import OAuthAdapter
+        from mcs.auth.oauth import OAuthConnector
 
         for var in ("AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"):
             if not os.environ.get(var):
@@ -106,7 +106,7 @@ def _build_credential(args: argparse.Namespace):
         domain = os.environ["AUTH0_DOMAIN"]
         audience = os.environ.get("AUTH0_AUDIENCE", f"https://{domain}/api/v2/")
 
-        auth_adapter = OAuthAdapter(
+        auth_adapter = OAuthConnector(
             authorize_url=f"https://{domain}/authorize",
             token_url=f"https://{domain}/oauth/token",
             client_id=os.environ["AUTH0_CLIENT_ID"],
@@ -132,7 +132,7 @@ def _build_credential(args: argparse.Namespace):
 
     if getattr(args, "auth0_linkauth", False):
         from mcs.auth.auth0 import Auth0Provider
-        from mcs.auth.linkauth import LinkAuthAdapter
+        from mcs.auth.linkauth import LinkAuthConnector
 
         for var in ("AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"):
             if not os.environ.get(var):
@@ -140,7 +140,7 @@ def _build_credential(args: argparse.Namespace):
 
         broker_url = os.environ.get("LINKAUTH_BROKER_URL", "http://localhost:8080")
         audience = os.environ.get("AUTH0_AUDIENCE", "")
-        auth_adapter = LinkAuthAdapter(
+        auth_adapter = LinkAuthConnector(
             broker_url=broker_url,
             api_key=os.environ.get("LINKAUTH_API_KEY"),
             oauth_provider="auth0",
