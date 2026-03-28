@@ -98,7 +98,7 @@ class TestTokenExchange:
         assert provider_with_token.get_token("gmail") == "goog-tok-123"
 
     def test_cache_expires(self, provider_with_token: Auth0Provider, http: FakeHttp):
-        provider_with_token._cache["gmail"] = ("old-tok", time.time() - 1)
+        provider_with_token._mem_cache["gmail"] = ("old-tok", time.time() - 1)
         http.push_response({"access_token": "fresh-tok", "expires_in": 3600})
         assert provider_with_token.get_token("gmail") == "fresh-tok"
 
@@ -118,15 +118,15 @@ class TestTokenExchange:
         )
         assert provider.get_token("myservice") == "custom-tok"
 
-    def test_auth0_error_raises_runtime_error(
+    def test_expired_refresh_token_without_auth_connector_raises_lookup(
         self, provider_with_token: Auth0Provider, http: FakeHttp
     ):
-        provider_with_token._cache.clear()
+        provider_with_token._mem_cache.clear()
         http.push_response({
             "error": "invalid_grant",
             "error_description": "Refresh token is expired",
         })
-        with pytest.raises(RuntimeError, match="Auth0 token exchange failed"):
+        with pytest.raises(LookupError, match="re-authenticate"):
             provider_with_token.get_token("gmail")
 
     def test_passthrough_connection_name(

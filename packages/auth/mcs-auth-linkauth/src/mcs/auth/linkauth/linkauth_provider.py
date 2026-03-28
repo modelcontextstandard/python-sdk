@@ -52,10 +52,16 @@ class LinkAuthProvider(CredentialProvider):
             from .linkauth_connector import LinkAuthConnector
             self._auth = LinkAuthConnector(_token_cache=_token_cache, **kwargs)
 
+    def invalidate_token(self, scope: str) -> None:
+        """Clear cached credential for *scope* (provider + connector)."""
+        self._cache_clear(f"linkauth:{scope}")
+        if hasattr(self._auth, "invalidate_token"):
+            self._auth.invalidate_token(scope)
+
     def get_token(self, scope: str) -> str:
         """Return a credential for *scope* via LinkAuth broker."""
         cached = self._cache_read(f"linkauth:{scope}")
-        if cached is not None:
+        if cached is not None and cached.strip():
             logger.debug("Restored token from cache for scope=%s", scope)
             return cached
 

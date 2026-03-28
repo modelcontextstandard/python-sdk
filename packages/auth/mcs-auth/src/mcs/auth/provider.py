@@ -74,6 +74,16 @@ class CredentialProvider(ABC):
             return
         self._token_cache.delete(key)
 
+    # -- Token lifecycle ------------------------------------------------------
+
+    def invalidate_token(self, scope: str) -> None:
+        """Clear cached credentials for *scope*.
+
+        Forces a fresh fetch on the next ``get_token`` call.  Subclasses
+        should override to also clear in-memory caches.
+        """
+        self._cache_clear(f"at:{scope}")
+
     # -- Abstract API --------------------------------------------------------
 
     @abstractmethod

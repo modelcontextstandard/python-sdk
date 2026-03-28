@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "mcs-auth-linkauth"
-version         = "0.4.1"
+version         = "0.4.2"
 description     = "LinkAuth credential broker connector for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"
@@ -29,7 +29,7 @@ classifiers     = [
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
 
 dependencies = [
-    "mcs-auth>=0.3",
+    "mcs-auth>=0.3.1",
     "mcs-adapter-http>=0.2",
     "cryptography>=41.0",
 ]

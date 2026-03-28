@@ -161,6 +161,15 @@ class FakeHttp:
         return _http_response({"error": "no_response"}, status_code=500)
 
 
+def _proxy_envelope(data: dict, *, status_code: int = 200) -> dict:
+    """Wrap an Auth0 API response as a broker proxy envelope."""
+    return {
+        "status_code": status_code,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(data),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Basic OAuth flow: LinkAuthConnector → Auth0Provider Token Exchange
 # ---------------------------------------------------------------------------
@@ -207,8 +216,10 @@ class TestBasicTokenAcquisition:
             "expires_at": "2099-01-01T00:00:00Z",
         })
 
-        # 3. Auth0 Token Vault exchange succeeds
-        http.push({"access_token": "ya29.google", "expires_in": 3600})
+        # 3. Auth0 Token Vault exchange succeeds via broker proxy
+        broker.push_response(
+            _proxy_envelope({"access_token": "ya29.google", "expires_in": 3600}),
+        )
 
         token = provider.get_token("gmail")
         assert token == "ya29.google"
@@ -248,7 +259,9 @@ class TestBasicTokenAcquisition:
             "expires_at": "2099-01-01T00:00:00Z",
         })
 
-        http.push({"access_token": "ya29.first", "expires_in": 3600})
+        broker.push_response(
+            _proxy_envelope({"access_token": "ya29.first", "expires_in": 3600}),
+        )
 
         assert provider.get_token("gmail") == "ya29.first"
 
@@ -290,11 +303,15 @@ class TestBasicTokenAcquisition:
             "expires_at": "2099-01-01T00:00:00Z",
         })
 
-        http.push({"access_token": "ya29.gmail", "expires_in": 3600})
+        broker.push_response(
+            _proxy_envelope({"access_token": "ya29.gmail", "expires_in": 3600}),
+        )
         assert provider.get_token("gmail") == "ya29.gmail"
 
         # Second scope — no broker call, refresh_token reused
-        http.push({"access_token": "ya29.drive", "expires_in": 3600})
+        broker.push_response(
+            _proxy_envelope({"access_token": "ya29.drive", "expires_in": 3600}),
+        )
         assert provider.get_token("google-drive") == "ya29.drive"
 
 
@@ -326,13 +343,18 @@ class TestConnectedAccountsViaProxy:
 
         # --- Call 1: Token Vault → not_found → start Connected Accounts ---
 
-        # 1a. Token Vault exchange fails
-        http.push({
+        # 1a. Token Vault exchange fails via broker proxy
+        broker.push_response(_proxy_envelope({
             "error": "federated_connection_refresh_token_not_found",
             "error_description": "Federated connection Refresh Token not found.",
-        })
-        # 1b. MRRT exchange succeeds
-        http.push({"access_token": "ma_tok", "scope": "create:me:connected_accounts"})
+        }))
+        # 1b. MRRT exchange succeeds via broker proxy
+        broker.push_response(
+            _proxy_envelope({
+                "access_token": "ma_tok",
+                "scope": "create:me:connected_accounts",
+            }),
+        )
 
         # 1c. POST /connect via proxy_http → broker proxy response
         connect_resp = json.dumps({
@@ -363,18 +385,21 @@ class TestConnectedAccountsViaProxy:
 
         assert provider._ca_pending is not None
 
-        # Verify proxy_http was called for /connect
-        proxy_req = [r for r in broker.requests if r["path"] == "/v1/proxy"]
-        assert len(proxy_req) == 1
-        assert "connected-accounts/connect" in proxy_req[0]["body"]["url"]
+        # Verify proxy_http was called for the Connected Accounts /connect step.
+        connect_proxy_req = [
+            r for r in broker.requests
+            if r["path"] == "/v1/proxy"
+            and "connected-accounts/connect" in r["body"]["url"]
+        ]
+        assert len(connect_proxy_req) == 1
 
         # --- Call 2: Complete the Connected Account ---
 
         # 2a. Token Vault still fails (triggers _ensure_connected_account)
-        http.push({
+        broker.push_response(_proxy_envelope({
             "error": "federated_connection_refresh_token_not_found",
             "error_description": "...",
-        })
+        }))
 
         # 2b. Passthrough session returns encrypted connect_code
         ciphertext = encrypt_for_key(
@@ -399,8 +424,10 @@ class TestConnectedAccountsViaProxy:
             "body": complete_resp,
         })
 
-        # 2d. Token Vault retry succeeds
-        http.push({"access_token": "ya29.final", "expires_in": 3600})
+        # 2d. Token Vault retry succeeds via broker proxy
+        broker.push_response(
+            _proxy_envelope({"access_token": "ya29.final", "expires_in": 3600}),
+        )
 
         token = provider.get_token("gmail")
         assert token == "ya29.final"

@@ -30,8 +30,8 @@ urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://
 
 dependencies = [
     "mcs-driver-core>=0.2.2",
-    "mcs-driver-mailread>=0.1",
-    "mcs-driver-mailsend>=0.1",
+    "mcs-driver-mailread>=0.2.1",
+    "mcs-driver-mailsend>=0.2.1",
 ]
 
 [project.optional-dependencies]

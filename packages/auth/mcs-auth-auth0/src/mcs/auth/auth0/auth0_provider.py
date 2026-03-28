@@ -191,6 +191,13 @@ class Auth0Provider(CredentialProvider):
                 self._refresh_token = cached_rt
                 logger.debug("Restored refresh token from cache for %s", self._domain)
 
+    # -- Token lifecycle ------------------------------------------------------
+
+    def invalidate_token(self, scope: str) -> None:
+        """Clear cached access token for *scope* (memory + persistent)."""
+        self._mem_cache.pop(scope, None)
+        super().invalidate_token(scope)
+
     # -- Public API ----------------------------------------------------------
 
     def get_token(self, scope: str) -> str:
@@ -214,9 +221,12 @@ class Auth0Provider(CredentialProvider):
 
         # 2. Persistent cache (access tokens)
         cached_at = self._cache_read(f"at:{scope}")
-        if cached_at is not None:
-            logger.debug("Restored access token from cache for scope=%s", scope)
-            return cached_at
+        if cached_at is not None and cached_at.strip():
+            if not self._is_jwt_expired(cached_at):
+                logger.debug("Restored access token from cache for scope=%s", scope)
+                return cached_at
+            logger.info("Cached access token expired for scope=%s -- refreshing", scope)
+            self.invalidate_token(scope)
 
         # 3. Obtain refresh token if needed
         if not self._refresh_token:
@@ -305,24 +315,49 @@ class Auth0Provider(CredentialProvider):
         return data
 
     def _exchange_and_cache(self, scope: str) -> str:
-        """Exchange + cache, with Connected Accounts auto-setup on failure."""
+        """Exchange + cache, with Connected Accounts auto-setup on failure.
+
+        If the refresh token itself has expired (``invalid_grant``), clears
+        it and re-triggers the full authentication flow via ``_auth``.
+        """
         connection = self._resolve_connection(scope)
 
         try:
             data = self._exchange_token(connection)
         except RuntimeError as exc:
-            if _NOT_FOUND_ERROR not in str(exc):
+            err = str(exc)
+            if _NOT_FOUND_ERROR in err:
+                logger.info(
+                    "No Connected Account for connection=%s -- "
+                    "initiating setup flow",
+                    connection,
+                )
+                self._ensure_connected_account(connection, scope)
+                data = self._exchange_token(connection)
+            elif "invalid_grant" in err or "expired" in err.lower():
+                logger.warning(
+                    "Refresh token expired for %s -- restarting auth flow",
+                    self._domain,
+                )
+                self._refresh_token = None
+                self._cache_clear(f"rt:{self._domain}")
+                if self._auth is None:
+                    raise LookupError(
+                        "Refresh token expired and no auth connector "
+                        "configured to re-authenticate."
+                    ) from exc
+                self._refresh_token = self._auth.authenticate(scope)
+                self._cache_write(f"rt:{self._domain}", self._refresh_token)
+                try:
+                    data = self._exchange_token(connection)
+                except RuntimeError as retry_exc:
+                    if _NOT_FOUND_ERROR in str(retry_exc):
+                        self._ensure_connected_account(connection, scope)
+                        data = self._exchange_token(connection)
+                    else:
+                        raise
+            else:
                 raise
-            # Token Vault has no Connected Account -> set one up
-            logger.info(
-                "No Connected Account for connection=%s -- "
-                "initiating setup flow",
-                connection,
-            )
-            self._ensure_connected_account(connection, scope)
-            # If _ensure_connected_account returns (instead of raising
-            # AuthChallenge), the setup is complete -- retry exchange.
-            data = self._exchange_token(connection)
 
         access_token = data["access_token"]
         expires_in = data.get("expires_in", 3600)
@@ -496,6 +531,31 @@ class Auth0Provider(CredentialProvider):
             data.get("id", "?"),
             data.get("connection", "?"),
         )
+
+    # -- JWT helpers ---------------------------------------------------------
+
+    @staticmethod
+    def _is_jwt_expired(token: str, *, leeway: int = 60) -> bool:
+        """Check if a JWT's ``exp`` claim is in the past.
+
+        Returns ``False`` (not expired) for opaque tokens or on any
+        parse error -- the worst case is one extra API call that returns
+        401, which the connector retry handles.
+        """
+        parts = token.split(".")
+        if len(parts) != 3:
+            return False
+        try:
+            from base64 import urlsafe_b64decode
+            payload = parts[1]
+            payload += "=" * (-len(payload) % 4)
+            claims = json.loads(urlsafe_b64decode(payload))
+            exp = claims.get("exp")
+            if exp is None:
+                return False
+            return time.time() >= (exp - leeway)
+        except Exception:
+            return False
 
     # -- HTTP helpers --------------------------------------------------------
 

@@ -1674,7 +1674,7 @@ requires-dist = [{ name = "paramiko", specifier = ">=3.0" }]
 
 [[package]]
 name = "mcs-auth"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/auth/mcs-auth" }
 dependencies = [
     { name = "mcs-types-cache" },
@@ -1685,7 +1685,7 @@ requires-dist = [{ name = "mcs-types-cache", editable = "packages/types/mcs-type
 
 [[package]]
 name = "mcs-auth-auth0"
-version = "0.4.1"
+version = "0.4.2"
 source = { editable = "packages/auth/mcs-auth-auth0" }
 dependencies = [
     { name = "mcs-adapter-http" },
@@ -1700,7 +1700,7 @@ requires-dist = [
 
 [[package]]
 name = "mcs-auth-linkauth"
-version = "0.4.1"
+version = "0.4.2"
 source = { editable = "packages/auth/mcs-auth-linkauth" }
 dependencies = [
     { name = "cryptography" },
@@ -1829,7 +1829,7 @@ provides-extras = ["imap", "smtp", "gmail", "inspector", "all"]
 
 [[package]]
 name = "mcs-driver-mailread"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/drivers/mcs-driver-mailread" }
 dependencies = [
     { name = "mcs-driver-core" },
@@ -1857,7 +1857,7 @@ provides-extras = ["imap", "gmail", "inspector"]
 
 [[package]]
 name = "mcs-driver-mailsend"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/drivers/mcs-driver-mailsend" }
 dependencies = [
     { name = "mcs-driver-core" },

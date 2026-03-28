@@ -73,6 +73,7 @@ class GmailMailboxConnector:
         _credential: Any | None = None,
         _http: HttpPort | None = None,
     ) -> None:
+        self._credential = _credential
         if _credential is not None:
             self._token: Union[str, Callable[[], str]] = lambda: _credential.get_token("gmail")
         elif access_token is not None:
@@ -93,23 +94,47 @@ class GmailMailboxConnector:
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._get_token()}"}
 
-    def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        _retried: bool = False,
+    ) -> Any:
         resp = self._http.request(
-            "GET", f"{_BASE}{path}",
+            method,
+            f"{_BASE}{path}",
             params=params,
+            json_body=json_body,
             headers=self._auth_headers(),
         )
+        if (
+            resp.status_code == 401
+            and self._credential is not None
+            and hasattr(self._credential, "invalidate_token")
+            and not _retried
+        ):
+            logger.info(
+                "Gmail access token rejected (401) -- retrying once with fresh token",
+            )
+            self._credential.invalidate_token("gmail")
+            return self._request_json(
+                method,
+                path,
+                params=params,
+                json_body=json_body,
+                _retried=True,
+            )
         resp.raise_for_status()
         return resp.json()
 
+    def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        return self._request_json("GET", path, params=params)
+
     def _post(self, path: str, body: dict[str, Any]) -> Any:
-        resp = self._http.request(
-            "POST", f"{_BASE}{path}",
-            json_body=body,
-            headers=self._auth_headers(),
-        )
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_json("POST", path, json_body=body)
 
     @staticmethod
     def _extract_header(headers: list[dict[str, str]], name: str) -> str:

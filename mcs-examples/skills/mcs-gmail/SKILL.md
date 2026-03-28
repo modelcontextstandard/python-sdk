@@ -53,7 +53,7 @@ Copy `config.toml.example` to `config.toml` in the skill directory and fill in t
 ## Setup
 
 ```bash
-pip install mcs-driver-mail>=0.1.2 mcs-driver-core>=0.2.2 mcs-driver-mailread>=0.2.0 mcs-driver-mailsend>=0.2.0 mcs-adapter-http>=0.3.0 mcs-auth>=0.3.0 mcs-auth-auth0>=0.4.1 mcs-auth-linkauth>=0.4.1 mcs-types-cache>=0.1.1
+pip install mcs-driver-mail>=0.1.2 mcs-driver-core>=0.2.2 mcs-driver-mailread>=0.2.1 mcs-driver-mailsend>=0.2.1 mcs-adapter-http>=0.3.0 mcs-auth>=0.3.1 mcs-auth-auth0>=0.4.2 mcs-auth-linkauth>=0.4.2 mcs-types-cache>=0.1.1
 ```
 
 ## Tools

@@ -277,6 +277,13 @@ class LinkAuthConnector:
             scope=scope,
         )
 
+    def invalidate_token(self, scope: str) -> None:
+        """Remove cached tokens for *scope* from memory and persistent cache."""
+        keys_to_remove = [k for k in self._tokens if k == scope or k.startswith(f"{scope}:")]
+        for k in keys_to_remove:
+            del self._tokens[k]
+        self._persist_state()
+
     # -- Cache persistence ---------------------------------------------------
 
     def _persist_state(self) -> None:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "mcs-driver-mailread"
-version         = "0.2.0"
+version         = "0.2.1"
 description     = "Mail-reading driver for the Model Context Standard -- lets an LLM read and organise e-mail."
 readme          = "README.md"
 requires-python = ">=3.9"
