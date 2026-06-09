@@ -277,3 +277,87 @@ An earlier version was published under the name `mcs-drivers-core` (plural).
 The canonical name is now `mcs-driver-core` (singular, consistent with the
 `mcs-driver-<capability>` naming convention). The old package should be
 yanked or updated with a deprecation notice pointing to `mcs-driver-core`.
+
+---
+
+## Hook-System für den Tool-Call-Lebenszyklus evaluieren
+
+**Affects:** `mcs-driver-core` (ToolDriver/Orchestrator-Ebene), alle Treiber, Clients
+
+**Status:** Open / Idee -- in ausführlicher Session evaluieren
+
+**Problem:**
+Aktuell ermitteln Clients Fähigkeiten der Treiber über **Mixins** und
+`isinstance`-Checks (z.B. `ToolCallSignalingMixin`, `SupportsHealthcheck`,
+`SupportsDriverContext` in `packages/core/src/mcs/driver/core/mixins/`).
+Verhalten rund um einen Tool-Call (Vorab-Validierung, Permission-Abfrage,
+Nachbearbeitung des Ergebnisses) ist mehr oder weniger über **Signale und
+Interfaces** verteilt realisiert.
+
+Das funktioniert, ist aber fragmentiert: Jede neue Quereinwirkung
+(Logging, Permission, Argument-Patching, Audit, Retry) braucht ein eigenes
+Interface bzw. Mixin, und der Client muss jede Capability einzeln abfragen.
+
+**Idee:**
+Ein einheitliches, **event-basiertes Hook-System**, in das man vor/nach
+einem Tool-Call Logik injizieren kann -- statt für jede Quereinwirkung ein
+neues Interface zu definieren. Der vom User skizzierte Lebenszyklus:
+
+```
+PreToolUse-Hook            -- vor dem Call; darf blocken / Argumente patchen
+PermissionRequest-Hook     -- Freigabe anfragen (allow / deny / ask)
+   ↓
+Tool Execution
+   ↓
+PostToolUse-Hook           -- Ergebnis nachbearbeiten / modifizieren
+PostToolUseFailure-Hook    -- Fehlerfall separat behandeln
+PostToolBatch-Hook         -- nach einem ganzen Tool-Call-Batch eines Turns
+```
+
+**Referenz -- PI (earendil-works/pi):**
+PI nutzt genau so ein Modell: `pi.on(eventName, async (event, ctx) => {...})`.
+Relevante Events, die unsere Punkte direkt abbilden:
+
+- **`tool_call`** -- feuert vor der Ausführung. **Kann blocken** über
+  `return { block: true, reason }`. `event.input` ist **mutierbar** →
+  Argument-Patching. (= unser *PreToolUse* + Permission-Deny)
+- **`tool_execution_start` / `_update` / `_end`** -- reine
+  Lifecycle-Notifications (Observability, Progress).
+- **`tool_result`** -- feuert nach Ausführung, **kann das Ergebnis
+  modifizieren**; Patches mehrerer Handler chainen. (= unser *PostToolUse*,
+  inkl. `isError` für *PostToolUseFailure*)
+- **`context`** -- vor jedem LLM-Call, Messages non-destruktiv anpassbar
+  (relevant fürs Tool-Injection/Orchestrator-Thema).
+- **`before_agent_start` / `turn_start` / `turn_end`** -- Turn-Grenzen
+  (= Aufhänger für *PostToolBatch*).
+
+PI hat keinen eigenständigen `PermissionRequest`-Event -- Permission wird
+dort als Deny-Entscheidung **innerhalb** von `tool_call` modelliert. Für MCS
+zu klären: eigener Hook (allow/deny/ask mit Remember-Flag, vgl. PIs
+`project_trust`) vs. Spezialfall des PreToolUse.
+
+**Zu evaluieren:**
+- Hook-Registrierung: zentrale Registry / Bus vs. pro-Treiber-Hooks. Wer
+  besitzt den Bus -- Orchestrator, Driver-Core, oder der Client?
+- Rückgabe-Semantik: `block`, `modify`, `replace`, `continue` -- wie chainen
+  mehrere Hooks (Reihenfolge, Veto-Gewinner)?
+- Verhältnis zu den bestehenden Mixins: Hooks **ersetzen** Signaling-Mixins
+  oder **ergänzen** sie? Capability-Detection (`isinstance`) bleibt für
+  "kann der Treiber X" sinnvoll; Hooks sind eher für "tu X um den Call herum".
+- Sync vs. async Hooks (vgl. CredentialProvider-Frage).
+- Was davon sollte als **Standard-Hook im Treiber** mitgeliefert werden,
+  damit ein Client es out-of-the-box nutzen kann (Logging-Hook,
+  Permission-Hook, Audit-Hook)?
+- Sicherheit: Hooks dürfen Argumente mutieren → Audit/Trust-Modell nötig
+  (PI knüpft Hook-Ausführung an `isProjectTrusted()`).
+
+**Bezug zu bestehenden TODOs:**
+- *Observability* (INFO-Logging je Layer-Übergang) wäre ein natürlicher
+  erster Hook-Konsument.
+- *CredentialProvider* (sync/async-Frage) überschneidet sich mit der
+  Hook-Signatur-Entscheidung.
+
+**Referenzen:**
+- PI Coding Agent: https://pi.dev/ ·
+  https://github.com/earendil-works/pi/tree/main/packages/coding-agent
+- Hook/Event-Doku: `packages/coding-agent/docs/extensions.md`
