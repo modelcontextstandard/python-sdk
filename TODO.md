@@ -280,84 +280,112 @@ yanked or updated with a deprecation notice pointing to `mcs-driver-core`.
 
 ---
 
-## Hook-System für den Tool-Call-Lebenszyklus evaluieren
+## Lifecycle-Notification-Hooks für den Tool-Call (Observer-Pattern)
 
-**Affects:** `mcs-driver-core` (ToolDriver/Orchestrator-Ebene), alle Treiber, Clients
+**Affects:** `mcs-driver-core` -- `DriverBase.process_llm_response`, `MCSDriver`-Interface; Clients
 
-**Status:** Open / Idee -- in ausführlicher Session evaluieren
+**Status:** Open / Design konsolidiert -- **eine** offene Designfrage (Permission UX vs. Security)
 
-**Problem:**
-Aktuell ermitteln Clients Fähigkeiten der Treiber über **Mixins** und
-`isinstance`-Checks (z.B. `ToolCallSignalingMixin`, `SupportsHealthcheck`,
-`SupportsDriverContext` in `packages/core/src/mcs/driver/core/mixins/`).
-Verhalten rund um einen Tool-Call (Vorab-Validierung, Permission-Abfrage,
-Nachbearbeitung des Ergebnisses) ist mehr oder weniger über **Signale und
-Interfaces** verteilt realisiert.
+**Ausgangsfrage (ursprünglich):**
+Sollte MCS ein event-basiertes **Hook-System** (PreToolUse, PermissionRequest,
+PostToolUse/Failure, PostToolBatch -- vgl. PIs `pi.on(...)`) bekommen, um das
+Verhalten rund um Tool-Calls zu vereinheitlichen, statt es über Mixins,
+Signale und Interfaces zu verteilen?
 
-Das funktioniert, ist aber fragmentiert: Jede neue Quereinwirkung
-(Logging, Permission, Argument-Patching, Audit, Retry) braucht ein eigenes
-Interface bzw. Mixin, und der Client muss jede Capability einzeln abfragen.
+**Befund (nach Code-Analyse):**
+Die meisten dieser Punkte sind im Code bereits idiomatisch gelöst -- es braucht
+**weder einen globalen Eventbus noch einen Generator-/yield-Umbau**. MCS hat
+zwei tragende Säulen, die zusammen fast alles abdecken:
 
-**Idee:**
-Ein einheitliches, **event-basiertes Hook-System**, in das man vor/nach
-einem Tool-Call Logik injizieren kann -- statt für jede Quereinwirkung ein
-neues Interface zu definieren. Der vom User skizzierte Lebenszyklus:
+1. **Pull über `DriverResponse`** (`mcs_driver_interface.py`) -- ein
+   *diskriminiertes Status-Objekt*: `call_executed` | `call_failed` +
+   `retry_prompt` | keins (= finale Antwort). Trägt bereits einen **Pre-Fehler**
+   (unbekanntes Tool kommt zurück, *bevor* `execute_tool` läuft, `base.py:100`).
+   Deckt PostToolUse + PostToolUseFailure ab.
+2. **In-band Challenge-as-result über MRO-Mixin** (`mcs.auth.mixin.AuthMixin`):
+   Tool-Execution wirft `AuthChallenge`; der Mixin legt sich via MRO um
+   `execute_tool`, fängt sie und konvertiert sie in ein **normales Tool-Ergebnis**
+   (`{"auth_required": true, "url": ...}`). Die interaktive Anforderung reist im
+   Tool-Result-Kanal und wird durch den **Multi-Turn-Loop** des Clients
+   aufgelöst -- kein Pausieren, kein Out-of-Band-Event. Ohne Mixin fängt
+   `DriverBase.process_llm_response` jede Exception zu sauberem `call_failed`
+   (`base.py:119`) -- kein roher Crash. **Permission kann demselben Muster
+   folgen** (`PermissionMixin`, Consent-Check *vor* `super().execute_tool()`).
 
-```
-PreToolUse-Hook            -- vor dem Call; darf blocken / Argumente patchen
-PermissionRequest-Hook     -- Freigabe anfragen (allow / deny / ask)
-   ↓
-Tool Execution
-   ↓
-PostToolUse-Hook           -- Ergebnis nachbearbeiten / modifizieren
-PostToolUseFailure-Hook    -- Fehlerfall separat behandeln
-PostToolBatch-Hook         -- nach einem ganzen Tool-Call-Batch eines Turns
-```
+**Was fehlt -- und nur das ist hier zu bauen:**
+Reine **Live-UX-Notification** ("Tool startet jetzt", "Tool ist zurück"), die
+*weder* der Response *noch* das in-band-Muster liefern kann und die bewusst
+**nicht** durch die LLM-Konversation laufen soll. Das ist der "darf, aber
+muss nicht / nicht kritisch"-Fall.
 
-**Referenz -- PI (earendil-works/pi):**
-PI nutzt genau so ein Modell: `pi.on(eventName, async (event, ctx) => {...})`.
-Relevante Events, die unsere Punkte direkt abbilden:
+**Empfehlung -- Observer-Parameter, nicht Hook-Bus:**
 
-- **`tool_call`** -- feuert vor der Ausführung. **Kann blocken** über
-  `return { block: true, reason }`. `event.input` ist **mutierbar** →
-  Argument-Patching. (= unser *PreToolUse* + Permission-Deny)
-- **`tool_execution_start` / `_update` / `_end`** -- reine
-  Lifecycle-Notifications (Observability, Progress).
-- **`tool_result`** -- feuert nach Ausführung, **kann das Ergebnis
-  modifizieren**; Patches mehrerer Handler chainen. (= unser *PostToolUse*,
-  inkl. `isError` für *PostToolUseFailure*)
-- **`context`** -- vor jedem LLM-Call, Messages non-destruktiv anpassbar
-  (relevant fürs Tool-Injection/Orchestrator-Thema).
-- **`before_agent_start` / `turn_start` / `turn_end`** -- Turn-Grenzen
-  (= Aufhänger für *PostToolBatch*).
+- Optionaler, **read-only** `observer`-Parameter an `process_llm_response`,
+  analog zum bereits vorhandenen `streaming`-kwarg im `MCSDriver`-Interface:
+  ```python
+  def process_llm_response(self, llm_response, *, streaming=False, observer=None) -> DriverResponse: ...
+  ```
+  Aufrufpunkte in `DriverBase.process_llm_response` um `base.py:117`:
+  `on_call_started(name, args)` / `on_call_finished(name, result)` /
+  `on_call_failed(name, err)`, jeweils nur `if observer is not None`.
+  `ToolEventObserver` = schlankes `Protocol`. Default `None` = heutiges Verhalten.
 
-PI hat keinen eigenständigen `PermissionRequest`-Event -- Permission wird
-dort als Deny-Entscheidung **innerhalb** von `tool_call` modelliert. Für MCS
-zu klären: eigener Hook (allow/deny/ask mit Remember-Flag, vgl. PIs
-`project_trust`) vs. Spezialfall des PreToolUse.
+- **Ebene = Driver (`process_llm_response`), NICHT `MCSToolDriver`/`execute_tool`.**
+  Begründung: (a) `execute_tool` ist die Ausführungs-Primitive -- "vorher/nachher"
+  ist Orchestrierung, und `tool_name`/`arguments`/`result` liegen ohnehin in
+  `process_llm_response`; (b) ISP -- ein REST-/CSV-/FS-ToolDriver soll nicht
+  UI-Notifications orchestrieren; (c) Orchestrator-Layer (DetailLoading,
+  Pagination) rufen `execute_tool` intern mehrfach -- die user-sichtbare
+  "ein Call"-Grenze kennt nur die Driver-Ebene.
 
-**Zu evaluieren:**
-- Hook-Registrierung: zentrale Registry / Bus vs. pro-Treiber-Hooks. Wer
-  besitzt den Bus -- Orchestrator, Driver-Core, oder der Client?
-- Rückgabe-Semantik: `block`, `modify`, `replace`, `continue` -- wie chainen
-  mehrere Hooks (Reihenfolge, Veto-Gewinner)?
-- Verhältnis zu den bestehenden Mixins: Hooks **ersetzen** Signaling-Mixins
-  oder **ergänzen** sie? Capability-Detection (`isinstance`) bleibt für
-  "kann der Treiber X" sinnvoll; Hooks sind eher für "tu X um den Call herum".
-- Sync vs. async Hooks (vgl. CredentialProvider-Frage).
-- Was davon sollte als **Standard-Hook im Treiber** mitgeliefert werden,
-  damit ein Client es out-of-the-box nutzen kann (Logging-Hook,
-  Permission-Hook, Audit-Hook)?
-- Sicherheit: Hooks dürfen Argumente mutieren → Audit/Trust-Modell nötig
-  (PI knüpft Hook-Ausführung an `isProjectTrusted()`).
+- **Per-Call-Parameter, kein `set_observer()`.** `DriverBase` ist vertraglich
+  **stateless / thread-safe** (`mcs_driver_interface.py:152`); ein Observer als
+  Instanz-Attribut würde das brechen.
+
+- **Kein Capability-Mixin nötig.** Der Observer ist rein *additiv* (Client gibt
+  ihn mit oder nicht) -- kein `isinstance`-Gate wie bei `SupportsDriverContext`,
+  wo der Client das Verhalten *vorab* kennen muss. "Grundsätzlich bereitgestellt"
+  ergibt sich daraus, dass die Aufrufpunkte in `DriverBase` sitzen -- jeder
+  Driver erbt sie.
+
+- **Progress ("Verlauf des Calls") später & separat.** Als einziger der drei
+  entsteht er *innerhalb* `execute_tool` und bräuchte den Observer auf der
+  Ausführungsebene (Signatur-Eingriff). Opt-in nur für ToolDriver, bei denen
+  es Sinn ergibt -- nicht in den ersten Wurf zwingen.
+
+**Verworfen (bewusst):**
+- **Globaler Eventbus à la PI** (`pi.on(...)`): PI ist eine *Endanwendung* und
+  darf implizit/global sein; MCS ist eine *Library* -- globale, unsichtbare
+  Hook-Magie verletzt "explizit über implizit" und die DPI-Konvention.
+- **Generator / yield-send-Lebenszyklus**: löst nur das Pausier-Problem bei
+  interaktiven Flows -- das erledigt das in-band-Muster bereits eleganter und
+  atomar.
+- **Hooks ersetzen Mixins**: falsche Dichotomie. Capability-Detection
+  (Mixin/`isinstance`, "was *ist* der Treiber") und Lifecycle-Notification
+  (Observer, "was passiert *um* den Call") sind getrennte Achsen.
+
+**Verbleibende offene Designfrage -- entscheidet den Permission-Weg:**
+Ist Permission ein **UX-Komfort-Gate** oder eine **harte Sicherheitsgrenze**
+gegen den Agenten?
+- *UX* → in-band-Muster (`PermissionMixin` analog `AuthMixin`) reicht; die
+  Freigabe läuft über die Konversation.
+- *Security* → in-band ist **prompt-injection-anfällig** (Freigabe im selben
+  Kanal wie der untrusted LLM-Output). Dann **out-of-band** nötig: Client-Callback
+  oder `plan()`/`execute()`-Split, garantiert vom Client (nicht vom LLM)
+  kontrolliert.
 
 **Bezug zu bestehenden TODOs:**
-- *Observability* (INFO-Logging je Layer-Übergang) wäre ein natürlicher
-  erster Hook-Konsument.
-- *CredentialProvider* (sync/async-Frage) überschneidet sich mit der
-  Hook-Signatur-Entscheidung.
+- *Observability* (INFO-Logging je Layer-Übergang) -- der `ToolEventObserver`
+  ist der natürliche erste Konsument.
+- *CredentialProvider* -- das in-band-Muster *ist* der Credential-/Auth-Pfad;
+  `CredentialProvider.get_token` ist bereits synchron (`auth/provider.py:33`),
+  passend zum synchronen Driver.
 
-**Referenzen:**
-- PI Coding Agent: https://pi.dev/ ·
-  https://github.com/earendil-works/pi/tree/main/packages/coding-agent
+**Referenz -- PI (earendil-works/pi):** als Vergleich, dessen globaler Bus für
+MCS bewusst *nicht* übernommen wird. Relevante Mappings: `tool_call` (kann
+blocken, `input` mutierbar) ≈ Pre/Permission; `tool_execution_start/_end` ≈
+Notification-Hooks; `tool_result` (modifizierbar) ≈ Post; `turn_end` ≈
+PostToolBatch. PI hat keinen eigenen `PermissionRequest`-Event -- Permission
+ist dort Deny innerhalb `tool_call`.
+- https://pi.dev/ · https://github.com/earendil-works/pi/tree/main/packages/coding-agent
 - Hook/Event-Doku: `packages/coding-agent/docs/extensions.md`
