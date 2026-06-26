@@ -10,7 +10,7 @@ A PromptStrategy defines:
 The default implementation ``JsonPromptStrategy`` uses JSON.
 All text that reaches the LLM lives in TOML files, not in Python code.
 
-See MCS Specification Section 10 -- LLM Prompt Patterns.
+See MCS Specification Section 11 -- LLM Prompt Patterns.
 """
 
 from __future__ import annotations

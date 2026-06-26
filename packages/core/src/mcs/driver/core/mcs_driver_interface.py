@@ -266,7 +266,7 @@ class MCSDriver(ABC):
 
         Before signalling *failed* the driver should attempt any
         configured self-healing patterns (e.g. fixing known
-        model-specific formatting errors) -- see Section 9 in docs.
+        model-specific formatting errors) -- see Section 10 in docs.
 
         Parameters
         ----------
