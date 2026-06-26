@@ -27,7 +27,7 @@ class MyDriver(MCSDriver):
 ## Capability detection
 
 Optional features (health checks, native tool-calling via
-`get_native_context`, streaming tool-call signaling, …) are advertised as
+`get_native_tool_context`, streaming tool-call signaling, …) are advertised as
 flags in `DriverMeta.capabilities`. Each optional contract carries its flag
 as a `CAPABILITY` constant. There are two operations — **detection** ("is the
 feature there?") and **invocation** ("give me the object that provides it") —
@@ -43,7 +43,7 @@ if driver.meta.has_capability(SupportsNativeTools):
 # invocation: get the layer that satisfies the contract -- typed, no cast,
 # works whether `driver` is a plain driver, an orchestrator, or a decorator
 if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)):
-    ctx = dc.get_native_context(model)
+    ctx = dc.get_native_tool_context(model)
 ```
 
 **Do not rely on `isinstance` for feature detection.** Drivers are

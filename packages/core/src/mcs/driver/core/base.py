@@ -47,7 +47,7 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsNativeTools):
     """
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        # DriverBase implements ``get_native_context`` for every subclass, so
+        # DriverBase implements ``get_native_tool_context`` for every subclass, so
         # advertise the ``native_tools`` capability via the metadata helper.
         # This replaces the implicit auto-registration that used to live in the
         # capability mixin: the contract stays pure, the convenience lives in
@@ -235,7 +235,7 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsNativeTools):
            and produces JSON in ``content`` that resembles a text-based
            tool call.  Future solutions may include passing
            ``model_name`` to ``process_llm_response`` or introducing
-           session-level state after ``get_native_context``.
+           session-level state after ``get_native_tool_context``.
         """
         ordered = list(self._extractors)
         text_fallback: TextExtractionStrategy | None = None

@@ -61,7 +61,7 @@ produces JSON in `content` that resembles a text-based tool call,
 **Possible solutions:**
 1. Pass `model_name` to `process_llm_response` so the extraction chain can
    be context-aware (implies a signature change).
-2. Introduce session-level state after `get_native_context` – the driver
+2. Introduce session-level state after `get_native_tool_context` – the driver
    remembers whether native tools were supplied and skips text extraction
    accordingly.
 3. Accept the edge case as negligible for now (models called with `tools`

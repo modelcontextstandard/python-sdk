@@ -5,7 +5,7 @@ with the tools embedded as text, which every model can consume. Some LLM APIs
 (OpenAI, Anthropic, ...) instead accept the tools as a separate, structured
 ``tools`` parameter and return structured tool-calls.
 
-``SupportsNativeTools`` bridges that gap: ``get_native_context`` returns a
+``SupportsNativeTools`` bridges that gap: ``get_native_tool_context`` returns a
 :class:`NativeToolContext` carrying the system message *and* -- when the target
 model supports native tool-calling -- the tool definitions as native dicts.
 When it does not, ``tools`` is ``None`` and the tools stay embedded in

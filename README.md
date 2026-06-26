@@ -84,7 +84,7 @@ from mcs.driver.rest import RestDriver
 client = OpenAI()
 driver = RestDriver(url="https://mcsd.io/context7.json")
 
-ctx = driver.get_native_context(model_name="gpt-5.2")
+ctx = driver.get_native_tool_context(model_name="gpt-5.2")
 
 messages = [
     {"role": "system", "content": ctx.system_message},
@@ -451,7 +451,7 @@ chain that detects tool calls (text-based Formats, OpenAI-native
 `tool_calls`, or raw dicts), executes them via `execute_tool()`, and
 returns a `DriverResponse` with the result or a retry prompt.
 
-**Native tool-call support** -- `get_native_context()` returns a
+**Native tool-call support** -- `get_native_tool_context()` returns a
 `NativeToolContext` with `system_message` and, when the model supports it,
 `tools` in OpenAI format -- the client just passes them through.
 
