@@ -41,7 +41,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from mcs.auth.mixin import AuthMixin
-from mcs.driver.core import DriverResponse, MCSDriver, SupportsDriverContext
+from mcs.driver.core import DriverMeta, DriverResponse, MCSDriver, SupportsNativeTools
 from mcs.driver.mail import MailDriver
 
 console = Console()
@@ -275,8 +275,8 @@ def _print_debug_dr(dr: DriverResponse) -> None:
 def chat_loop(driver: MCSDriver, model: str, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
     native_tools: list[dict] | None = None
-    if isinstance(driver, SupportsDriverContext):
-        ctx = driver.get_driver_context(model)
+    if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)):
+        ctx = dc.get_native_tool_context(model)
         system_msg = ctx.system_message
         native_tools = ctx.tools
     else:

@@ -19,9 +19,11 @@ keeps the integration surface minimal and self‑contained.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, TypeVar
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,46 @@ class DriverMeta:
     bindings: tuple[DriverBinding, ...]
     supported_llms: tuple[str, ...] | None
     capabilities: tuple[str, ...]
+
+    def has_capability(self, contract: type) -> bool:
+        """Return ``True`` if *contract*'s ``CAPABILITY`` flag is advertised.
+
+        Detection only -- a pure read over :attr:`capabilities`. Reflects the
+        whole stack, because wrappers aggregate the inner driver's flags.
+        """
+        return getattr(contract, "CAPABILITY", None) in self.capabilities
+
+    def with_capability(self, contract: type) -> "DriverMeta":
+        """Return a copy with *contract*'s ``CAPABILITY`` flag added (idempotent).
+
+        Explicit, port-neutral metadata helper -- replaces the implicit
+        ``__init_subclass__`` auto-registration that used to live inside the
+        capability mixins.
+        """
+        flag = getattr(contract, "CAPABILITY", None)
+        if flag is None or flag in self.capabilities:
+            return self
+        return replace(self, capabilities=(*self.capabilities, flag))
+
+    @staticmethod
+    def resolve_capability(driver: MCSDriver, contract: type[T]) -> T | None:
+        """Return the layer in *driver*'s stack typed as *contract*, or ``None``.
+
+        Invocation across composition. A wrapper (orchestrator, decorator)
+        implements :class:`SupportsCapabilityResolution` to search inward; a plain
+        driver is matched directly on itself. Works uniformly whether *driver*
+        is a plain driver, an orchestrator, or a decorator -- the caller never
+        needs to know which.
+
+        This is a ``@staticmethod`` on purpose: the metadata cannot reach the
+        driver instance (it is typically a shared class attribute), so the
+        driver is passed in explicitly rather than held as a back-reference.
+        """
+        from .mixins.capability_resolution import SupportsCapabilityResolution
+
+        if isinstance(driver, SupportsCapabilityResolution):
+            return driver.resolve_capability(contract)
+        return driver if isinstance(driver, contract) else None
 
 
 @dataclass

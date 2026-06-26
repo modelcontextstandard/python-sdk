@@ -7,7 +7,7 @@ to analyse local CSV files via natural language.
 
 - How to instantiate a driver with `CsvDriver(base_dir="...")`
 - The full tool-call loop: LLM → `process_llm_response()` → `execute_tool()` → LLM
-- Non-streaming vs. streaming vs. streaming with **ToolCallSignalingMixin** (TCS)
+- Non-streaming vs. streaming vs. streaming with **ToolCallSignaling** (TCS)
 - The TCS example demonstrates how to extend any driver with the mixin at the application level
 
 ## Prerequisites

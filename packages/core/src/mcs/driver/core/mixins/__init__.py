@@ -1,9 +1,11 @@
 from .healthcheck import SupportsHealthcheck, HealthCheckResult, HealthStatus
-from .tool_call_signaling_mixin import ToolCallSignalingMixin
-from .driver_context_mixin import SupportsDriverContext, DriverContext
+from .tool_call_signaling import ToolCallSignaling
+from .native_tools import SupportsNativeTools, NativeToolContext
+from .capability_resolution import SupportsCapabilityResolution
 
 __all__ = [
     "SupportsHealthcheck", "HealthCheckResult", "HealthStatus",
-    "ToolCallSignalingMixin",
-    "SupportsDriverContext", "DriverContext",
+    "ToolCallSignaling",
+    "SupportsNativeTools", "NativeToolContext",
+    "SupportsCapabilityResolution",
 ]

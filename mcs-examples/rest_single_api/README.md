@@ -19,7 +19,7 @@ the driver setup in `main()` differ.
   parts of a large API (like GitHub's 800+ endpoints) the LLM sees.
 - **Same client, different driver** -- the CSV and REST examples share
   the same `chat_loop` code; only the driver instantiation changes.
-- Native tool support via `DriverContext` (when the model supports it)
+- Native tool support via `NativeToolContext` (when the model supports it)
 - Tool-call signaling (TCS) for clean streaming UX
 
 ## Client variants

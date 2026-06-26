@@ -5,7 +5,7 @@ events (e.g. older or local models), the client has no way to know whether
 the tokens currently being generated are a tool call or regular text.  By the
 time the full response is available, the raw JSON has already been displayed.
 
-``ToolCallSignalingMixin`` solves this by giving the driver a lightweight
+``ToolCallSignaling`` solves this by giving the driver a lightweight
 signaling interface that a streaming client can query on each chunk:
 
 1. ``might_be_tool_call(partial)`` -- fast heuristic on a small token window.
@@ -18,7 +18,7 @@ signaling interface that a streaming client can query on each chunk:
 
 The mixin is **opt-in**: drivers that only target LLMs with native tool-call
 events (OpenAI, Claude, Gemini) do not need it.  Clients detect support via
-``isinstance(driver, ToolCallSignalingMixin)``.
+its ``CAPABILITY`` flag in ``driver.meta.capabilities``.
 
 The mixin keeps the driver **stateless** -- both methods are pure functions
 on the provided text.  All buffering, timeout, and display logic is the
@@ -30,7 +30,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 
-class ToolCallSignalingMixin(ABC):
+class ToolCallSignaling(ABC):
     """Opt-in mixin for inline tool-call detection during streaming.
 
     A driver implementing this mixin tells streaming clients:
@@ -39,6 +39,10 @@ class ToolCallSignalingMixin(ABC):
     The client decides what to do with that signal (buffer, show spinner,
     delay output, etc.).
     """
+
+    #: Capability flag advertised in ``DriverMeta.capabilities`` when a
+    #: driver (or decorator) in the stack satisfies this contract.
+    CAPABILITY = "tcs"
 
     @abstractmethod
     def might_be_tool_call(self, partial: str) -> bool:

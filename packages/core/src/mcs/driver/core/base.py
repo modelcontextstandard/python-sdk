@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any
 
-from .mcs_driver_interface import MCSDriver, DriverResponse
+from .mcs_driver_interface import MCSDriver, DriverMeta, DriverResponse
 from .mcs_tool_driver_interface import MCSToolDriver, Tool
 from .prompt_strategy import PromptStrategy, UnknownToolBehavior
 from .extraction_strategy import (
@@ -25,12 +25,12 @@ from .extraction_strategy import (
     DirectDictExtractionStrategy,
     OpenAIExtractionStrategy,
 )
-from .mixins.driver_context_mixin import SupportsDriverContext, DriverContext
+from .mixins.native_tools import SupportsNativeTools, NativeToolContext
 
 logger = logging.getLogger(__name__)
 
 
-class DriverBase(MCSDriver, MCSToolDriver, SupportsDriverContext):
+class DriverBase(MCSDriver, MCSToolDriver, SupportsNativeTools):
     """Concrete base that wires ``MCSDriver`` methods to a ``PromptStrategy``.
 
     Subclasses must provide:
@@ -45,6 +45,17 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsDriverContext):
     first, then falls back to the text codec.  Custom strategies can be
     injected via ``_extraction_strategies``.
     """
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        # DriverBase implements ``get_native_context`` for every subclass, so
+        # advertise the ``native_tools`` capability via the metadata helper.
+        # This replaces the implicit auto-registration that used to live in the
+        # capability mixin: the contract stays pure, the convenience lives in
+        # the reference implementation.
+        super().__init_subclass__(**kwargs)
+        meta = getattr(cls, "meta", None)
+        if isinstance(meta, DriverMeta):
+            cls.meta = meta.with_capability(SupportsNativeTools)
 
     def __init__(
         self,
@@ -137,25 +148,25 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsDriverContext):
             ],
         )
 
-    # -- SupportsDriverContext override ----------------------------------------
+    # -- SupportsNativeTools implementation ------------------------------------
 
-    def get_driver_context(
+    def get_native_tool_context(
         self, model_name: str | None = None,
-    ) -> DriverContext:
+    ) -> NativeToolContext:
         """Return context for an LLM call.
 
         When *model_name* is given and the model supports native
-        function-calling, the returned :class:`DriverContext` includes
+        function-calling, the returned :class:`NativeToolContext` includes
         tool definitions in OpenAI format so the client can pass them
         as ``tools=ctx.tools``.  Otherwise, tools are embedded in
         ``system_message`` as text (the default MCS approach).
         """
         if model_name and self._model_supports_native_tools(model_name):
-            return DriverContext(
+            return NativeToolContext(
                 system_message=self._custom_system_message or "You are a helpful assistant.",
                 tools=self._tools_as_native_dicts(),
             )
-        return DriverContext(
+        return NativeToolContext(
             system_message=self.get_driver_system_message(model_name),
         )
 
@@ -224,7 +235,7 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsDriverContext):
            and produces JSON in ``content`` that resembles a text-based
            tool call.  Future solutions may include passing
            ``model_name`` to ``process_llm_response`` or introducing
-           session-level state after ``get_driver_context``.
+           session-level state after ``get_native_context``.
         """
         ordered = list(self._extractors)
         text_fallback: TextExtractionStrategy | None = None

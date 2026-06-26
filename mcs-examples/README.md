@@ -25,7 +25,7 @@ To demonstrate the full MCS driver stack we need a real protocol/transport pair 
 | 2 | `reference/localfs_adapter.py` | **Adapter implementation** -- concrete LocalFS backend |
 | 3 | `reference/csv_tooldriver.py` | **ToolDriver** -- CSV capability built on top of the adapter |
 | 4 | `reference/csv_driver.py` | **Driver** -- `MCSDriver` + `MCSToolDriver` wrapping the ToolDriver |
-| -- | `reference/csv_driver_tcs.py` | Same driver with `ToolCallSignalingMixin` (for TCS demo) |
+| -- | `reference/csv_driver_tcs.py` | Same driver with `ToolCallSignaling` (for TCS demo) |
 | -- | `reference/demo.py` | Runs all steps + a namespacing orchestrator with two directories |
 | -- | `reference/data/sales.csv` | Sample dataset (sales) |
 | -- | `reference/data2/inventory.csv` | Sample dataset (inventory, for orchestrator demo) |
@@ -79,7 +79,7 @@ python mcs_driver_minimal_client_stream_tcs.py --model openai\meta-llama\Llama-3
 ```
 Run a lokal model unter the name provided by --model parameter or use one with OpenRouter.
 
-For models that do not support native tool-call events, or when the driver does not handle the provider's event format, inline JSON ends up visible in the user's stream.  `ToolCallSignalingMixin` solves this: the driver signals whether streamed tokens look like a tool call, the client buffers them instead of displaying, and once confirmed the tool executes invisibly.  The user never sees raw JSON that defining tool calls.
+For models that do not support native tool-call events, or when the driver does not handle the provider's event format, inline JSON ends up visible in the user's stream.  `ToolCallSignaling` solves this: the driver signals whether streamed tokens look like a tool call, the client buffers them instead of displaying, and once confirmed the tool executes invisibly.  The user never sees raw JSON that defining tool calls.
 
 ### Convenience launcher
 
@@ -112,7 +112,7 @@ python mcs_driver_minimal_client.py --stream --tcs \
 
 ## Implementation notes
 
-The TCS examples (`_tcs` suffix) are intentionally separate files to keep the base examples simple.  In production you would add `ToolCallSignalingMixin` directly to your driver rather than creating a separate class.
+The TCS examples (`_tcs` suffix) are intentionally separate files to keep the base examples simple.  In production you would add `ToolCallSignaling` directly to your driver rather than creating a separate class.
 
 - `mcs_driver_minimal_client_stream_tcs.py` -- streaming client with buffer logic
-- `reference/csv_driver_tcs.py` -- driver with `ToolCallSignalingMixin`
+- `reference/csv_driver_tcs.py` -- driver with `ToolCallSignaling`

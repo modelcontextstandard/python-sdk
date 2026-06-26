@@ -17,6 +17,10 @@ class HealthCheckResult(TypedDict):
 
 
 class SupportsHealthcheck(ABC):
+    #: Capability flag advertised in ``DriverMeta.capabilities`` when a
+    #: driver (or decorator) in the stack satisfies this contract.
+    CAPABILITY = "healthcheck"
+
     @abstractmethod
     def healthcheck(self) -> HealthCheckResult:
         """Perform a health check on the driver.

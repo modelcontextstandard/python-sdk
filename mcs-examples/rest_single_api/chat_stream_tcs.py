@@ -1,6 +1,6 @@
-"""Streaming MCS chat client with ToolCallSignalingMixin support (REST).
+"""Streaming MCS chat client with ToolCallSignaling support (REST).
 
-Demonstrates how a client can use ``ToolCallSignalingMixin`` to hide
+Demonstrates how a client can use ``ToolCallSignaling`` to hide
 inline JSON tool calls from the user during streaming.  When the driver
 signals that streamed tokens might be a tool call, the client buffers
 them instead of displaying.  Once the call is confirmed and executed,
@@ -42,8 +42,8 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 
 from mcs.driver.rest import RestDriver
-from mcs.driver.core import DriverMeta, DriverBinding, DriverResponse, MCSDriver, SupportsDriverContext
-from mcs.driver.core.mixins import ToolCallSignalingMixin
+from mcs.driver.core import DriverMeta, DriverBinding, DriverResponse, MCSDriver, SupportsNativeTools
+from mcs.driver.core.mixins import ToolCallSignaling
 
 console = Console()
 
@@ -63,11 +63,11 @@ class _RestTcsMeta(DriverMeta):
     capabilities: tuple[str, ...] = ()
 
 
-class RestDriverTcs(RestDriver, ToolCallSignalingMixin):
+class RestDriverTcs(RestDriver, ToolCallSignaling):
     """RestDriver extended with streaming tool-call signaling.
 
     Shows how to add TCS to any existing driver by mixing in
-    ``ToolCallSignalingMixin`` and implementing two methods.
+    ``ToolCallSignaling`` and implementing two methods.
     """
 
     meta: DriverMeta = _RestTcsMeta()
@@ -150,7 +150,7 @@ def _stream_one_turn(
         kwargs["tools"] = tools
     stream = completion(**kwargs)
 
-    has_signaling = isinstance(driver, ToolCallSignalingMixin)
+    has_signaling = ToolCallSignaling.CAPABILITY in driver.meta.capabilities
 
     full_buffer = ""
     tool_calls_buffer: list[dict] = []
@@ -298,8 +298,8 @@ def _print_debug_dr(dr: DriverResponse) -> None:
 def chat_loop(driver: MCSDriver, model: str, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
     native_tools: list[dict] | None = None
-    if isinstance(driver, SupportsDriverContext):
-        ctx = driver.get_driver_context(model)
+    if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)):
+        ctx = dc.get_native_tool_context(model)
         system_msg = ctx.system_message
         native_tools = ctx.tools
     else:
@@ -308,7 +308,7 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
     messages: list[dict] = [{"role": "system", "content": system_msg}]
 
     binding = driver.meta.bindings[0]
-    has_tcs = isinstance(driver, ToolCallSignalingMixin)
+    has_tcs = ToolCallSignaling.CAPABILITY in driver.meta.capabilities
     mode = "native tools" if native_tools else "text prompt"
     info = [
         "[bold cyan]MCS Chat (streaming + TCS)[/bold cyan]\n",
