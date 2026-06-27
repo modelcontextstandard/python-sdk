@@ -1,14 +1,26 @@
-"""Tests for AuthChallenge and AuthMixin."""
+"""Tests for AuthChallenge and AuthDecorator."""
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
 
+from mcs.driver.core import MCSToolDriver, DriverMeta, DriverBinding, Tool
 from mcs.auth.challenge import AuthChallenge
-from mcs.auth.mixin import AuthMixin
+from mcs.auth.decorator import AuthDecorator, SupportsAuth
+
+
+@dataclass(frozen=True)
+class _Meta(DriverMeta):
+    id: str = "fake-0001"
+    name: str = "Fake"
+    version: str = "0.0.1"
+    bindings: tuple[DriverBinding, ...] = ()
+    supported_llms: tuple[str, ...] | None = None
+    capabilities: tuple[str, ...] = ()
 
 
 class TestAuthChallenge:
@@ -35,12 +47,17 @@ class TestAuthChallenge:
         assert issubclass(AuthChallenge, Exception)
 
 
-class FakeToolDriver:
-    """Simulates a BaseDriver with execute_tool."""
+class FakeToolDriver(MCSToolDriver):
+    """A minimal tool driver whose ``execute_tool`` can be made to raise."""
+
+    meta: DriverMeta = _Meta()
 
     def __init__(self, result: Any = None, error: Exception | None = None):
         self._result = result
         self._error = error
+
+    def list_tools(self) -> list[Tool]:
+        return []
 
     def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         if self._error:
@@ -48,17 +65,11 @@ class FakeToolDriver:
         return self._result
 
 
-class MixedDriver(AuthMixin, FakeToolDriver):
-    """AuthMixin + FakeToolDriver via MRO."""
-    pass
-
-
-class TestAuthMixin:
+class TestAuthDecorator:
 
     def test_normal_execution_passes_through(self):
-        driver = MixedDriver(result='{"messages": []}')
-        result = driver.execute_tool("list_messages", {})
-        assert result == '{"messages": []}'
+        dec = AuthDecorator(FakeToolDriver(result='{"messages": []}'))
+        assert dec.execute_tool("list_messages", {}) == '{"messages": []}'
 
     def test_auth_challenge_converted_to_json(self):
         challenge = AuthChallenge(
@@ -67,9 +78,8 @@ class TestAuthMixin:
             code="WXYZ-5678",
             scope="gmail",
         )
-        driver = MixedDriver(error=challenge)
-        result = driver.execute_tool("list_messages", {})
-        data = json.loads(result)
+        dec = AuthDecorator(FakeToolDriver(error=challenge))
+        data = json.loads(dec.execute_tool("list_messages", {}))
 
         assert data["auth_required"] is True
         assert data["message"] == "Please authenticate"
@@ -78,10 +88,8 @@ class TestAuthMixin:
         assert data["scope"] == "gmail"
 
     def test_auth_challenge_without_optional_fields(self):
-        challenge = AuthChallenge("API key needed")
-        driver = MixedDriver(error=challenge)
-        result = driver.execute_tool("some_tool", {})
-        data = json.loads(result)
+        dec = AuthDecorator(FakeToolDriver(error=AuthChallenge("API key needed")))
+        data = json.loads(dec.execute_tool("some_tool", {}))
 
         assert data["auth_required"] is True
         assert data["message"] == "API key needed"
@@ -90,6 +98,21 @@ class TestAuthMixin:
         assert "scope" not in data
 
     def test_other_exceptions_propagate(self):
-        driver = MixedDriver(error=ValueError("something broke"))
+        dec = AuthDecorator(FakeToolDriver(error=ValueError("something broke")))
         with pytest.raises(ValueError, match="something broke"):
-            driver.execute_tool("list_messages", {})
+            dec.execute_tool("list_messages", {})
+
+    # -- Composition: capability + delegation + resolution --------------------
+
+    def test_advertises_auth_capability(self):
+        dec = AuthDecorator(FakeToolDriver())
+        assert "auth" in dec.meta.capabilities
+
+    def test_resolves_as_supports_auth(self):
+        dec = AuthDecorator(FakeToolDriver())
+        assert DriverMeta.resolve_capability(dec, SupportsAuth) is dec
+
+    def test_list_tools_is_delegated(self):
+        inner = FakeToolDriver()
+        dec = AuthDecorator(inner)
+        assert dec.list_tools() == inner.list_tools()

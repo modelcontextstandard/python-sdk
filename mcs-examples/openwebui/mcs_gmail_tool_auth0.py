@@ -3,21 +3,18 @@ title: MCS Gmail Agent
 description: Gmail access via MCS. Reads, searches, and organises e-mail. Authenticates via Auth0 + LinkAuth device flow.
 author: MCS
 version: 2.0.0
-requirements: mcs-driver-core>=0.2.2, mcs-driver-mail[gmail]>=0.1.2, mcs-driver-mailread>=0.2.1, mcs-driver-mailsend>=0.2.1, mcs-types-http>=0.1, mcs-types-cache>=0.1, mcs-adapter-http>=0.3, mcs-auth>=0.3.1, mcs-auth-auth0>=0.4.2, mcs-auth-oauth==0.3.0, mcs-auth-linkauth>=0.4.2
+requirements: mcs-driver-core>=0.4.1, mcs-driver-mail[gmail]>=0.1.5, mcs-driver-mailread>=0.2.3, mcs-driver-mailsend>=0.2.3, mcs-types-http>=0.1, mcs-types-cache>=0.1, mcs-adapter-http>=0.3, mcs-auth>=0.4.0, mcs-auth-auth0>=0.4.2, mcs-auth-oauth==0.3.0, mcs-auth-linkauth>=0.4.2
 """
 
 import json
 import inspect
 from typing import Any
 
-from mcs.auth.mixin import AuthMixin
+from mcs.auth.decorator import AuthDecorator
 from mcs.auth.auth0 import Auth0Provider
 from mcs.auth.linkauth import LinkAuthConnector
 from mcs.driver.mail import MailDriver
-
-
-class AuthMailDriver(AuthMixin, MailDriver):
-    """MailDriver with transparent auth-challenge handling via AuthMixin."""
+from mcs.driver.mail.tooldriver import MailToolDriver
 
 
 class Tools:
@@ -89,12 +86,16 @@ class Tools:
             _auth=auth_connector,
         )
 
-        self.driver = AuthMailDriver(
+        tool_driver = MailToolDriver(
             read_adapter="gmail",
             send_adapter="gmail",
             read_kwargs={"_credential": credential},
             send_kwargs={"_credential": credential},
         )
+        # Wrap the ToolDriver with auth handling and inject it via the
+        # MailDriver's ``_tooldriver`` DI hook. OpenWebUI calls execute_tool
+        # directly, which now routes through AuthDecorator.
+        self.driver = MailDriver(_tooldriver=AuthDecorator(tool_driver))
 
     def _dynamically_generate_tools(self):
         """Build the driver and inject its tools -- same pattern as the REST tool."""

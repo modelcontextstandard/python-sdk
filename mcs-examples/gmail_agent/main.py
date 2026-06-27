@@ -7,7 +7,8 @@ Demonstrates the MCS auth stack with pluggable credential providers:
 - Static tokens for quick testing
 
 The client has no knowledge of authentication -- when a tool needs
-credentials, the AuthMixin intercepts the challenge and the LLM
+credentials, the AuthDecorator (wrapping the ToolDriver, injected via the
+MailDriver's ``_tooldriver`` hook) intercepts the challenge and the LLM
 presents the login URL to the user.
 
 Usage:
@@ -40,17 +41,14 @@ from litellm import completion
 from rich.console import Console
 from rich.panel import Panel
 
-from mcs.auth.mixin import AuthMixin
+from mcs.auth.decorator import AuthDecorator
 from mcs.driver.core import DriverMeta, DriverResponse, MCSDriver, SupportsNativeTools
 from mcs.driver.mail import MailDriver
+from mcs.driver.mail.tooldriver import MailToolDriver
 
 console = Console()
 
 MAX_TOOL_ROUNDS = 10
-
-
-class AuthMailDriver(AuthMixin, MailDriver):
-    """MailDriver with transparent auth-challenge handling via AuthMixin."""
 
 
 def _parse_args() -> argparse.Namespace:
@@ -173,8 +171,8 @@ def _build_credential(args: argparse.Namespace):
     raise SystemExit("No authentication method specified.")
 
 
-def _build_driver(args: argparse.Namespace) -> AuthMailDriver:
-    """Build an AuthMailDriver with gmail adapters."""
+def _build_driver(args: argparse.Namespace) -> MailDriver:
+    """Build a MailDriver whose ToolDriver is wrapped with AuthDecorator (via DI)."""
     gmail_kwargs: dict = {}
     if args.sender_name:
         gmail_kwargs["sender_name"] = args.sender_name
@@ -185,12 +183,17 @@ def _build_driver(args: argparse.Namespace) -> AuthMailDriver:
     else:
         gmail_kwargs["access_token"] = args.gmail_token
 
-    return AuthMailDriver(
+    tool_driver = MailToolDriver(
         read_adapter="gmail",
         send_adapter="gmail",
         read_kwargs=gmail_kwargs,
         send_kwargs=gmail_kwargs,
     )
+    # Wrap the ToolDriver with auth handling, then inject it into the MailDriver
+    # via its ``_tooldriver`` DI hook. The MailDriver stays the client-facing
+    # driver (process_llm_response, native tools, bindings); its execute_tool
+    # now routes through AuthDecorator, which catches AuthChallenge.
+    return MailDriver(_tooldriver=AuthDecorator(tool_driver))
 
 
 def _stream_one_turn(

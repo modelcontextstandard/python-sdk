@@ -33,6 +33,7 @@ members = [
     "mcs-inspector",
     "mcs-orchestrator-base",
     "mcs-orchestrator-rest",
+    "mcs-permission",
     "mcs-python-sdk",
     "mcs-types-cache",
     "mcs-types-http",
@@ -1674,14 +1675,18 @@ requires-dist = [{ name = "paramiko", specifier = ">=3.0" }]
 
 [[package]]
 name = "mcs-auth"
-version = "0.3.2"
+version = "0.4.0"
 source = { editable = "packages/auth/mcs-auth" }
 dependencies = [
+    { name = "mcs-driver-core" },
     { name = "mcs-types-cache" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcs-types-cache", editable = "packages/types/mcs-types-cache" }]
+requires-dist = [
+    { name = "mcs-driver-core", editable = "packages/core" },
+    { name = "mcs-types-cache", editable = "packages/types/mcs-types-cache" },
+]
 
 [[package]]
 name = "mcs-auth-auth0"
@@ -1732,7 +1737,7 @@ requires-dist = [
 
 [[package]]
 name = "mcs-driver-core"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/core" }
 
 [package.optional-dependencies]
@@ -2049,6 +2054,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "mcs-permission"
+version = "0.1.0"
+source = { editable = "packages/permission/mcs-permission" }
+dependencies = [
+    { name = "mcs-driver-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "mcs-driver-core", editable = "packages/core" }]
+
+[[package]]
 name = "mcs-python-sdk"
 version = "0.2.2"
 source = { virtual = "." }
@@ -2078,6 +2094,7 @@ dependencies = [
     { name = "mcs-inspector" },
     { name = "mcs-orchestrator-base" },
     { name = "mcs-orchestrator-rest" },
+    { name = "mcs-permission" },
     { name = "mcs-types-cache" },
     { name = "mcs-types-http" },
 ]
@@ -2140,6 +2157,7 @@ requires-dist = [
     { name = "mcs-inspector", editable = "packages/inspector" },
     { name = "mcs-orchestrator-base", editable = "packages/orchestrators/mcs-orchestrator-base" },
     { name = "mcs-orchestrator-rest", editable = "packages/orchestrators/mcs-orchestrator-rest" },
+    { name = "mcs-permission", editable = "packages/permission/mcs-permission" },
     { name = "mcs-types-cache", editable = "packages/types/mcs-types-cache" },
     { name = "mcs-types-http", editable = "packages/types/mcs-types-http" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8" },

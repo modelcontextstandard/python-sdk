@@ -663,7 +663,7 @@ uv run python -m pytest packages/core/tests/ -q
 ### Building & Publishing
 
 ```bash
-python scripts/build_all.py --build --check      # build all 21 packages + twine check
+python scripts/build_all.py --build --check      # build all 22 packages + twine check
 uvx twine upload --repository testpypi dist_all/* # TestPyPI dry-run
 uvx twine upload dist_all/*                       # production PyPI
 ```

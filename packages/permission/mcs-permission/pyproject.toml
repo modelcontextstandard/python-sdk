@@ -3,15 +3,15 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "mcs-driver-core"
-version         = "0.4.1"
-description     = "Core driver contract for the Model Context Standard."
+name            = "mcs-permission"
+version         = "0.1.0"
+description     = "Consent/permission decorator for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"
 license         = "Apache-2.0"
-license-files   = ["LICENSE"]
-keywords        = ["mcs", "modelcontextstandard", "mcs-driver", "mcs-tools", "mcs-orchestrator", "python-sdk", "function-calling", "llm", "driver"]
+keywords        = ["mcs", "modelcontextstandard", "permission", "consent", "decorator"]
 authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
+license-files   = ["LICENSE"]
 classifiers     = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -21,27 +21,19 @@ classifiers     = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
     "Topic :: Software Development :: Libraries",
-    "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
 
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
 
-dependencies    = []
-
-[project.optional-dependencies]
-dev = [
-  "pytest>=8.0",
-  "ruff>=0.6",
-  "pre-commit>=3.8",
-  "build>=1.2",
-  "twine>=5.1",
-  "basedpyright>=1.18",
+dependencies = [
+    "mcs-driver-core>=0.4.1",
 ]
+
+[tool.uv.sources]
+mcs-driver-core = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"mcs.driver.core" = ["prompts/*.toml"]
