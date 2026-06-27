@@ -138,6 +138,28 @@ class DriverMeta:
             return driver.resolve_capability(contract)
         return driver if isinstance(driver, contract) else None
 
+    @staticmethod
+    def derive_capabilities(meta: "DriverMeta", cls: type) -> "DriverMeta":
+        """Return a copy of *meta* with capability flags derived from *cls*.
+
+        Scans *cls*'s MRO for ``CAPABILITY`` attributes -- the flag each contract
+        carries (``"standalone"`` on :class:`MCSDriver`, ``"orchestratable"`` on
+        :class:`MCSToolDriver`, ``"native_tools"`` on ``SupportsNativeTools``, …)
+        -- and **unions** them with whatever *meta* already declares.
+
+        So a driver may list its capabilities explicitly (readable, inspectable
+        by human and machine), let them be derived from the interfaces it
+        implements, or both -- the result is the same complete tuple either way.
+        Flag-less contracts (e.g. ``SupportsCapabilityResolution``, which is pure
+        mechanism) are skipped.
+        """
+        flags = list(meta.capabilities)
+        for base in cls.__mro__:
+            flag = base.__dict__.get("CAPABILITY")
+            if isinstance(flag, str) and flag not in flags:
+                flags.append(flag)
+        return replace(meta, capabilities=tuple(flags))
+
 
 @dataclass
 class DriverResponse:
@@ -204,7 +226,11 @@ class MCSDriver(ABC):
         :class:`DriverMeta` instance that declares capability, adapter,
         spec format and supported models.  It acts like a device-ID so an
         orchestrator can pick the right driver at runtime.
+
+    A driver that implements this interface is usable **standalone** (directly
+    with an LLM), advertised via the ``"standalone"`` capability flag.
     """
+    CAPABILITY = "standalone"
     meta: DriverMeta
 
     @abstractmethod

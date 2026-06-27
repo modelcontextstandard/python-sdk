@@ -15,6 +15,7 @@ from mcs.driver.core import (
     DriverBinding,
     SupportsHealthcheck,
     SupportsNativeTools,
+    BaseDecorator,
 )
 from mcs.orchestrator.base import (
     BaseOrchestrator,
@@ -425,3 +426,32 @@ class TestNestedCapabilityResolution:
         """A deep stack with no matching capability resolves to None."""
         o1 = _orch_with(_orch_with(_orch_with(_driver_c())))
         assert DriverMeta.resolve_capability(o1, SupportsHealthcheck) is None
+
+
+class _Wrapped(BaseDecorator, SupportsHealthcheck):
+    """A decorator that adds the healthcheck capability to whatever it wraps."""
+
+    CONTRACT = SupportsHealthcheck
+
+    def healthcheck(self):
+        return {"status": "decorator"}
+
+
+class TestDecoratorInOrchestrator:
+    """A BaseDecorator used as a registered ToolDriver inside the orchestrator."""
+
+    def test_decorator_capability_found_through_orchestrator(self):
+        dec = _Wrapped(_driver_ab())           # decorator adds healthcheck
+        orch = _orch_with(dec)
+        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is dec
+
+    def test_orchestrator_finds_capability_inside_decorator(self):
+        health = _HealthDriver([TOOL_C])       # inner holds the capability
+        dec = BaseDecorator(health)            # bare wrapper hides it
+        orch = _orch_with(dec)
+        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is health
+
+    def test_decorator_delegates_execution_in_orchestrator(self):
+        dec = _Wrapped(_driver_ab())           # bare execute_tool -> delegates
+        orch = _orch_with(dec)
+        assert orch.execute_tool("tool_a", {}) == "result_a"

@@ -1,9 +1,12 @@
-"""Tests for capability resolution -- the core mechanism.
+"""Tests for capability resolution -- the core mechanism (entry point + fallback).
 
-Covers the leaf node (:meth:`BaseDriver.resolve_capability`), the static entry
-point (:meth:`DriverMeta.resolve_capability`), and the ``isinstance`` fallback
-for drivers that are not resolution-aware.  Nested composition through
-orchestrators is tested in the ``mcs-orchestrator-base`` package.
+Only *wrappers* (decorators, orchestrators) implement
+``SupportsCapabilityResolution`` -- they need it as a signal to the entry point
+"search me inward instead of matching me with ``isinstance``". A plain or hybrid
+``BaseDriver`` is **not** a resolution node: it has no inner layers, so the
+``isinstance`` fallback in :meth:`DriverMeta.resolve_capability` is exactly the
+right (and only needed) behaviour. Wrapper-side resolution lives in the decorator
+and orchestrator packages.
 
 Note: resolution is an *invocation* concern -- it locates the layer that
 *satisfies* a contract via ``isinstance``, independent of what
@@ -38,7 +41,7 @@ class _Meta(DriverMeta):
 
 
 class PlainDriver(BaseDriver):
-    """A ``BaseDriver`` leaf -- provides ``native_tools`` via the base, nothing else."""
+    """A plain ``BaseDriver`` -- provides ``native_tools`` via the base, nothing else."""
 
     meta: DriverMeta = _Meta()
 
@@ -50,19 +53,14 @@ class PlainDriver(BaseDriver):
 
 
 class HealthDriver(PlainDriver, SupportsHealthcheck):
-    """A ``BaseDriver`` leaf that additionally provides the healthcheck capability."""
+    """A ``BaseDriver`` that additionally provides the healthcheck capability."""
 
     def healthcheck(self) -> dict[str, Any]:
         return {"status": "OK"}
 
 
 class RawToolDriver(MCSToolDriver, SupportsHealthcheck):
-    """A non-``BaseDriver`` tool driver.
-
-    It does **not** implement ``resolve_capability`` (it is not a
-    ``SupportsCapabilityResolution`` node), so it can only be matched through
-    the ``isinstance`` fallback in :meth:`DriverMeta.resolve_capability`.
-    """
+    """A non-``BaseDriver`` tool driver -- also matched through the fallback."""
 
     meta: DriverMeta = _Meta()
 
@@ -76,51 +74,35 @@ class RawToolDriver(MCSToolDriver, SupportsHealthcheck):
         return {"status": "OK"}
 
 
-# -- BaseDriver as a leaf resolution node ------------------------------------
+# -- Leaves are NOT resolution nodes -- only wrappers implement the contract --
 
-class TestLeafResolution:
-    def test_driverbase_is_resolution_node(self):
-        assert isinstance(PlainDriver(), SupportsCapabilityResolution)
+class TestNotResolutionNodes:
+    def test_basedriver_is_not_a_resolution_node(self):
+        assert not isinstance(PlainDriver(), SupportsCapabilityResolution)
 
-    def test_leaf_resolves_own_capability_to_self(self):
-        d = PlainDriver()
-        assert d.resolve_capability(SupportsNativeTools) is d
-
-    def test_leaf_returns_none_for_absent_capability(self):
-        d = PlainDriver()
-        assert d.resolve_capability(SupportsHealthcheck) is None
-
-    def test_leaf_resolves_extra_capability(self):
-        d = HealthDriver()
-        assert d.resolve_capability(SupportsHealthcheck) is d
-
-    def test_leaf_still_resolves_inherited_capability(self):
-        d = HealthDriver()
-        assert d.resolve_capability(SupportsNativeTools) is d
+    def test_raw_tool_driver_is_not_a_resolution_node(self):
+        assert not isinstance(RawToolDriver(), SupportsCapabilityResolution)
 
 
-# -- DriverMeta.resolve_capability static entry point ------------------------
+# -- DriverMeta.resolve_capability: the fallback resolves every leaf ----------
 
-class TestEntryPoint:
-    def test_dispatches_to_node_for_driverbase(self):
+class TestEntryPointFallback:
+    def test_basedriver_matched_via_fallback(self):
         d = HealthDriver()
         assert DriverMeta.resolve_capability(d, SupportsHealthcheck) is d
 
-    def test_returns_none_when_absent(self):
+    def test_basedriver_inherited_capability(self):
+        d = PlainDriver()
+        assert DriverMeta.resolve_capability(d, SupportsNativeTools) is d
+
+    def test_basedriver_absent_capability_returns_none(self):
         d = PlainDriver()
         assert DriverMeta.resolve_capability(d, SupportsHealthcheck) is None
 
-
-# -- Fallback for non-resolution-aware drivers -------------------------------
-
-class TestIsinstanceFallback:
-    def test_raw_driver_is_not_a_resolution_node(self):
-        assert not isinstance(RawToolDriver(), SupportsCapabilityResolution)
-
-    def test_raw_driver_matched_via_fallback(self):
+    def test_raw_tool_driver_matched_via_fallback(self):
         d = RawToolDriver()
         assert DriverMeta.resolve_capability(d, SupportsHealthcheck) is d
 
-    def test_raw_driver_absent_capability_returns_none(self):
+    def test_raw_tool_driver_absent_capability_returns_none(self):
         d = RawToolDriver()
         assert DriverMeta.resolve_capability(d, SupportsNativeTools) is None

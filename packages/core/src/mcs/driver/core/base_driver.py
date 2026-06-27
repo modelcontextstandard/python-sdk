@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, TypeVar
+from typing import Any
 
 from .mcs_driver_interface import MCSDriver, DriverMeta, DriverResponse
 from .mcs_tool_driver_interface import MCSToolDriver, Tool
@@ -26,14 +26,11 @@ from .extraction_strategy import (
     OpenAIExtractionStrategy,
 )
 from .mixins.native_tools import SupportsNativeTools, NativeToolContext
-from .mixins.capability_resolution import SupportsCapabilityResolution
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
 
-
-class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsCapabilityResolution):
+class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools):
     """Concrete base that wires ``MCSDriver`` methods to a ``PromptStrategy``.
 
     Subclasses must provide:
@@ -48,17 +45,6 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsCapabili
     first, then falls back to the text codec.  Custom strategies can be
     injected via ``_extraction_strategies``.
     """
-
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        # BaseDriver implements ``get_native_tool_context`` for every subclass, so
-        # advertise the ``native_tools`` capability via the metadata helper.
-        # This replaces the implicit auto-registration that used to live in the
-        # capability mixin: the contract stays pure, the convenience lives in
-        # the reference implementation.
-        super().__init_subclass__(**kwargs)
-        meta = getattr(cls, "meta", None)
-        if isinstance(meta, DriverMeta):
-            cls.meta = meta.with_capability(SupportsNativeTools)
 
     def __init__(
         self,
@@ -77,6 +63,15 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsCapabili
             TextExtractionStrategy(self._strategy),
         ]
         self._preferred_extractor: ExtractionStrategy | None = None
+
+        # Capability flags are derived from the interfaces this driver implements
+        # (MCSDriver -> "standalone", MCSToolDriver -> "orchestratable",
+        # SupportsNativeTools -> "native_tools", …) and unioned with whatever the
+        # driver's ``meta`` already declares -- so a driver may list them
+        # explicitly for readability, leave them to be derived, or both.
+        meta = getattr(type(self), "meta", None)
+        if isinstance(meta, DriverMeta):
+            self.meta = DriverMeta.derive_capabilities(meta, type(self))
 
     # -- MCSDriver contract ---------------------------------------------------
 
@@ -207,23 +202,6 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsCapabili
         """Return tools as native API dicts via the active ``PromptStrategy``."""
         schemas = json.loads(self._strategy.format_tools(self.list_tools()))["tools"]
         return [{"type": "function", "function": s} for s in schemas]
-
-    # -- Capability resolution (leaf) -----------------------------------------
-
-    def resolve_capability(self, contract: type[T]) -> T | None:
-        """Resolve *contract* against this driver -- leaf behaviour.
-
-        ``BaseDriver`` declares :class:`SupportsCapabilityResolution`, so every
-        driver that inherits it -- plain drivers and orchestrators alike -- is a
-        uniform resolution node rather than a special case handled by the
-        ``isinstance`` fallback in
-        :meth:`mcs.driver.core.DriverMeta.resolve_capability`.
-
-        A plain or hybrid driver *is* its own capability holder and matches
-        itself (leaf).  Wrappers (decorators, orchestrators) override this to
-        also search the drivers they hold.
-        """
-        return self if isinstance(self, contract) else None
 
     # -- Extraction chain -----------------------------------------------------
 

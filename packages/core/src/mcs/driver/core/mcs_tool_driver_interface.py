@@ -110,7 +110,12 @@ class MCSToolDriver(ABC):
         Metadata about the driver, including its capabilities, bindings,
         and supported models. This allows an orchestrator to understand
         how to interact with and utilize the driver.
+
+    A driver that implements this interface is **orchestratable** (usable as a
+    composable ToolDriver), advertised via the ``"orchestratable"`` capability
+    flag.
     """
+    CAPABILITY = "orchestratable"
     meta: DriverMeta
 
     @abstractmethod

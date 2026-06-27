@@ -63,8 +63,9 @@ does not.
 mechanism** — and nothing more:
 
 - **`BaseDriver`** — the *leaf*. A ready-made implementation of the mandatory
-  driver methods (prompt generation, response parsing) plus capability
-  resolution: it matches itself.
+  driver methods (prompt generation, response parsing). It carries no resolution
+  logic of its own: a leaf has no inner layers, so the resolution entry point's
+  `isinstance` fallback matches it directly.
 - **`BaseDecorator`** — the *wrapping node*. It delegates every interface call
   to a single inner driver and resolves capabilities by searching inward — the
   one-inner counterpart to what the orchestrator does for many. Being nothing

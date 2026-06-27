@@ -1,16 +1,17 @@
-"""Optional contract for capability-resolving wrappers.
+"""Optional contract for *wrappers* that resolve a capability through a stack.
 
-A plain driver *is* the capability holder and is matched directly. Wrappers
-(orchestrators, decorators) wrap an inner driver and therefore hide the inner
-layers from a direct ``isinstance`` check on the stack as a whole.
+A **leaf** driver (a plain or hybrid ``BaseDriver``) has no inner layers, so it
+needs no resolution logic of its own: the ``isinstance`` fallback in
+:meth:`mcs.driver.core.DriverMeta.resolve_capability` *is* the leaf behaviour.
 
-By implementing ``SupportsCapabilityResolution`` a wrapper exposes
-``resolve_capability``, which searches inward (each layer checks itself, then
-delegates to its inner driver). This lets
-:meth:`mcs.driver.core.DriverMeta.resolve_capability` locate the layer that
-satisfies a contract no matter how deep it sits in the stack -- so a client
-can treat every driver the same, whether it is plain, an orchestrator, or a
-decorator.
+A **wrapper** (an orchestrator or a decorator) hides its inner layers from a
+direct ``isinstance`` check on the stack as a whole. By implementing
+``SupportsCapabilityResolution`` it signals the entry point to call its
+``resolve_capability`` instead -- which checks itself first, then searches
+inward through the driver(s) it holds. That is what lets
+:meth:`DriverMeta.resolve_capability` locate the layer satisfying a contract no
+matter how deep it sits, so a client treats every driver the same, whether it is
+a plain leaf, an orchestrator, or a decorator.
 """
 
 from __future__ import annotations
@@ -22,6 +23,6 @@ T = TypeVar("T")
 
 @runtime_checkable
 class SupportsCapabilityResolution(Protocol):
-    """Opt-in contract for wrappers that resolve an inner driver's capability."""
+    """Opt-in contract for wrappers that resolve a capability across their inner driver(s)."""
 
     def resolve_capability(self, contract: type[T]) -> T | None: ...

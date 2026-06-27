@@ -1,6 +1,7 @@
 from .mcs_driver_interface import MCSDriver, DriverMeta, DriverBinding, DriverResponse
 from .mcs_tool_driver_interface import Tool, ToolParameter, MCSToolDriver
 from .base_driver import BaseDriver
+from .base_decorator import BaseDecorator
 from .prompt_strategy import PromptStrategy, JsonPromptStrategy, UnknownToolBehavior
 from .extraction_strategy import (
     ExtractionStrategy,
@@ -17,7 +18,7 @@ from .mixins import (
 __all__ = [
     "MCSDriver", "DriverMeta", "DriverBinding", "DriverResponse", "SupportsCapabilityResolution",
     "Tool", "ToolParameter", "MCSToolDriver",
-    "BaseDriver",
+    "BaseDriver", "BaseDecorator",
     "PromptStrategy", "JsonPromptStrategy", "UnknownToolBehavior",
     "ExtractionStrategy", "TextExtractionStrategy",
     "DirectDictExtractionStrategy", "OpenAIExtractionStrategy",
