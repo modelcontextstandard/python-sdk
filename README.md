@@ -269,7 +269,7 @@ the LLM response yourself. This is a valid MCS driver.
 
 But you'd be writing boilerplate -- prompt templates, JSON parsing,
 error handling, retry logic -- every single time. That's what
-`DriverBase` and the layered architecture solve.
+`BaseDriver` and the layered architecture solve.
 
 ### The recommended workflow
 
@@ -392,10 +392,10 @@ driver to the client. It depends on the `-toolonly` packages.
 
 ```python
 # mcs-driver-mail/src/mcs/driver/mail/driver.py
-from mcs.driver.core import DriverBase
+from mcs.driver.core import BaseDriver
 from mcs.driver.imap.tooldriver import ImapToolDriver, SmtpToolDriver
 
-class MailDriver(DriverBase):
+class MailDriver(BaseDriver):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._imap = ImapToolDriver(*(kwargs.get(k) for k in ("imap_host", "imap_user", "imap_pass")))
@@ -410,11 +410,11 @@ class MailDriver(DriverBase):
                 return td.execute_tool(tool_name, arguments)
 ```
 
-#### What `DriverBase` does for you
+#### What `BaseDriver` does for you
 
 The Driver itself only wires `list_tools()` and `execute_tool()`.
 Everything that makes the LLM *understand* and *use* these tools lives
-in `DriverBase`:
+in `BaseDriver`:
 
 **System prompt & tool descriptions** -- `get_driver_system_message()`
 takes the `Tool` objects from `list_tools()`, passes them through a
@@ -455,9 +455,9 @@ returns a `DriverResponse` with the result or a retry prompt.
 `NativeToolContext` with `system_message` and, when the model supports it,
 `tools` in OpenAI format -- the client just passes them through.
 
-**HybridDriver** -- Because `DriverBase` inherits from both `MCSDriver`
+**HybridDriver** -- Because `BaseDriver` inherits from both `MCSDriver`
 (prompt generation, LLM parsing) *and* `MCSToolDriver` (`list_tools`,
-`execute_tool`), every driver that extends `DriverBase` is automatically
+`execute_tool`), every driver that extends `BaseDriver` is automatically
 a HybridDriver. That means `MailDriver` can talk to a client directly
 **and** be used as a ToolDriver inside another driver or orchestrator.
 This is the default.
@@ -616,7 +616,7 @@ that enforces them at runtime.
 | Class | `<Capability>Driver` | `MailDriver`, `PdfDriver` |
 
 Most packages ship **both** the ToolDriver and the full Driver (a
-HybridDriver extending `DriverBase`). For example, `mcs-driver-pdf`
+HybridDriver extending `BaseDriver`). For example, `mcs-driver-pdf`
 contains a `PdfToolDriver` and a `PdfDriver` -- there's no reason to
 separate them. The `-toolonly` suffix (e.g. `mcs-driver-imap-toolonly`)
 is only used when a ToolDriver is explicitly designed as a building

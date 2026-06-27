@@ -302,9 +302,9 @@ class TestCustomLayer:
         assert pipeline.execute_tool(labeled, "a__tool_a", {}) == "result_a"
 
 
-# -- DriverBase integration ---------------------------------------------------
+# -- BaseDriver integration ---------------------------------------------------
 
-class TestDriverBaseIntegration:
+class TestBaseDriverIntegration:
     def test_get_function_description(self):
         orch = BaseOrchestrator()
         orch.add_driver(_driver_ab(), label="alpha")
@@ -397,7 +397,7 @@ class TestNestedCapabilityResolution:
     def test_self_takes_priority_over_inner(self):
         """A capability the outer layer provides itself wins over deeper layers."""
         outer = _orch_with(_orch_with(_HealthDriver([TOOL_C])))
-        # native_tools is provided by every orchestrator (via DriverBase);
+        # native_tools is provided by every orchestrator (via BaseDriver);
         # the outermost layer must match first.
         assert DriverMeta.resolve_capability(outer, SupportsNativeTools) is outer
 

@@ -1,6 +1,6 @@
 """MCS Hybrid Driver for sending e-mail.
 
-Inherits prompt generation and LLM response parsing from ``DriverBase``.
+Inherits prompt generation and LLM response parsing from ``BaseDriver``.
 Only adds ToolDriver delegation.
 
 See Section 4 of the MCS specification for the hybrid driver pattern.
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mcs.driver.core import (
-    DriverBase,
+    BaseDriver,
     DriverBinding,
     DriverMeta,
     MCSToolDriver,
@@ -33,8 +33,8 @@ class _MailsendDriverMeta(DriverMeta):
     capabilities: tuple[str, ...] = ("standalone", "orchestratable")
 
 
-class MailsendDriver(DriverBase):
-    """Hybrid mail-sending driver: ``DriverBase`` prompt engine + ``MailsendToolDriver``.
+class MailsendDriver(BaseDriver):
+    """Hybrid mail-sending driver: ``BaseDriver`` prompt engine + ``MailsendToolDriver``.
 
     Use this driver standalone (with ``get_driver_system_message()`` and
     ``process_llm_response()``) or plug it into an Orchestrator as a

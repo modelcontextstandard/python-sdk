@@ -1,7 +1,7 @@
 """MCS Hybrid Driver for full e-mail access (read + send).
 
 Composite driver that stacks ``MailreadToolDriver`` and
-``MailsendToolDriver``, inheriting prompt generation from ``DriverBase``.
+``MailsendToolDriver``, inheriting prompt generation from ``BaseDriver``.
 
 See Section 4 of the MCS specification for the hybrid driver pattern.
 """
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mcs.driver.core import (
-    DriverBase,
+    BaseDriver,
     DriverBinding,
     DriverMeta,
     MCSToolDriver,
@@ -34,7 +34,7 @@ class _MailDriverMeta(DriverMeta):
     capabilities: tuple[str, ...] = ("standalone", "orchestratable")
 
 
-class MailDriver(DriverBase):
+class MailDriver(BaseDriver):
     """Hybrid composite mail driver: read + send e-mail.
 
     Use this driver when you need the LLM to have full e-mail access

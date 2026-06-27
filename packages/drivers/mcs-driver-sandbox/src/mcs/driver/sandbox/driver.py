@@ -1,6 +1,6 @@
 """Sandbox Driver — LLM-facing wrapper around the SandboxToolDriver.
 
-This hybrid driver (``DriverBase`` + ``MCSToolDriver``) can be used
+This hybrid driver (``BaseDriver`` + ``MCSToolDriver``) can be used
 standalone (direct LLM conversation) or nested inside an Orchestrator.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from mcs.driver.core.base import DriverBase
+from mcs.driver.core import BaseDriver
 from mcs.driver.core.mcs_driver_interface import DriverBinding, DriverMeta
 from mcs.driver.core.mcs_tool_driver_interface import MCSToolDriver, Tool
 from mcs.driver.core.prompt_strategy import PromptStrategy
@@ -29,7 +29,7 @@ class _SandboxDriverMeta(DriverMeta):
     capabilities: tuple = ("standalone", "orchestratable")
 
 
-class SandboxDriver(DriverBase):
+class SandboxDriver(BaseDriver):
     """Full MCS Driver that gives an LLM access to an isolated sandbox.
 
     Parameters

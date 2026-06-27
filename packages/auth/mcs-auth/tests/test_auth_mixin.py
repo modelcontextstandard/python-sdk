@@ -36,7 +36,7 @@ class TestAuthChallenge:
 
 
 class FakeToolDriver:
-    """Simulates a DriverBase with execute_tool."""
+    """Simulates a BaseDriver with execute_tool."""
 
     def __init__(self, result: Any = None, error: Exception | None = None):
         self._result = result

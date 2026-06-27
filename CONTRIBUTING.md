@@ -25,7 +25,7 @@ The repo is a `uv` workspace. All packages live under `packages/`:
 
 ```
 packages/
-  core/                         # mcs-core (interfaces, DriverBase, PromptStrategy)
+  core/                         # mcs-core (interfaces, BaseDriver, PromptStrategy)
   adapters/
     mcs-adapter-http/           # HTTP transport
     mcs-adapter-localfs/        # Local filesystem
@@ -68,7 +68,7 @@ driver's Port protocol. No changes to the driver needed.
 
 - **PromptStrategy**: New formats (XML, YAML), model-specific tuning
 - **ExtractionStrategy**: Better parsing for new LLM output formats
-- **DriverBase**: Performance, error messages, edge cases
+- **BaseDriver**: Performance, error messages, edge cases
 - **Tests**: The `packages/core/tests/` suite needs more coverage
 
 ### Documentation & examples
@@ -97,7 +97,7 @@ packages/drivers/mcs-driver-mail/
       driver/
         mail/
           __init__.py       # exports MailDriver
-          driver.py         # MailDriver(DriverBase)
+          driver.py         # MailDriver(BaseDriver)
           tooldriver.py     # MailToolDriver(MCSToolDriver)  -- optional if HybridDriver
           ports.py          # Protocol definitions
 ```

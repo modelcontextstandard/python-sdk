@@ -56,6 +56,34 @@ stack. Each decorator aggregates the inner driver's `capabilities` and adds
 its own, so `meta.capabilities` reflects the **whole** stack; `isinstance`
 does not.
 
+## What lives in core — and what doesn't
+
+`mcs-driver-core` holds the contracts (`MCSDriver`, `MCSToolDriver`,
+`DriverMeta`) plus the reference implementations that are **pure composition
+mechanism** — and nothing more:
+
+- **`BaseDriver`** — the *leaf*. A ready-made implementation of the mandatory
+  driver methods (prompt generation, response parsing) plus capability
+  resolution: it matches itself.
+- **`BaseDecorator`** — the *wrapping node*. It delegates every interface call
+  to a single inner driver and resolves capabilities by searching inward — the
+  one-inner counterpart to what the orchestrator does for many. Being nothing
+  but delegation plus stack-navigation, it belongs here alongside `BaseDriver`.
+
+Both are zero-dependency and carry no concept of their own; they are the
+minimal machinery the contract already implies.
+
+The **orchestrator** lives in its **own** package (`mcs-orchestrator-base`),
+even though it is *also* a wrapping driver. The difference is decisive: it
+brings an abstraction of its own — a pluggable `ResolutionStrategy` (tool
+pipelines, namespacing, tool-switching layers). That is a strategy *family*
+with a concept of its own, not bare mechanism, so it earns a package of its
+own (and keeps the kernel free of that weight).
+
+**Rule of thumb:** pure composition mechanism — the leaf and the wrapping
+delegation — lives in the kernel; composition that carries its own strategy
+becomes its own package.
+
 ## Links
 
 - **Homepage:** <https://www.modelcontextstandard.io>

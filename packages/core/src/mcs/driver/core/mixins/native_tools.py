@@ -13,7 +13,7 @@ When it does not, ``tools`` is ``None`` and the tools stay embedded in
 ``get_driver_system_message``, not a replacement.
 
 This is a **pure contract** -- the example implementation lives in
-``DriverBase``. Clients detect support via ``driver.meta.has_capability`` and
+``BaseDriver``. Clients detect support via ``driver.meta.has_capability`` and
 resolve it via ``DriverMeta.resolve_capability(driver, SupportsNativeTools)``.
 """
 

@@ -1,6 +1,6 @@
 """Tests for capability resolution -- the core mechanism.
 
-Covers the leaf node (:meth:`DriverBase.resolve_capability`), the static entry
+Covers the leaf node (:meth:`BaseDriver.resolve_capability`), the static entry
 point (:meth:`DriverMeta.resolve_capability`), and the ``isinstance`` fallback
 for drivers that are not resolution-aware.  Nested composition through
 orchestrators is tested in the ``mcs-orchestrator-base`` package.
@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mcs.driver.core import (
-    DriverBase,
+    BaseDriver,
     DriverMeta,
     DriverBinding,
     Tool,
@@ -37,8 +37,8 @@ class _Meta(DriverMeta):
     capabilities: tuple[str, ...] = ()
 
 
-class PlainDriver(DriverBase):
-    """A ``DriverBase`` leaf -- provides ``native_tools`` via the base, nothing else."""
+class PlainDriver(BaseDriver):
+    """A ``BaseDriver`` leaf -- provides ``native_tools`` via the base, nothing else."""
 
     meta: DriverMeta = _Meta()
 
@@ -50,14 +50,14 @@ class PlainDriver(DriverBase):
 
 
 class HealthDriver(PlainDriver, SupportsHealthcheck):
-    """A ``DriverBase`` leaf that additionally provides the healthcheck capability."""
+    """A ``BaseDriver`` leaf that additionally provides the healthcheck capability."""
 
     def healthcheck(self) -> dict[str, Any]:
         return {"status": "OK"}
 
 
 class RawToolDriver(MCSToolDriver, SupportsHealthcheck):
-    """A non-``DriverBase`` tool driver.
+    """A non-``BaseDriver`` tool driver.
 
     It does **not** implement ``resolve_capability`` (it is not a
     ``SupportsCapabilityResolution`` node), so it can only be matched through
@@ -76,7 +76,7 @@ class RawToolDriver(MCSToolDriver, SupportsHealthcheck):
         return {"status": "OK"}
 
 
-# -- DriverBase as a leaf resolution node ------------------------------------
+# -- BaseDriver as a leaf resolution node ------------------------------------
 
 class TestLeafResolution:
     def test_driverbase_is_resolution_node(self):

@@ -1,25 +1,25 @@
 """AuthMixin -- intercepts authentication challenges at the tool-execution boundary.
 
-This mixin is designed to be mixed into any ``DriverBase`` subclass.
+This mixin is designed to be mixed into any ``BaseDriver`` subclass.
 When a tool execution raises ``AuthChallenge`` (because a
 ``CredentialProvider`` needs user interaction), the mixin catches the
 exception and returns a structured JSON result instead of letting
-``DriverBase`` treat it as a generic failure.
+``BaseDriver`` treat it as a generic failure.
 
 The LLM sees the result as a *successful* tool call whose content
 describes the authentication action the user must take.  This keeps
-auth concerns completely outside of ``DriverBase`` (core).
+auth concerns completely outside of ``BaseDriver`` (core).
 
 Usage::
 
     from mcs.auth.mixin import AuthMixin
-    from mcs.driver.core import DriverBase
+    from mcs.driver.core import BaseDriver
 
-    class MyDriver(AuthMixin, DriverBase):
+    class MyDriver(AuthMixin, BaseDriver):
         ...
 
 Python's MRO ensures ``AuthMixin.execute_tool`` wraps
-``DriverBase.execute_tool`` (via ``super()``).
+``BaseDriver.execute_tool`` (via ``super()``).
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from .challenge import AuthChallenge
 class AuthMixin:
     """Catches ``AuthChallenge`` from tool execution and converts it to a tool result.
 
-    The mixin overrides ``execute_tool`` so that ``DriverBase.process_llm_response``
+    The mixin overrides ``execute_tool`` so that ``BaseDriver.process_llm_response``
     receives a normal result string (not an exception), allowing the LLM to present
     the authentication instructions to the user naturally.
     """

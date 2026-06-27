@@ -1,4 +1,4 @@
-"""Tests for MailsendDriver (HybridDriver = DriverBase + ToolDriver delegation)."""
+"""Tests for MailsendDriver (HybridDriver = BaseDriver + ToolDriver delegation)."""
 
 from __future__ import annotations
 

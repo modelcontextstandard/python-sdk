@@ -44,7 +44,7 @@ class ExtractionStrategy(ABC):
        ``False``, which means *"I never claim -- use me as fallback"*.
     2. **Extract** -- :meth:`extract` performs the actual parsing.
 
-    ``DriverBase._extract`` iterates the chain: the first strategy
+    ``BaseDriver._extract`` iterates the chain: the first strategy
     that *claims* a response owns it exclusively (even when
     ``extract`` returns ``None``).  ``TextExtractionStrategy`` never
     claims and serves as the final fallback.

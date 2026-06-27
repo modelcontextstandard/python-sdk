@@ -1,4 +1,4 @@
-"""Tests for ExtractionStrategy implementations and DriverBase extraction chain."""
+"""Tests for ExtractionStrategy implementations and BaseDriver extraction chain."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import pytest
 
 from mcs.driver.core import (
-    DriverBase,
+    BaseDriver,
     MCSToolDriver,
     Tool,
     ToolParameter,
@@ -56,7 +56,7 @@ TOOL_A = Tool(name="greet", description="Greet someone", parameters=[
 ])
 
 
-class SimpleDriverBase(DriverBase):
+class SimpleBaseDriver(BaseDriver):
     meta: DriverMeta = _FakeMeta()
 
     def __init__(self, **kwargs: Any):
@@ -195,23 +195,23 @@ class TestOpenAIExtractionStrategy:
         assert self.strategy.extract({"tool": "greet", "arguments": {}}) is None
 
 
-# -- DriverBase extraction chain ----------------------------------------------
+# -- BaseDriver extraction chain ----------------------------------------------
 
-class TestDriverBaseExtractionChain:
+class TestBaseDriverExtractionChain:
     def test_str_input_uses_text_strategy(self):
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
         dr = driver.process_llm_response('{"tool": "greet", "arguments": {"name": "X"}}')
         assert dr.call_executed is True
         assert dr.tool_call_result == "Hello!"
 
     def test_direct_dict_input(self):
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
         dr = driver.process_llm_response({"tool": "greet", "arguments": {"name": "Y"}})
         assert dr.call_executed is True
         assert dr.tool_call_result == "Hello!"
 
     def test_openai_dict_input(self):
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
         payload = {
             "tool_calls": [{
                 "function": {
@@ -225,13 +225,13 @@ class TestDriverBaseExtractionChain:
         assert dr.tool_call_result == "Hello!"
 
     def test_no_tool_call_in_text(self):
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
         dr = driver.process_llm_response("Just chatting, no tool call here.")
         assert dr.call_executed is False
         assert dr.call_failed is False
 
     def test_no_tool_call_in_dict(self):
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
         dr = driver.process_llm_response({"random": "data"})
         assert dr.call_executed is False
         assert dr.call_failed is False
@@ -240,13 +240,13 @@ class TestDriverBaseExtractionChain:
         from mcs.driver.core.prompt_strategy import UnknownToolBehavior
         ps = JsonPromptStrategy.from_defaults()
         ps.unknown_tool_behavior = UnknownToolBehavior.RETRY_WITH_LIST
-        driver = SimpleDriverBase(prompt_strategy=ps)
+        driver = SimpleBaseDriver(prompt_strategy=ps)
         dr = driver.process_llm_response('{"tool": "nonexistent", "arguments": {}}')
         assert dr.call_failed is True
         assert "nonexistent" in (dr.call_detail or "")
 
     def test_unknown_tool_silent_returns_empty(self):
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
         dr = driver.process_llm_response('{"tool": "nonexistent", "arguments": {}}')
         assert dr.call_executed is False
         assert dr.call_failed is False
@@ -256,14 +256,14 @@ class TestDriverBaseExtractionChain:
 
 class TestExtractionCaching:
     def test_preferred_extractor_cached_after_first_hit(self):
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
         assert driver._preferred_extractor is None
 
         driver.process_llm_response({"tool": "greet", "arguments": {}})
         assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
 
     def test_cached_strategy_tried_first(self):
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
 
         driver.process_llm_response({"tool": "greet", "arguments": {}})
         assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
@@ -273,7 +273,7 @@ class TestExtractionCaching:
 
     def test_text_fallback_does_not_become_preferred(self):
         """TextExtraction is a fallback -- it never becomes _preferred_extractor."""
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
 
         driver.process_llm_response({"tool": "greet", "arguments": {}})
         assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
@@ -293,7 +293,7 @@ class TestCustomExtractionStrategy:
             def extract(self, llm_response):
                 return ("greet", {"name": "Custom"})
 
-        driver = SimpleDriverBase(
+        driver = SimpleBaseDriver(
             _extraction_strategies=[AlwaysGreetStrategy()],
         )
         dr = driver.process_llm_response("anything at all")
@@ -348,7 +348,7 @@ class TestClaimPhase:
         Even though extract returns None, text fallback must NOT run --
         the JSON in content must not be misinterpreted as a tool call.
         """
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
         response = {
             "role": "assistant",
             "content": '{"tool": "greet", "arguments": {}}',
@@ -360,13 +360,13 @@ class TestClaimPhase:
 
     def test_str_input_falls_through_to_text(self):
         """Pure str input: no strategy claims → text fallback extracts."""
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
         dr = driver.process_llm_response('{"tool": "greet", "arguments": {}}')
         assert dr.call_executed is True
 
     def test_dict_without_tool_calls_key_uses_text_fallback(self):
         """Dict from text-model client (no tool_calls key) → text fallback."""
-        driver = SimpleDriverBase()
+        driver = SimpleBaseDriver()
         dr = driver.process_llm_response(
             {"role": "assistant", "content": '{"tool": "greet", "arguments": {}}'}
         )

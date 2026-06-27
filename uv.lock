@@ -1674,7 +1674,7 @@ requires-dist = [{ name = "paramiko", specifier = ">=3.0" }]
 
 [[package]]
 name = "mcs-auth"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "packages/auth/mcs-auth" }
 dependencies = [
     { name = "mcs-types-cache" },
@@ -1732,7 +1732,7 @@ requires-dist = [
 
 [[package]]
 name = "mcs-driver-core"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/core" }
 
 [package.optional-dependencies]
@@ -1760,7 +1760,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "mcs-driver-csv"
-version = "0.1.3"
+version = "0.1.4"
 source = { editable = "packages/drivers/mcs-driver-csv" }
 dependencies = [
     { name = "mcs-adapter-localfs" },
@@ -1775,7 +1775,7 @@ requires-dist = [
 
 [[package]]
 name = "mcs-driver-filesystem"
-version = "0.2.3"
+version = "0.2.4"
 source = { editable = "packages/drivers/mcs-driver-filesystem" }
 dependencies = [
     { name = "mcs-driver-core" },
@@ -1786,7 +1786,7 @@ requires-dist = [{ name = "mcs-driver-core", editable = "packages/core" }]
 
 [[package]]
 name = "mcs-driver-mail"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/drivers/mcs-driver-mail" }
 dependencies = [
     { name = "mcs-driver-core" },
@@ -1829,7 +1829,7 @@ provides-extras = ["imap", "smtp", "gmail", "inspector", "all"]
 
 [[package]]
 name = "mcs-driver-mailread"
-version = "0.2.2"
+version = "0.2.3"
 source = { editable = "packages/drivers/mcs-driver-mailread" }
 dependencies = [
     { name = "mcs-driver-core" },
@@ -1857,7 +1857,7 @@ provides-extras = ["imap", "gmail", "inspector"]
 
 [[package]]
 name = "mcs-driver-mailsend"
-version = "0.2.2"
+version = "0.2.3"
 source = { editable = "packages/drivers/mcs-driver-mailsend" }
 dependencies = [
     { name = "mcs-driver-core" },
@@ -1885,7 +1885,7 @@ provides-extras = ["smtp", "gmail", "inspector"]
 
 [[package]]
 name = "mcs-driver-mcp"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "packages/drivers/mcs-driver-mcp" }
 dependencies = [
     { name = "mcs-adapter-mcp" },
@@ -1900,7 +1900,7 @@ requires-dist = [
 
 [[package]]
 name = "mcs-driver-rest"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "packages/drivers/mcs-driver-rest" }
 dependencies = [
     { name = "mcs-adapter-http" },
@@ -1922,7 +1922,7 @@ provides-extras = ["inspector"]
 
 [[package]]
 name = "mcs-driver-sandbox"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "packages/drivers/mcs-driver-sandbox" }
 dependencies = [
     { name = "mcs-driver-core" },
@@ -2020,7 +2020,7 @@ provides-extras = ["mailread", "mailsend", "mail", "rest", "all"]
 
 [[package]]
 name = "mcs-orchestrator-base"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/orchestrators/mcs-orchestrator-base" }
 dependencies = [
     { name = "mcs-driver-core" },
@@ -2031,7 +2031,7 @@ requires-dist = [{ name = "mcs-driver-core", editable = "packages/core" }]
 
 [[package]]
 name = "mcs-orchestrator-rest"
-version = "0.2.3"
+version = "0.2.4"
 source = { editable = "packages/orchestrators/mcs-orchestrator-rest" }
 dependencies = [
     { name = "mcs-adapter-http" },

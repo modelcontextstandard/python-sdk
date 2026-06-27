@@ -19,7 +19,7 @@ For that the orchestartor should inject a pagination tool, when the tool set exc
 **Status:** Open / Undecided
 
 **Problem:**
-`DriverBase._model_supports_native_tools()` uses a lazy import of
+`BaseDriver._model_supports_native_tools()` uses a lazy import of
 `litellm.supports_function_calling()` to check whether a model supports native
 tool calls. This implicitly pulls in the entire `litellm` dependency (including
 ~2600 model entries in `model_cost`) into `mcs-core`.
@@ -282,7 +282,7 @@ yanked or updated with a deprecation notice pointing to `mcs-driver-core`.
 
 ## Lifecycle-Notification-Hooks für den Tool-Call (Observer-Pattern)
 
-**Affects:** `mcs-driver-core` -- `DriverBase.process_llm_response`, `MCSDriver`-Interface; Clients
+**Affects:** `mcs-driver-core` -- `BaseDriver.process_llm_response`, `MCSDriver`-Interface; Clients
 
 **Status:** Open / Design konsolidiert -- **eine** offene Designfrage (Permission UX vs. Security)
 
@@ -308,7 +308,7 @@ zwei tragende Säulen, die zusammen fast alles abdecken:
    (`{"auth_required": true, "url": ...}`). Die interaktive Anforderung reist im
    Tool-Result-Kanal und wird durch den **Multi-Turn-Loop** des Clients
    aufgelöst -- kein Pausieren, kein Out-of-Band-Event. Ohne Mixin fängt
-   `DriverBase.process_llm_response` jede Exception zu sauberem `call_failed`
+   `BaseDriver.process_llm_response` jede Exception zu sauberem `call_failed`
    (`base.py:119`) -- kein roher Crash. **Permission kann demselben Muster
    folgen** (`PermissionMixin`, Consent-Check *vor* `super().execute_tool()`).
 
@@ -325,7 +325,7 @@ muss nicht / nicht kritisch"-Fall.
   ```python
   def process_llm_response(self, llm_response, *, streaming=False, observer=None) -> DriverResponse: ...
   ```
-  Aufrufpunkte in `DriverBase.process_llm_response` um `base.py:117`:
+  Aufrufpunkte in `BaseDriver.process_llm_response` um `base.py:117`:
   `on_call_started(name, args)` / `on_call_finished(name, result)` /
   `on_call_failed(name, err)`, jeweils nur `if observer is not None`.
   `ToolEventObserver` = schlankes `Protocol`. Default `None` = heutiges Verhalten.
@@ -338,14 +338,14 @@ muss nicht / nicht kritisch"-Fall.
   Pagination) rufen `execute_tool` intern mehrfach -- die user-sichtbare
   "ein Call"-Grenze kennt nur die Driver-Ebene.
 
-- **Per-Call-Parameter, kein `set_observer()`.** `DriverBase` ist vertraglich
+- **Per-Call-Parameter, kein `set_observer()`.** `BaseDriver` ist vertraglich
   **stateless / thread-safe** (`mcs_driver_interface.py:152`); ein Observer als
   Instanz-Attribut würde das brechen.
 
 - **Kein Capability-Mixin nötig.** Der Observer ist rein *additiv* (Client gibt
   ihn mit oder nicht) -- kein `isinstance`-Gate wie bei `SupportsNativeTools`,
   wo der Client das Verhalten *vorab* kennen muss. "Grundsätzlich bereitgestellt"
-  ergibt sich daraus, dass die Aufrufpunkte in `DriverBase` sitzen -- jeder
+  ergibt sich daraus, dass die Aufrufpunkte in `BaseDriver` sitzen -- jeder
   Driver erbt sie.
 
 - **Progress ("Verlauf des Calls") später & separat.** Als einziger der drei

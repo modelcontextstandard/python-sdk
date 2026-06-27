@@ -1,6 +1,6 @@
 """MCS Hybrid Driver for REST APIs.
 
-Inherits prompt generation and LLM response parsing from ``DriverBase``.
+Inherits prompt generation and LLM response parsing from ``BaseDriver``.
 Only adds ToolDriver delegation and HealthCheck support.
 
 See Section 4 of the MCS specification for the hybrid driver pattern.
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mcs.driver.core import (
-    DriverBase,
+    BaseDriver,
     MCSToolDriver,
     Tool,
     DriverMeta,
@@ -34,8 +34,8 @@ class _RestDriverMeta(DriverMeta):
     capabilities: tuple[str, ...] = ("standalone", "orchestratable", "healthcheck")
 
 
-class RestDriver(DriverBase, SupportsHealthcheck):
-    """Hybrid REST driver: DriverBase + ToolDriver delegation + healthcheck."""
+class RestDriver(BaseDriver, SupportsHealthcheck):
+    """Hybrid REST driver: BaseDriver + ToolDriver delegation + healthcheck."""
 
     meta: DriverMeta = _RestDriverMeta()
 

@@ -1,4 +1,4 @@
-"""DriverBase -- concrete base for hybrid drivers and orchestrators.
+"""BaseDriver -- concrete base for hybrid drivers and orchestrators.
 
 Delegates prompt generation to a ``PromptStrategy`` (codec) and
 tool-call extraction to a chain of ``ExtractionStrategy`` instances.
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-class DriverBase(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsCapabilityResolution):
+class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsCapabilityResolution):
     """Concrete base that wires ``MCSDriver`` methods to a ``PromptStrategy``.
 
     Subclasses must provide:
@@ -50,7 +50,7 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsCapabili
     """
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        # DriverBase implements ``get_native_tool_context`` for every subclass, so
+        # BaseDriver implements ``get_native_tool_context`` for every subclass, so
         # advertise the ``native_tools`` capability via the metadata helper.
         # This replaces the implicit auto-registration that used to live in the
         # capability mixin: the contract stays pure, the convenience lives in
@@ -213,7 +213,7 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsCapabili
     def resolve_capability(self, contract: type[T]) -> T | None:
         """Resolve *contract* against this driver -- leaf behaviour.
 
-        ``DriverBase`` declares :class:`SupportsCapabilityResolution`, so every
+        ``BaseDriver`` declares :class:`SupportsCapabilityResolution`, so every
         driver that inherits it -- plain drivers and orchestrators alike -- is a
         uniform resolution node rather than a special case handled by the
         ``isinstance`` fallback in

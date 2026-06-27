@@ -1,6 +1,6 @@
 """MCS Hybrid Driver for filesystem access.
 
-Inherits prompt generation and LLM response parsing from ``DriverBase``.
+Inherits prompt generation and LLM response parsing from ``BaseDriver``.
 Only adds ToolDriver delegation.
 
 See Section 4 of the MCS specification for the hybrid driver pattern.
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mcs.driver.core import (
-    DriverBase,
+    BaseDriver,
     MCSToolDriver,
     Tool,
     DriverMeta,
@@ -33,8 +33,8 @@ class _FsDriverMeta(DriverMeta):
     capabilities: tuple[str, ...] = ("standalone", "orchestratable")
 
 
-class FilesystemDriver(DriverBase):
-    """Hybrid filesystem driver: DriverBase + ToolDriver delegation."""
+class FilesystemDriver(BaseDriver):
+    """Hybrid filesystem driver: BaseDriver + ToolDriver delegation."""
 
     meta: DriverMeta = _FsDriverMeta()
 

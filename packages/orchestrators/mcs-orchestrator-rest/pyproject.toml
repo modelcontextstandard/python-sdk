@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "mcs-orchestrator-rest"
-version         = "0.2.3"
+version         = "0.2.4"
 description     = "Dynamic REST/OpenAPI orchestrator for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"
@@ -28,8 +28,8 @@ classifiers     = [
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
 
 dependencies = [
-    "mcs-driver-core>=0.3.0",
-    "mcs-orchestrator-base>=0.1",
+    "mcs-driver-core>=0.4.0",
+    "mcs-orchestrator-base>=0.1.5",
     "mcs-adapter-http>=0.3",
     "mcs-driver-rest>=0.2",
 ]

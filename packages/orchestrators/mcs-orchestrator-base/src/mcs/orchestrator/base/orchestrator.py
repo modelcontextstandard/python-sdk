@@ -5,7 +5,7 @@ by a human-readable *label*.  Tool listing and execution are delegated
 to a pluggable ``ResolutionStrategy`` (typically a ``ToolPipeline``
 composed of ``ToolLayer`` decorators).
 
-Inherits prompt generation and LLM response parsing from ``BaseDriver``.
+Inherits prompt generation and LLM response parsing from ``DriverBase``.
 Uses ``UnknownToolBehavior.RETRY_WITH_LIST`` so the LLM gets feedback
 when it calls a tool that does not exist.
 
@@ -56,7 +56,7 @@ class BaseOrchestrator(BaseDriver):
     ``ResolutionStrategy`` passed at construction time.
 
     The orchestrator is **composable**: because it implements
-    ``MCSToolDriver`` (via ``BaseDriver``), it can itself be embedded
+    ``MCSToolDriver`` (via ``DriverBase``), it can itself be embedded
     in another orchestrator.
     """
 
@@ -135,7 +135,7 @@ class BaseOrchestrator(BaseDriver):
     def resolve_capability(self, contract: type[T]) -> T | None:
         """Resolve *contract* across the orchestrator and its drivers.
 
-        Overrides the leaf behaviour inherited from :class:`BaseDriver`:
+        Overrides the leaf behaviour inherited from :class:`DriverBase`:
         first match the orchestrator itself (e.g. its own ``native_tools``),
         then search each registered driver inward via
         :meth:`mcs.driver.core.DriverMeta.resolve_capability` -- so a

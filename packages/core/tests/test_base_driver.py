@@ -1,4 +1,4 @@
-"""Tests for DriverBase -- the shared LLM-facing logic."""
+"""Tests for BaseDriver -- the shared LLM-facing logic."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from mcs.driver.core import (
-    DriverBase,
+    BaseDriver,
     DriverMeta,
     DriverBinding,
     DriverResponse,
@@ -36,7 +36,7 @@ class _TestMeta(DriverMeta):
     capabilities: tuple[str, ...] = ()
 
 
-class ConcreteDriver(DriverBase):
+class ConcreteDriver(BaseDriver):
     """Minimal concrete subclass for testing."""
 
     meta: DriverMeta = _TestMeta()
