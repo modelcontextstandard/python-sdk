@@ -30,6 +30,7 @@ members = [
     "mcs-driver-rest",
     "mcs-driver-sandbox",
     "mcs-examples",
+    "mcs-hooks",
     "mcs-inspector",
     "mcs-orchestrator-base",
     "mcs-orchestrator-rest",
@@ -1985,6 +1986,17 @@ requires-dist = [
 provides-extras = ["quickstart", "gmail"]
 
 [[package]]
+name = "mcs-hooks"
+version = "0.1.0"
+source = { editable = "packages/hooks/mcs-hooks" }
+dependencies = [
+    { name = "mcs-driver-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "mcs-driver-core", editable = "packages/core" }]
+
+[[package]]
 name = "mcs-inspector"
 version = "0.1.3"
 source = { editable = "packages/inspector" }
@@ -2091,6 +2103,7 @@ dependencies = [
     { name = "mcs-driver-rest" },
     { name = "mcs-driver-sandbox" },
     { name = "mcs-examples" },
+    { name = "mcs-hooks" },
     { name = "mcs-inspector" },
     { name = "mcs-orchestrator-base" },
     { name = "mcs-orchestrator-rest" },
@@ -2154,6 +2167,7 @@ requires-dist = [
     { name = "mcs-driver-rest", editable = "packages/drivers/mcs-driver-rest" },
     { name = "mcs-driver-sandbox", editable = "packages/drivers/mcs-driver-sandbox" },
     { name = "mcs-examples", editable = "mcs-examples" },
+    { name = "mcs-hooks", editable = "packages/hooks/mcs-hooks" },
     { name = "mcs-inspector", editable = "packages/inspector" },
     { name = "mcs-orchestrator-base", editable = "packages/orchestrators/mcs-orchestrator-base" },
     { name = "mcs-orchestrator-rest", editable = "packages/orchestrators/mcs-orchestrator-rest" },

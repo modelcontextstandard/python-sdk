@@ -26,6 +26,7 @@ dependencies = [
   "mcs-auth-oauth>=0.1",
   "mcs-auth-linkauth>=0.1",
   "mcs-permission>=0.1",
+  "mcs-hooks>=0.1",
   "mcs-adapter-docker>=0.1",
   "mcs-adapter-ssh>=0.1",
   "mcs-adapter-mcp>=0.1",
@@ -57,6 +58,7 @@ mcs-auth-auth0 = { workspace = true }
 mcs-auth-oauth = { workspace = true }
 mcs-auth-linkauth = { workspace = true }
 mcs-permission = { workspace = true }
+mcs-hooks = { workspace = true }
 mcs-adapter-docker = { workspace = true }
 mcs-adapter-ssh = { workspace = true }
 mcs-adapter-mcp = { workspace = true }
@@ -74,6 +76,7 @@ members = [
   "packages/orchestrators/*",
   "packages/auth/*",
   "packages/permission/*",
+  "packages/hooks/*",
   "mcs-examples",
 ]
 

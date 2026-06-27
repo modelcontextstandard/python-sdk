@@ -33,6 +33,8 @@ PACKAGES = [
     "packages/auth/mcs-auth-linkauth",
     # Permission (consent decorator)
     "packages/permission/mcs-permission",
+    # Hooks (lifecycle decorator)
+    "packages/hooks/mcs-hooks",
     # Drivers (depend on core + adapters)
     "packages/drivers/mcs-driver-rest",
     "packages/drivers/mcs-driver-csv",
