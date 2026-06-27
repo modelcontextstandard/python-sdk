@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, TypeVar
 
 from .mcs_driver_interface import MCSDriver, DriverMeta, DriverResponse
 from .mcs_tool_driver_interface import MCSToolDriver, Tool
@@ -26,11 +26,14 @@ from .extraction_strategy import (
     OpenAIExtractionStrategy,
 )
 from .mixins.native_tools import SupportsNativeTools, NativeToolContext
+from .mixins.capability_resolution import SupportsCapabilityResolution
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T")
 
-class DriverBase(MCSDriver, MCSToolDriver, SupportsNativeTools):
+
+class DriverBase(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsCapabilityResolution):
     """Concrete base that wires ``MCSDriver`` methods to a ``PromptStrategy``.
 
     Subclasses must provide:
@@ -204,6 +207,23 @@ class DriverBase(MCSDriver, MCSToolDriver, SupportsNativeTools):
         """Return tools as native API dicts via the active ``PromptStrategy``."""
         schemas = json.loads(self._strategy.format_tools(self.list_tools()))["tools"]
         return [{"type": "function", "function": s} for s in schemas]
+
+    # -- Capability resolution (leaf) -----------------------------------------
+
+    def resolve_capability(self, contract: type[T]) -> T | None:
+        """Resolve *contract* against this driver -- leaf behaviour.
+
+        ``DriverBase`` declares :class:`SupportsCapabilityResolution`, so every
+        driver that inherits it -- plain drivers and orchestrators alike -- is a
+        uniform resolution node rather than a special case handled by the
+        ``isinstance`` fallback in
+        :meth:`mcs.driver.core.DriverMeta.resolve_capability`.
+
+        A plain or hybrid driver *is* its own capability holder and matches
+        itself (leaf).  Wrappers (decorators, orchestrators) override this to
+        also search the drivers they hold.
+        """
+        return self if isinstance(self, contract) else None
 
     # -- Extraction chain -----------------------------------------------------
 

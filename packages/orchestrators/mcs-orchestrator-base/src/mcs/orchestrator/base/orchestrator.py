@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from mcs.driver.core import (
     DriverBase,
@@ -34,6 +34,8 @@ from mcs.driver.core import (
 from .strategies import ResolutionStrategy, NamespacingLayer, ToolPipeline
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,31 @@ class BaseOrchestrator(DriverBase):
         with self._lock:
             labeled_copy = dict(self._labeled)
         return self._resolution.execute_tool(labeled_copy, tool_name, arguments)
+
+    # ------------------------------------------------------------------
+    # Capability resolution (wrapper: self first, then registered drivers)
+    # ------------------------------------------------------------------
+
+    def resolve_capability(self, contract: type[T]) -> T | None:
+        """Resolve *contract* across the orchestrator and its drivers.
+
+        Overrides the leaf behaviour inherited from :class:`DriverBase`:
+        first match the orchestrator itself (e.g. its own ``native_tools``),
+        then search each registered driver inward via
+        :meth:`mcs.driver.core.DriverMeta.resolve_capability` -- so a
+        capability provided by a wrapped driver (or a decorator around it) is
+        found regardless of how deep it sits.  Returns the first match in
+        registration order, or ``None`` if no layer satisfies *contract*.
+        """
+        if isinstance(self, contract):
+            return self
+        with self._lock:
+            inners = list(self._labeled.values())
+        for inner in inners:
+            hit = DriverMeta.resolve_capability(inner, contract)
+            if hit is not None:
+                return hit
+        return None
 
     # ------------------------------------------------------------------
     # LLM integration (override to append layer instructions)

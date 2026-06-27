@@ -9,6 +9,7 @@ from .extraction_strategy import (
     OpenAIExtractionStrategy,
 )
 from .mixins import (
+    SupportsHealthcheck, HealthCheckResult, HealthStatus,
     ToolCallSignaling, SupportsNativeTools, NativeToolContext,
     SupportsCapabilityResolution,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "PromptStrategy", "JsonPromptStrategy", "UnknownToolBehavior",
     "ExtractionStrategy", "TextExtractionStrategy",
     "DirectDictExtractionStrategy", "OpenAIExtractionStrategy",
+    "SupportsHealthcheck", "HealthCheckResult", "HealthStatus",
     "ToolCallSignaling",
     "SupportsNativeTools", "NativeToolContext",
 ]

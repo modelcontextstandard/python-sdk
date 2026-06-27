@@ -7,7 +7,15 @@ from typing import Any
 
 import pytest
 
-from mcs.driver.core import MCSToolDriver, Tool, ToolParameter, DriverMeta, DriverBinding
+from mcs.driver.core import (
+    MCSToolDriver,
+    Tool,
+    ToolParameter,
+    DriverMeta,
+    DriverBinding,
+    SupportsHealthcheck,
+    SupportsNativeTools,
+)
 from mcs.orchestrator.base import (
     BaseOrchestrator,
     ToolLayer,
@@ -330,3 +338,90 @@ class TestDriverBaseIntegration:
         dr = orch.process_llm_response('{"tool": "nope", "arguments": {}}')
         assert dr.call_failed is True
         assert "nope" in (dr.call_detail or "")
+
+
+# -- Capability resolution (wrapper navigates inward) ------------------------
+
+class _HealthDriver(FakeToolDriver, SupportsHealthcheck):
+    """A registered driver that additionally provides the healthcheck capability."""
+
+    def healthcheck(self) -> dict[str, Any]:
+        return {"status": "OK"}
+
+
+class TestCapabilityResolution:
+    def test_resolves_own_capability_to_self(self):
+        """A capability the orchestrator provides itself resolves to itself."""
+        orch = BaseOrchestrator()
+        orch.add_driver(_driver_ab(), label="alpha")
+        assert DriverMeta.resolve_capability(orch, SupportsNativeTools) is orch
+
+    def test_resolves_inner_driver_capability(self):
+        """A capability held by a registered driver is found by searching inward."""
+        orch = BaseOrchestrator()
+        health = _HealthDriver([TOOL_C])
+        orch.add_driver(_driver_ab(), label="alpha")
+        orch.add_driver(health, label="beta")
+        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is health
+
+    def test_returns_none_when_capability_absent(self):
+        """When no layer satisfies the contract, resolution yields None."""
+        orch = BaseOrchestrator()
+        orch.add_driver(_driver_ab(), label="alpha")
+        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is None
+
+
+def _orch_with(*drivers: MCSToolDriver) -> BaseOrchestrator:
+    """Build an orchestrator holding *drivers* under labels ``d0``, ``d1`` ..."""
+    orch = BaseOrchestrator()
+    for i, d in enumerate(drivers):
+        orch.add_driver(d, label=f"d{i}")
+    return orch
+
+
+class TestNestedCapabilityResolution:
+    """Resolution through orchestrator-in-orchestrator stacks of varying depth."""
+
+    def test_depth_two(self):
+        """outer -> inner orchestrator -> driver."""
+        health = _HealthDriver([TOOL_C])
+        outer = _orch_with(_orch_with(health))
+        assert DriverMeta.resolve_capability(outer, SupportsHealthcheck) is health
+
+    def test_depth_three(self):
+        """Three orchestrator layers deep down to the capability holder."""
+        health = _HealthDriver([TOOL_C])
+        o1 = _orch_with(_orch_with(_orch_with(health)))
+        assert DriverMeta.resolve_capability(o1, SupportsHealthcheck) is health
+
+    def test_self_takes_priority_over_inner(self):
+        """A capability the outer layer provides itself wins over deeper layers."""
+        outer = _orch_with(_orch_with(_HealthDriver([TOOL_C])))
+        # native_tools is provided by every orchestrator (via DriverBase);
+        # the outermost layer must match first.
+        assert DriverMeta.resolve_capability(outer, SupportsNativeTools) is outer
+
+    def test_mixed_shallow_and_deep_branches(self):
+        """A flat sibling without the capability, plus a nested branch with it."""
+        health = _HealthDriver([TOOL_C])
+        outer = _orch_with(_driver_ab(), _orch_with(health))   # plain first, nested second
+        assert DriverMeta.resolve_capability(outer, SupportsHealthcheck) is health
+
+    def test_first_match_wins_across_depths(self):
+        """With candidates at different depths, the earliest registered wins."""
+        shallow = _HealthDriver([TOOL_A])                      # depth 1
+        deep = _HealthDriver([TOOL_C])                         # depth 2
+        outer = _orch_with(shallow, _orch_with(deep))          # shallow registered first
+        assert DriverMeta.resolve_capability(outer, SupportsHealthcheck) is shallow
+
+    def test_capability_on_sibling_inside_nested_orchestrator(self):
+        """outer -> inner orchestrator holding [plain sibling, health holder]."""
+        health = _HealthDriver([TOOL_C])
+        inner = _orch_with(_driver_ab(), health)               # plain first, health second
+        outer = _orch_with(inner)
+        assert DriverMeta.resolve_capability(outer, SupportsHealthcheck) is health
+
+    def test_absent_in_deep_stack_returns_none(self):
+        """A deep stack with no matching capability resolves to None."""
+        o1 = _orch_with(_orch_with(_orch_with(_driver_c())))
+        assert DriverMeta.resolve_capability(o1, SupportsHealthcheck) is None

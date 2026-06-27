@@ -21,7 +21,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from abc import ABC, abstractmethod
-from typing import Any, TypeVar
+from typing import Any, TypeVar, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .mcs_tool_driver_interface import MCSToolDriver
 
 T = TypeVar("T")
 
@@ -116,7 +119,7 @@ class DriverMeta:
         return replace(self, capabilities=(*self.capabilities, flag))
 
     @staticmethod
-    def resolve_capability(driver: MCSDriver, contract: type[T]) -> T | None:
+    def resolve_capability(driver: MCSDriver | MCSToolDriver, contract: type[T]) -> T | None:
         """Return the layer in *driver*'s stack typed as *contract*, or ``None``.
 
         Invocation across composition. A wrapper (orchestrator, decorator)
