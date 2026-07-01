@@ -2037,7 +2037,7 @@ provides-extras = ["mailread", "mailsend", "mail", "rest", "all"]
 
 [[package]]
 name = "mcs-orchestrator-base"
-version = "0.1.5"
+version = "0.2.0"
 source = { editable = "packages/orchestrators/mcs-orchestrator-base" }
 dependencies = [
     { name = "mcs-driver-core" },
@@ -2048,7 +2048,7 @@ requires-dist = [{ name = "mcs-driver-core", editable = "packages/core" }]
 
 [[package]]
 name = "mcs-orchestrator-rest"
-version = "0.2.4"
+version = "0.2.5"
 source = { editable = "packages/orchestrators/mcs-orchestrator-rest" }
 dependencies = [
     { name = "mcs-adapter-http" },

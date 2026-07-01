@@ -20,7 +20,7 @@ pip install mcs-auth
 | `CredentialProvider` | Protocol: `get_token(scope) -> str`. Any provider satisfies it. |
 | `AuthPort` | Protocol for auth transport adapters (OAuth, LinkAuth, Device Flow, ...). |
 | `AuthChallenge` | Exception raised when user interaction is needed (URL + code). |
-| `AuthMixin` | Mixin for drivers -- catches auth challenges at the tool execution boundary. |
+| `AuthDecorator` | Decorator wrapping a ToolDriver -- catches auth challenges at the tool execution boundary. |
 | `StaticProvider` | Simple provider: tokens from a dict or environment variables. |
 
 ## Quick start

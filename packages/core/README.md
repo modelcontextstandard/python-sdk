@@ -66,10 +66,11 @@ mechanism** — and nothing more:
   driver methods (prompt generation, response parsing). It carries no resolution
   logic of its own: a leaf has no inner layers, so the resolution entry point's
   `isinstance` fallback matches it directly.
-- **`BaseDecorator`** — the *wrapping node*. It delegates every interface call
-  to a single inner driver and resolves capabilities by searching inward — the
-  one-inner counterpart to what the orchestrator does for many. Being nothing
-  but delegation plus stack-navigation, it belongs here alongside `BaseDriver`.
+- **`BaseDecorator`** — the *transparent wrapping node*. It delegates every
+  interface call to a single inner driver and resolves capabilities by searching
+  inward, so an inner capability stays reachable through the decorator. Being
+  nothing but delegation plus stack-navigation, it belongs here alongside
+  `BaseDriver`.
 
 Both are zero-dependency and carry no concept of their own; they are the
 minimal machinery the contract already implies.
