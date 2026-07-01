@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any
 
 from mcs.driver.core import (
     BaseDriver,
@@ -30,12 +30,37 @@ from mcs.driver.core import (
     JsonPromptStrategy,
     UnknownToolBehavior,
 )
+from mcs.driver.core.mixins.healthcheck import (
+    SupportsHealthcheck,
+    HealthStatus,
+    HealthCheckResult,
+)
 
 from .strategies import ResolutionStrategy, NamespacingLayer, ToolPipeline
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
+# Health severity ranking for the default AND-aggregation (higher = worse).
+_HEALTH_SEVERITY = {
+    HealthStatus.OK: 0,
+    HealthStatus.UNKNOWN: 1,
+    HealthStatus.WARNING: 2,
+    HealthStatus.ERROR: 3,
+}
+
+
+def _as_health_status(status: object) -> HealthStatus:
+    """Coerce a driver's reported status (enum or string) to ``HealthStatus``.
+
+    Unrecognised values map to ``UNKNOWN`` so a malformed report never passes
+    as healthy.
+    """
+    if isinstance(status, HealthStatus):
+        return status
+    try:
+        return HealthStatus(status)
+    except ValueError:
+        return HealthStatus.UNKNOWN
 
 
 @dataclass(frozen=True)
@@ -48,7 +73,7 @@ class _BaseOrchestratorMeta(DriverMeta):
     capabilities: tuple[str, ...] = ("standalone", "orchestratable")
 
 
-class BaseOrchestrator(BaseDriver):
+class BaseOrchestrator(BaseDriver, SupportsHealthcheck):
     """Generic multi-driver orchestrator with pluggable resolution strategy.
 
     Any ``MCSToolDriver`` can be registered via :meth:`add_driver`.
@@ -129,29 +154,38 @@ class BaseOrchestrator(BaseDriver):
         return self._resolution.execute_tool(labeled_copy, tool_name, arguments)
 
     # ------------------------------------------------------------------
-    # Capability resolution (wrapper: self first, then registered drivers)
+    # Healthcheck (aggregate over first-level drivers)
     # ------------------------------------------------------------------
 
-    def resolve_capability(self, contract: type[T]) -> T | None:
-        """Resolve *contract* across the orchestrator and its drivers.
+    def healthcheck(self) -> HealthCheckResult:
+        """Aggregate health across the **first-level** registered drivers.
 
-        Overrides the leaf behaviour inherited from :class:`BaseDriver`:
-        first match the orchestrator itself (e.g. its own ``native_tools``),
-        then search each registered driver inward via
-        :meth:`mcs.driver.core.DriverMeta.resolve_capability` -- so a
-        capability provided by a wrapped driver (or a decorator around it) is
-        found regardless of how deep it sits.  Returns the first match in
-        registration order, or ``None`` if no layer satisfies *contract*.
+        For each registered driver that satisfies :class:`SupportsHealthcheck`
+        (directly, or through a decorator that resolves it), the status is
+        collected and the **worst** one wins -- so the result is ``OK`` only if
+        *every* checkable driver is ``OK`` (a logical AND). A driver without the
+        capability is skipped; if none support it there is nothing to check and
+        the result is ``OK``.
+
+        Nesting resolves itself: a registered driver that is *itself* a
+        ``BaseOrchestrator`` provides ``healthcheck`` too, so calling it here
+        cascades into that sub-orchestrator's own first level -- no recursive
+        capability search required.
+
+        Override in a subclass when "healthy" means something specific for your
+        stack (only a primary counts, redundant drivers OR-aggregate, ...).
         """
-        if isinstance(self, contract):
-            return self
         with self._lock:
             inners = list(self._labeled.values())
+        worst = HealthStatus.OK
         for inner in inners:
-            hit = DriverMeta.resolve_capability(inner, contract)
-            if hit is not None:
-                return hit
-        return None
+            provider = DriverMeta.resolve_capability(inner, SupportsHealthcheck)
+            if provider is None:
+                continue
+            status = _as_health_status(provider.healthcheck().get("status"))
+            if _HEALTH_SEVERITY[status] > _HEALTH_SEVERITY[worst]:
+                worst = status
+        return {"status": worst}
 
     # ------------------------------------------------------------------
     # LLM integration (override to append layer instructions)

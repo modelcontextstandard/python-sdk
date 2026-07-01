@@ -17,6 +17,7 @@ from mcs.driver.core import (
     SupportsNativeTools,
     BaseDecorator,
 )
+from mcs.driver.core.mixins.healthcheck import HealthStatus
 from mcs.orchestrator.base import (
     BaseOrchestrator,
     ToolLayer,
@@ -341,35 +342,33 @@ class TestBaseDriverIntegration:
         assert "nope" in (dr.call_detail or "")
 
 
-# -- Capability resolution (wrapper navigates inward) ------------------------
+# -- Capability resolution: opaque composition -------------------------------
+# The orchestrator is opaque -- it advertises and resolves only its OWN
+# capabilities, never those of the drivers it holds. (A decorator is the
+# transparent counterpart: it *does* pass inner capabilities through.)
 
 class _HealthDriver(FakeToolDriver, SupportsHealthcheck):
-    """A registered driver that additionally provides the healthcheck capability."""
+    """A registered driver reporting a (configurable) health status."""
+
+    def __init__(self, tools: list[Tool], status: Any = "OK"):
+        super().__init__(tools)
+        self._status = status
 
     def healthcheck(self) -> dict[str, Any]:
-        return {"status": "OK"}
+        return {"status": self._status}
 
 
-class TestCapabilityResolution:
-    def test_resolves_own_capability_to_self(self):
-        """A capability the orchestrator provides itself resolves to itself."""
-        orch = BaseOrchestrator()
-        orch.add_driver(_driver_ab(), label="alpha")
-        assert DriverMeta.resolve_capability(orch, SupportsNativeTools) is orch
+class _SupportsFoo:
+    """Test-only capability the orchestrator does NOT implement."""
 
-    def test_resolves_inner_driver_capability(self):
-        """A capability held by a registered driver is found by searching inward."""
-        orch = BaseOrchestrator()
-        health = _HealthDriver([TOOL_C])
-        orch.add_driver(_driver_ab(), label="alpha")
-        orch.add_driver(health, label="beta")
-        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is health
+    CAPABILITY = "foo"
 
-    def test_returns_none_when_capability_absent(self):
-        """When no layer satisfies the contract, resolution yields None."""
-        orch = BaseOrchestrator()
-        orch.add_driver(_driver_ab(), label="alpha")
-        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is None
+    def foo(self) -> str:
+        return "foo"
+
+
+class _FooDriver(FakeToolDriver, _SupportsFoo):
+    """A driver carrying a capability the orchestrator must NOT surface."""
 
 
 def _orch_with(*drivers: MCSToolDriver) -> BaseOrchestrator:
@@ -380,52 +379,98 @@ def _orch_with(*drivers: MCSToolDriver) -> BaseOrchestrator:
     return orch
 
 
-class TestNestedCapabilityResolution:
-    """Resolution through orchestrator-in-orchestrator stacks of varying depth."""
+class TestCapabilityResolution:
+    """The orchestrator resolves/advertises only its OWN capabilities."""
 
-    def test_depth_two(self):
-        """outer -> inner orchestrator -> driver."""
-        health = _HealthDriver([TOOL_C])
-        outer = _orch_with(_orch_with(health))
-        assert DriverMeta.resolve_capability(outer, SupportsHealthcheck) is health
+    def test_resolves_own_capability_to_self(self):
+        """A capability the orchestrator provides itself resolves to itself."""
+        orch = _orch_with(_driver_ab())
+        assert DriverMeta.resolve_capability(orch, SupportsNativeTools) is orch
 
-    def test_depth_three(self):
-        """Three orchestrator layers deep down to the capability holder."""
-        health = _HealthDriver([TOOL_C])
-        o1 = _orch_with(_orch_with(_orch_with(health)))
-        assert DriverMeta.resolve_capability(o1, SupportsHealthcheck) is health
+    def test_healthcheck_resolves_to_self(self):
+        """Healthcheck is implemented by the orchestrator itself -> resolves to
+        self, not to an inner healthcheck-capable driver."""
+        orch = _orch_with(_HealthDriver([TOOL_C]))
+        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is orch
 
-    def test_self_takes_priority_over_inner(self):
-        """A capability the outer layer provides itself wins over deeper layers."""
-        outer = _orch_with(_orch_with(_HealthDriver([TOOL_C])))
-        # native_tools is provided by every orchestrator (via BaseDriver);
-        # the outermost layer must match first.
-        assert DriverMeta.resolve_capability(outer, SupportsNativeTools) is outer
+    def test_inner_capability_not_passed_through(self):
+        """Opaque: a contract held only by an inner driver is NOT surfaced."""
+        orch = _orch_with(_FooDriver([TOOL_C]))
+        assert DriverMeta.resolve_capability(orch, _SupportsFoo) is None
 
-    def test_mixed_shallow_and_deep_branches(self):
-        """A flat sibling without the capability, plus a nested branch with it."""
-        health = _HealthDriver([TOOL_C])
-        outer = _orch_with(_driver_ab(), _orch_with(health))   # plain first, nested second
-        assert DriverMeta.resolve_capability(outer, SupportsHealthcheck) is health
+    def test_detect_and_resolve_agree(self):
+        """detect <-> resolve are consistent for owned and non-owned contracts."""
+        orch = _orch_with(_FooDriver([TOOL_C]))
+        # owned: healthcheck
+        assert orch.meta.has_capability(SupportsHealthcheck)
+        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is orch
+        # not owned: foo (held by an inner driver only)
+        assert not orch.meta.has_capability(_SupportsFoo)
+        assert DriverMeta.resolve_capability(orch, _SupportsFoo) is None
 
-    def test_first_match_wins_across_depths(self):
-        """With candidates at different depths, the earliest registered wins."""
-        shallow = _HealthDriver([TOOL_A])                      # depth 1
-        deep = _HealthDriver([TOOL_C])                         # depth 2
-        outer = _orch_with(shallow, _orch_with(deep))          # shallow registered first
-        assert DriverMeta.resolve_capability(outer, SupportsHealthcheck) is shallow
 
-    def test_capability_on_sibling_inside_nested_orchestrator(self):
-        """outer -> inner orchestrator holding [plain sibling, health holder]."""
-        health = _HealthDriver([TOOL_C])
-        inner = _orch_with(_driver_ab(), health)               # plain first, health second
+class TestHealthcheck:
+    """Default healthcheck: AND-aggregate over first-level drivers."""
+
+    def test_no_drivers_is_ok(self):
+        assert BaseOrchestrator().healthcheck()["status"] is HealthStatus.OK
+
+    def test_no_healthcheck_capable_driver_is_ok(self):
+        orch = _orch_with(_driver_ab())
+        assert orch.healthcheck()["status"] is HealthStatus.OK
+
+    def test_single_ok(self):
+        orch = _orch_with(_HealthDriver([TOOL_C], "OK"))
+        assert orch.healthcheck()["status"] is HealthStatus.OK
+
+    def test_single_error(self):
+        orch = _orch_with(_HealthDriver([TOOL_C], "ERROR"))
+        assert orch.healthcheck()["status"] is HealthStatus.ERROR
+
+    def test_all_ok_aggregates_ok(self):
+        orch = _orch_with(_HealthDriver([TOOL_A], "OK"), _HealthDriver([TOOL_C], "OK"))
+        assert orch.healthcheck()["status"] is HealthStatus.OK
+
+    def test_one_error_wins(self):
+        orch = _orch_with(_HealthDriver([TOOL_A], "OK"), _HealthDriver([TOOL_C], "ERROR"))
+        assert orch.healthcheck()["status"] is HealthStatus.ERROR
+
+    def test_warning_wins_over_ok(self):
+        orch = _orch_with(_HealthDriver([TOOL_A], "OK"), _HealthDriver([TOOL_C], "WARNING"))
+        assert orch.healthcheck()["status"] is HealthStatus.WARNING
+
+    def test_error_wins_over_warning(self):
+        orch = _orch_with(_HealthDriver([TOOL_A], "WARNING"), _HealthDriver([TOOL_C], "ERROR"))
+        assert orch.healthcheck()["status"] is HealthStatus.ERROR
+
+    def test_plain_driver_skipped(self):
+        orch = _orch_with(_driver_ab(), _HealthDriver([TOOL_C], "ERROR"))
+        assert orch.healthcheck()["status"] is HealthStatus.ERROR
+
+    def test_unknown_status_coerced(self):
+        orch = _orch_with(_HealthDriver([TOOL_C], "bogus"))
+        assert orch.healthcheck()["status"] is HealthStatus.UNKNOWN
+
+    def test_capability_advertised(self):
+        assert "healthcheck" in BaseOrchestrator().meta.capabilities
+
+
+class TestNestedHealthcheck:
+    """Nesting cascades through delegation -- no recursive capability search."""
+
+    def test_nested_orchestrator_cascades(self):
+        inner = _orch_with(_HealthDriver([TOOL_C], "ERROR"))
         outer = _orch_with(inner)
-        assert DriverMeta.resolve_capability(outer, SupportsHealthcheck) is health
+        assert outer.healthcheck()["status"] is HealthStatus.ERROR
 
-    def test_absent_in_deep_stack_returns_none(self):
-        """A deep stack with no matching capability resolves to None."""
-        o1 = _orch_with(_orch_with(_orch_with(_driver_c())))
-        assert DriverMeta.resolve_capability(o1, SupportsHealthcheck) is None
+    def test_nested_all_ok(self):
+        inner = _orch_with(_HealthDriver([TOOL_C], "OK"))
+        outer = _orch_with(_HealthDriver([TOOL_A], "OK"), inner)
+        assert outer.healthcheck()["status"] is HealthStatus.OK
+
+    def test_depth_three_cascades(self):
+        deep = _orch_with(_orch_with(_orch_with(_HealthDriver([TOOL_C], "WARNING"))))
+        assert deep.healthcheck()["status"] is HealthStatus.WARNING
 
 
 class _Wrapped(BaseDecorator, SupportsHealthcheck):
@@ -434,22 +479,23 @@ class _Wrapped(BaseDecorator, SupportsHealthcheck):
     CONTRACT = SupportsHealthcheck
 
     def healthcheck(self):
-        return {"status": "decorator"}
+        return {"status": "WARNING"}
 
 
 class TestDecoratorInOrchestrator:
-    """A BaseDecorator used as a registered ToolDriver inside the orchestrator."""
+    """A BaseDecorator registered as a ToolDriver inside the orchestrator."""
 
-    def test_decorator_capability_found_through_orchestrator(self):
-        dec = _Wrapped(_driver_ab())           # decorator adds healthcheck
+    def test_healthcheck_reaches_through_bare_decorator(self):
+        """A healthcheck-capable driver behind a bare decorator is still found
+        (the decorator transparently resolves inward)."""
+        dec = BaseDecorator(_HealthDriver([TOOL_C], "ERROR"))
         orch = _orch_with(dec)
-        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is dec
+        assert orch.healthcheck()["status"] is HealthStatus.ERROR
 
-    def test_orchestrator_finds_capability_inside_decorator(self):
-        health = _HealthDriver([TOOL_C])       # inner holds the capability
-        dec = BaseDecorator(health)            # bare wrapper hides it
-        orch = _orch_with(dec)
-        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is health
+    def test_decorator_that_adds_healthcheck_contributes(self):
+        """A decorator whose CONTRACT is SupportsHealthcheck contributes its status."""
+        orch = _orch_with(_Wrapped(_driver_ab()))
+        assert orch.healthcheck()["status"] is HealthStatus.WARNING
 
     def test_decorator_delegates_execution_in_orchestrator(self):
         dec = _Wrapped(_driver_ab())           # bare execute_tool -> delegates

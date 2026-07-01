@@ -74,13 +74,17 @@ def main() -> None:
     print("== 1. Capability aggregation through the stack ==")
     print("  stack meta.capabilities:", stack.meta.capabilities)
 
-    print("\n== 2. Capability resolution through the orchestrator ==")
-    hooks_layer = DriverMeta.resolve_capability(orch, SupportsHooks)
-    consent_layer = DriverMeta.resolve_capability(orch, SupportsConsent)
-    auth_layer = DriverMeta.resolve_capability(orch, SupportsAuth)
-    print("  SupportsHooks   ->", type(hooks_layer).__name__)
-    print("  SupportsConsent ->", type(consent_layer).__name__)
-    print("  SupportsAuth    ->", type(auth_layer).__name__)
+    print("\n== 2. Resolution: decorator is transparent, orchestrator is opaque ==")
+    # The decorator stack is transparent -- resolve finds each concern's layer.
+    hooks_layer = DriverMeta.resolve_capability(stack, SupportsHooks)
+    consent_layer = DriverMeta.resolve_capability(stack, SupportsConsent)
+    auth_layer = DriverMeta.resolve_capability(stack, SupportsAuth)
+    print("  on stack -> SupportsHooks  :", type(hooks_layer).__name__)
+    print("  on stack -> SupportsConsent:", type(consent_layer).__name__)
+    print("  on stack -> SupportsAuth   :", type(auth_layer).__name__)
+    # The orchestrator is opaque -- it does NOT surface its drivers' capabilities.
+    print("  on orch  -> SupportsHooks  :",
+          DriverMeta.resolve_capability(orch, SupportsHooks), "(opaque)")
 
     print("\n== 3. execute_tool interception (Hooks -> Permission -> Auth -> driver) ==")
     r1 = orch.execute_tool("list_messages", {})   # consent ok, no challenge
@@ -91,9 +95,11 @@ def main() -> None:
 
     # -- Verification --------------------------------------------------------
     assert set(stack.meta.capabilities) >= {"auth", "consent", "hooks"}
-    assert isinstance(hooks_layer, HooksDecorator)
+    assert isinstance(hooks_layer, HooksDecorator)          # transparent: found on the stack
     assert isinstance(consent_layer, PermissionDecorator)
     assert isinstance(auth_layer, AuthDecorator)
+    # opaque composition: the orchestrator surfaces none of the stack's concerns
+    assert DriverMeta.resolve_capability(orch, SupportsHooks) is None
     assert json.loads(r1)["messages"] == ["hello", "world"]
     assert json.loads(r2)["auth_required"] is True
     # Hooks observed both calls (the auth-challenge is a normal return, not an exception)
