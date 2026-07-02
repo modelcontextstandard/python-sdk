@@ -20,8 +20,7 @@ from mcs.driver.core import (
 from mcs.driver.core.extraction_strategy import (
     ExtractionStrategy,
     TextExtractionStrategy,
-    DirectDictExtractionStrategy,
-    OpenAIExtractionStrategy,
+    OpenAICompletionExtractionStrategy,
 )
 
 
@@ -97,46 +96,11 @@ class TestTextExtractionStrategy:
         assert self.strategy.extract('{"foo": "bar"}') is None
 
 
-# -- DirectDictExtractionStrategy ---------------------------------------------
+# -- OpenAICompletionExtractionStrategy -------------------------------------------------
 
-class TestDirectDictExtractionStrategy:
+class TestOpenAICompletionExtractionStrategy:
     def setup_method(self):
-        self.strategy = DirectDictExtractionStrategy()
-
-    def test_extracts_tool_field(self):
-        result = self.strategy.extract({"tool": "greet", "arguments": {"name": "Bob"}})
-        assert result == ("greet", {"name": "Bob"})
-
-    def test_extracts_name_alias(self):
-        result = self.strategy.extract({"name": "greet", "arguments": {}})
-        assert result == ("greet", {})
-
-    def test_returns_none_for_str_input(self):
-        assert self.strategy.extract("not a dict") is None
-
-    def test_returns_none_for_missing_tool_key(self):
-        assert self.strategy.extract({"arguments": {"x": 1}}) is None
-
-    def test_returns_none_for_empty_dict(self):
-        assert self.strategy.extract({}) is None
-
-    def test_handles_arguments_as_json_string(self):
-        result = self.strategy.extract({
-            "tool": "greet",
-            "arguments": '{"name": "Charlie"}',
-        })
-        assert result == ("greet", {"name": "Charlie"})
-
-    def test_handles_missing_arguments(self):
-        result = self.strategy.extract({"tool": "greet"})
-        assert result == ("greet", {})
-
-
-# -- OpenAIExtractionStrategy -------------------------------------------------
-
-class TestOpenAIExtractionStrategy:
-    def setup_method(self):
-        self.strategy = OpenAIExtractionStrategy()
+        self.strategy = OpenAICompletionExtractionStrategy()
 
     def test_extracts_openai_format(self):
         payload = {
@@ -179,7 +143,12 @@ class TestOpenAIExtractionStrategy:
         payload = {"tool_calls": [{"function": {"arguments": "{}"}}]}
         assert self.strategy.extract(payload) is None
 
-    def test_handles_invalid_arguments_json(self):
+    def test_incomplete_or_broken_arguments_return_none(self):
+        """Non-empty but unparseable arguments -> None (incomplete/broken call).
+
+        Lets the driver report INCOMPLETE: keep buffering while streaming, or
+        skip/heal otherwise, rather than executing with silently-dropped args.
+        """
         payload = {
             "tool_calls": [{
                 "function": {
@@ -188,8 +157,7 @@ class TestOpenAIExtractionStrategy:
                 },
             }],
         }
-        result = self.strategy.extract(payload)
-        assert result == ("greet", {})
+        assert self.strategy.extract(payload) is None
 
     def test_returns_none_for_direct_dict_format(self):
         assert self.strategy.extract({"tool": "greet", "arguments": {}}) is None
@@ -201,12 +169,6 @@ class TestBaseDriverExtractionChain:
     def test_str_input_uses_text_strategy(self):
         driver = SimpleBaseDriver()
         dr = driver.process_llm_response('{"tool": "greet", "arguments": {"name": "X"}}')
-        assert dr.call_executed is True
-        assert dr.tool_call_result == "Hello!"
-
-    def test_direct_dict_input(self):
-        driver = SimpleBaseDriver()
-        dr = driver.process_llm_response({"tool": "greet", "arguments": {"name": "Y"}})
         assert dr.call_executed is True
         assert dr.tool_call_result == "Hello!"
 
@@ -254,40 +216,46 @@ class TestBaseDriverExtractionChain:
 
 # -- Caching ------------------------------------------------------------------
 
+def _native_greet() -> dict:
+    """A native OpenAI tool_calls message -> claimed by OpenAICompletion."""
+    return {"tool_calls": [{"id": "c1", "type": "function",
+            "function": {"name": "greet", "arguments": "{}"}}]}
+
+
 class TestExtractionCaching:
     def test_preferred_extractor_cached_after_first_hit(self):
         driver = SimpleBaseDriver()
-        assert driver._preferred_extractor is None
+        assert driver._chain._preferred is None
 
-        driver.process_llm_response({"tool": "greet", "arguments": {}})
-        assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
+        driver.process_llm_response(_native_greet())
+        assert isinstance(driver._chain._preferred, OpenAICompletionExtractionStrategy)
 
     def test_cached_strategy_tried_first(self):
         driver = SimpleBaseDriver()
 
-        driver.process_llm_response({"tool": "greet", "arguments": {}})
-        assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
+        driver.process_llm_response(_native_greet())
+        assert isinstance(driver._chain._preferred, OpenAICompletionExtractionStrategy)
 
-        driver.process_llm_response({"tool": "greet", "arguments": {}})
-        assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
+        driver.process_llm_response(_native_greet())
+        assert isinstance(driver._chain._preferred, OpenAICompletionExtractionStrategy)
 
     def test_text_fallback_does_not_become_preferred(self):
-        """TextExtraction is a fallback -- it never becomes _preferred_extractor."""
+        """TextExtraction is a fallback -- it never becomes the chain's preferred."""
         driver = SimpleBaseDriver()
 
-        driver.process_llm_response({"tool": "greet", "arguments": {}})
-        assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
+        driver.process_llm_response(_native_greet())
+        assert isinstance(driver._chain._preferred, OpenAICompletionExtractionStrategy)
 
         driver.process_llm_response('{"tool": "greet", "arguments": {}}')
-        assert isinstance(driver._preferred_extractor, DirectDictExtractionStrategy)
+        assert isinstance(driver._chain._preferred, OpenAICompletionExtractionStrategy)
 
 
 # -- Custom ExtractionStrategy injection --------------------------------------
 
 class TestCustomExtractionStrategy:
-    def test_custom_strategy_with_claims(self):
+    def test_custom_strategy_with_recognizes(self):
         class AlwaysGreetStrategy(ExtractionStrategy):
-            def claims(self, llm_response: str | dict) -> bool:
+            def recognizes(self, llm_response: str | dict) -> bool:
                 return True
 
             def extract(self, llm_response):
@@ -301,50 +269,38 @@ class TestCustomExtractionStrategy:
         assert dr.tool_call_result == "Hello!"
 
 
-# -- Claim-phase tests -------------------------------------------------------
+# -- Recognise-phase tests ---------------------------------------------------
 
-class TestClaimPhase:
-    """Verify the two-phase claim → extract → text-fallback protocol."""
+class TestRecognizePhase:
+    """Verify the two-phase recognise → extract → text-fallback protocol."""
 
-    def test_openai_claims_dict_with_tool_calls_key(self):
-        s = OpenAIExtractionStrategy()
-        assert s.claims({"tool_calls": [{"function": {"name": "x", "arguments": "{}"}}]})
+    def test_openai_recognizes_dict_with_tool_calls_key(self):
+        s = OpenAICompletionExtractionStrategy()
+        assert s.recognizes({"tool_calls": [{"function": {"name": "x", "arguments": "{}"}}]})
 
-    def test_openai_claims_dict_with_tool_calls_none(self):
+    def test_openai_recognizes_dict_with_tool_calls_none(self):
         """Even tool_calls=None means 'my format, no tool call'."""
-        s = OpenAIExtractionStrategy()
-        assert s.claims({"role": "assistant", "content": "hi", "tool_calls": None})
+        s = OpenAICompletionExtractionStrategy()
+        assert s.recognizes({"role": "assistant", "content": "hi", "tool_calls": None})
 
-    def test_openai_does_not_claim_dict_without_tool_calls(self):
-        s = OpenAIExtractionStrategy()
-        assert not s.claims({"role": "assistant", "content": "hi"})
+    def test_openai_does_not_recognize_dict_without_tool_calls(self):
+        s = OpenAICompletionExtractionStrategy()
+        assert not s.recognizes({"role": "assistant", "content": "hi"})
 
-    def test_openai_does_not_claim_str(self):
-        s = OpenAIExtractionStrategy()
-        assert not s.claims('{"tool_calls": []}')
+    def test_openai_does_not_recognize_str(self):
+        s = OpenAICompletionExtractionStrategy()
+        assert not s.recognizes('{"tool_calls": []}')
 
-    def test_direct_dict_claims_tool_key(self):
-        s = DirectDictExtractionStrategy()
-        assert s.claims({"tool": "greet", "arguments": {}})
-
-    def test_direct_dict_claims_name_key(self):
-        s = DirectDictExtractionStrategy()
-        assert s.claims({"name": "greet", "arguments": {}})
-
-    def test_direct_dict_does_not_claim_empty(self):
-        s = DirectDictExtractionStrategy()
-        assert not s.claims({})
-
-    def test_text_never_claims(self):
+    def test_text_never_recognizes(self):
         codec = JsonPromptStrategy.from_defaults()
         s = TextExtractionStrategy(codec)
-        assert not s.claims('{"tool": "greet"}')
-        assert not s.claims({"content": '{"tool": "greet"}'})
+        assert not s.recognizes('{"tool": "greet"}')
+        assert not s.recognizes({"content": '{"tool": "greet"}'})
 
-    def test_claimer_blocks_text_fallback_even_when_extract_returns_none(self):
+    def test_recognizer_blocks_text_fallback_even_when_extract_returns_none(self):
         """The critical false-positive prevention test.
 
-        A dict with ``tool_calls: None`` is claimed by OpenAI strategy.
+        A dict with ``tool_calls: None`` is recognised by OpenAI strategy.
         Even though extract returns None, text fallback must NOT run --
         the JSON in content must not be misinterpreted as a tool call.
         """
@@ -359,7 +315,7 @@ class TestClaimPhase:
         assert not dr.call_failed
 
     def test_str_input_falls_through_to_text(self):
-        """Pure str input: no strategy claims → text fallback extracts."""
+        """Pure str input: no strategy recognises → text fallback extracts."""
         driver = SimpleBaseDriver()
         dr = driver.process_llm_response('{"tool": "greet", "arguments": {}}')
         assert dr.call_executed is True

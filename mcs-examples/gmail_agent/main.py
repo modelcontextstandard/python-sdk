@@ -6,10 +6,21 @@ Demonstrates the MCS auth stack with pluggable credential providers:
 - Direct OAuth 2.0 Authorization Code Flow
 - Static tokens for quick testing
 
-The client has no knowledge of authentication -- when a tool needs
-credentials, the AuthDecorator (wrapping the ToolDriver, injected via the
-MailDriver's ``_tooldriver`` hook) intercepts the challenge and the LLM
-presents the login URL to the user.
+The client has no knowledge of authentication or approval -- the ToolDriver is
+wrapped in two stacked decorators, injected via the MailDriver's ``_tooldriver``
+hook:
+
+- ``AuthDecorator`` intercepts credential challenges so the LLM can present the
+  login URL to the user.
+- ``PermissionDecorator`` gates every tool call through a user-consent prompt
+  before it runs; the client only supplies the consent handler.
+- ``HooksDecorator`` fires a pre-tool-use hook so the client can show progress
+  ("a tool is running") WITHOUT ever inspecting the LLM output. This is the
+  point: the client knows nothing about LLM tool-calling formats -- it hands the
+  raw message to ``process_llm_response`` as a black box and learns of tool
+  activity only through the hook.
+
+Stack:  ``MailDriver(_tooldriver=Hooks(Permission(Auth(MailToolDriver))))``.
 
 Usage:
     # Auth0 with pre-existing refresh token (from .env):
@@ -28,12 +39,13 @@ Usage:
     python main.py --gmail-token ya29.xxx
 
 Requires:
-    pip install mcs-driver-mail[gmail] mcs-auth-auth0 litellm rich python-dotenv
+    pip install mcs-driver-mail[gmail] mcs-auth-auth0 mcs-permission litellm rich python-dotenv
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 
 from dotenv import load_dotenv
@@ -42,6 +54,8 @@ from rich.console import Console
 from rich.panel import Panel
 
 from mcs.auth.decorator import AuthDecorator
+from mcs.permission.decorator import PermissionDecorator
+from mcs.hooks.decorator import HooksDecorator
 from mcs.driver.core import DriverMeta, DriverResponse, MCSDriver, SupportsNativeTools
 from mcs.driver.mail import MailDriver
 from mcs.driver.mail.tooldriver import MailToolDriver
@@ -171,8 +185,40 @@ def _build_credential(args: argparse.Namespace):
     raise SystemExit("No authentication method specified.")
 
 
+def _ask_consent(tool_name: str, arguments: dict) -> bool:
+    """Consent handler for the PermissionDecorator.
+
+    Called from inside ``execute_tool`` -- after the LLM has chosen a tool but
+    *before* it runs. Blocks on user input; returns True to allow, False to deny
+    (the decorator then returns a ``permission_denied`` result to the LLM).
+    """
+    console.print(
+        Panel(
+            f"[bold]{tool_name}[/bold]\n{json.dumps(arguments, indent=2)}",
+            title="Tool call -- approve?",
+            border_style="yellow",
+        )
+    )
+    answer = console.input(
+        "[bold yellow]Allow this tool call? [y/N]:[/bold yellow] "
+    ).strip().lower()
+    return answer in ("y", "yes")
+
+
+def _on_tool_start(tool_name: str, arguments: dict) -> None:
+    """Pre-tool-use hook: the driver stack tells the client a tool is running.
+
+    This is how the client learns a tool call is happening *without* inspecting
+    the LLM output. The MCS premise is that the client knows nothing about LLM
+    tool-calling -- it hands the raw LLM message to ``process_llm_response`` as a
+    black box. Native ``tool_calls``, text-embedded JSON, anything -- the client
+    only ever sees this callback, never the format.
+    """
+    console.print(f"[dim]→ running tool: {tool_name}[/dim]")
+
+
 def _build_driver(args: argparse.Namespace) -> MailDriver:
-    """Build a MailDriver whose ToolDriver is wrapped with AuthDecorator (via DI)."""
+    """Build a MailDriver whose ToolDriver is wrapped with Hooks+Permission+Auth (via DI)."""
     gmail_kwargs: dict = {}
     if args.sender_name:
         gmail_kwargs["sender_name"] = args.sender_name
@@ -189,11 +235,20 @@ def _build_driver(args: argparse.Namespace) -> MailDriver:
         read_kwargs=gmail_kwargs,
         send_kwargs=gmail_kwargs,
     )
-    # Wrap the ToolDriver with auth handling, then inject it into the MailDriver
-    # via its ``_tooldriver`` DI hook. The MailDriver stays the client-facing
-    # driver (process_llm_response, native tools, bindings); its execute_tool
-    # now routes through AuthDecorator, which catches AuthChallenge.
-    return MailDriver(_tooldriver=AuthDecorator(tool_driver))
+    # Stack three cross-cutting concerns as decorators and inject them via the
+    # MailDriver's ``_tooldriver`` DI hook. The MailDriver stays the client-
+    # facing driver (process_llm_response, native tools, bindings); its
+    # execute_tool now routes through  Hooks( Permission( Auth( MailToolDriver ) ) ):
+    # Hooks notifies the client a tool is running, Permission asks the user to
+    # approve it, Auth catches credential challenges. The client sees none of it.
+    guarded = HooksDecorator(
+        PermissionDecorator(
+            AuthDecorator(tool_driver),
+            consent_handler=_ask_consent,
+        ),
+        pre=[_on_tool_start],
+    )
+    return MailDriver(_tooldriver=guarded)
 
 
 def _stream_one_turn(
@@ -321,15 +376,11 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
         for _round in range(MAX_TOOL_ROUNDS):
             llm_out = _stream_one_turn(model, messages, api_base, api_key, native_tools)
 
-            # Show tool calls in debug mode before processing
-            if debug and llm_out.get("tool_calls"):
-                for tc in llm_out["tool_calls"]:
-                    fn = tc.get("function", {})
-                    console.print(
-                        f"[dim]Tool call: {fn.get('name', '?')}("
-                        f"{fn.get('arguments', '')[:80]})[/dim]"
-                    )
-
+            # The client hands the raw LLM message to the driver as a black box.
+            # It deliberately does NOT inspect llm_out for tool calls -- that
+            # would require knowing LLM tool-calling formats and breaks the MCS
+            # premise. Tool activity is surfaced by the driver stack via the
+            # pre-tool-use hook (_on_tool_start) instead.
             response = driver.process_llm_response(llm_out)
 
             if debug and (response.call_executed or response.call_failed):

@@ -22,15 +22,22 @@ from .prompt_strategy import PromptStrategy, UnknownToolBehavior
 from .extraction_strategy import (
     ExtractionStrategy,
     TextExtractionStrategy,
-    DirectDictExtractionStrategy,
-    OpenAIExtractionStrategy,
+    OpenAICompletionExtractionStrategy,
 )
+from .extraction_chain import ExtractionChain
 from .mixins.native_tools import SupportsNativeTools, NativeToolContext
+from .mixins.streaming import SupportsStreaming
 
 logger = logging.getLogger(__name__)
 
+#: Sentinel returned by ``_extract`` when a strategy claimed the response's
+#: format but no complete tool call could be parsed (yet). Distinct from
+#: ``None`` (= no tool call at all) -- the difference is what lets streaming
+#: tell "keep buffering" from "plain text".
+_INCOMPLETE: object = object()
 
-class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools):
+
+class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreaming):
     """Concrete base that wires ``MCSDriver`` methods to a ``PromptStrategy``.
 
     Subclasses must provide:
@@ -58,11 +65,12 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools):
         self._custom_tool_description = custom_tool_description
         self._custom_system_message = custom_system_message
         self._extractors: list[ExtractionStrategy] = _extraction_strategies or [
-            DirectDictExtractionStrategy(),
-            OpenAIExtractionStrategy(),
+            OpenAICompletionExtractionStrategy(),
             TextExtractionStrategy(self._strategy),
         ]
-        self._preferred_extractor: ExtractionStrategy | None = None
+        # Shape-resolution + preferred-strategy cache live in the chain, so the
+        # driver (extract) and the stream buffer (accumulate) share one instance.
+        self._chain = ExtractionChain(self._extractors)
 
         # Capability flags are derived from the interfaces this driver implements
         # (MCSDriver -> "standalone", MCSToolDriver -> "orchestratable",
@@ -99,9 +107,15 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools):
             llm_text = str(llm_response)
 
         parsed = self._extract(llm_response)
+        if parsed is _INCOMPLETE:
+            # A tool-call format was recognised but the call is not yet complete.
+            if streaming:
+                return DriverResponse(call_pending=True)   # keep feeding chunks
+            return DriverResponse()                        # non-streaming: treat as no call
         if parsed is None:
             return DriverResponse()
 
+        assert isinstance(parsed, tuple)   # narrowed: not _INCOMPLETE, not None
         tool_name, arguments = parsed
 
         known = {t.name for t in self.list_tools()}
@@ -207,52 +221,22 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools):
 
     def _extract(
         self, llm_response: str | dict,
-    ) -> tuple[str, dict[str, Any]] | None:
-        """Two-phase extraction: Claim → Extract → Text-Fallback.
+    ) -> tuple[str, dict[str, Any]] | object | None:
+        """Resolve the owning strategy via the chain, then extract.
 
-        Each strategy can *claim* a response based on its shape (e.g.
-        ``"tool_calls"`` key for OpenAI).  The first claimer owns the
-        response exclusively -- even when ``extract()`` returns ``None``
-        (= "my format, but no tool call").
-
-        ``TextExtractionStrategy`` never claims and serves as the
-        natural fallback when no strategy takes ownership.
-
-        The ``_preferred_extractor`` cache promotes the last successful
-        claiming strategy to the front of the chain for subsequent
-        calls.  This is a stateful optimisation without side-effects:
-        the system produces the same result without it, just slower.
-
-        .. note::
-
-           The claim logic relies on the **response shape** (e.g. the
-           presence of a ``"tool_calls"`` key) to distinguish native
-           tool-call responses from plain text.  This covers >99% of
-           practical cases, but edge cases remain -- for instance when
-           a native-tool-capable model is called **without** ``tools``
-           and produces JSON in ``content`` that resembles a text-based
-           tool call.  Future solutions may include passing
-           ``model_name`` to ``process_llm_response`` or introducing
-           session-level state after ``get_native_tool_context``.
+        :class:`ExtractionChain` finds the strategy whose *shape* matches
+        (``recognizes``) and caches it; this driver then calls ``extract``
+        on the winner.  A recognised strategy that yields no complete call
+        returns :data:`_INCOMPLETE` -- distinct from ``None`` (no call at
+        all) -- so streaming can tell "keep buffering" from "plain text".
+        When nothing claims the shape, the chain's text fallback is used.
         """
-        ordered = list(self._extractors)
-        text_fallback: TextExtractionStrategy | None = None
+        strategy = self._chain.resolve(llm_response)
+        if strategy is not None:
+            result = strategy.extract(llm_response)
+            return result if result is not None else _INCOMPLETE
 
-        if self._preferred_extractor is not None and self._preferred_extractor in ordered:
-            ordered = [self._preferred_extractor] + [
-                s for s in ordered if s is not self._preferred_extractor
-            ]
-
-        for strategy in ordered:
-            if isinstance(strategy, TextExtractionStrategy):
-                text_fallback = strategy
-                continue
-            if strategy.claims(llm_response):
-                result = strategy.extract(llm_response)
-                if result is not None:
-                    self._preferred_extractor = strategy
-                return result
-
-        if text_fallback is not None:
-            return text_fallback.extract(llm_response)
+        fallback = self._chain.text_fallback
+        if fallback is not None:
+            return fallback.extract(llm_response)
         return None

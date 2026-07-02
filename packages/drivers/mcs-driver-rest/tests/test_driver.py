@@ -220,7 +220,12 @@ class TestProcessLlmResponse:
 
     def test_dict_llm_response_handled(self):
         driver = RestDriver(_tooldriver=FakeToolDriver())
-        resp = driver.process_llm_response({"tool": "greet", "arguments": {"name": "Bob"}})
+        resp = driver.process_llm_response({
+            "tool_calls": [{
+                "id": "c1", "type": "function",
+                "function": {"name": "greet", "arguments": '{"name": "Bob"}'},
+            }],
+        })
         assert resp.call_executed is True
 
     def test_name_field_also_accepted(self):

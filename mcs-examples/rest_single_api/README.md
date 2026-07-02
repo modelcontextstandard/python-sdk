@@ -53,7 +53,7 @@ python chat_non_stream.py \
 
 # Swagger Petstore:
 python chat_non_stream.py \
-    --url https://petstore3.swagger.io/api/v3/openapi.json
+    --url https://petstore3.swagger.io/api/v3/oexpenapi.json
 
 # Any OpenAPI spec with custom tag filter:
 python chat_non_stream.py \

@@ -1,15 +1,16 @@
 """Streaming MCS chat client using the REST driver.
 
-Streams LLM output token-by-token.  The client only buffers text and
-passes the accumulated buffer to the driver.  When the driver detects
-a tool call it executes it, feeds the result back, and the LLM continues.
+Streams LLM output chunk-by-chunk. The client feeds each raw chunk to an
+``LLMStreamBuffer`` it creates itself; the buffer reassembles content *and* native
+tool calls and returns the content delta for live display. Each accumulated message
+goes to ``process_llm_response`` -- the client never touches ``tool_calls`` itself.
+When the driver detects a complete call it executes it, the client ``reset()``s the
+buffer to hunt for the next call, feeds the result back, and the LLM continues.
 
-The client has no knowledge of tool calls whatsoever -- it just collects
-text and lets the driver decide.
-
-The MCS integration loop in ``chat_loop`` is structurally identical to
-the non-streaming variant -- only the LLM call differs (streaming
-accumulation instead of a single request).
+The client has no knowledge of tool calls whatsoever -- the ``LLMStreamBuffer`` does
+the reassembly (once, in the SDK, per tool format, instead of in every client); the
+driver does the rest. The buffer is not driver-bound: reassembly is an LLM/SDK
+concern, identical for every driver.
 
 Default: GitHub REST API (search + repos).  Any OpenAPI spec works.
 
@@ -35,10 +36,14 @@ import argparse
 from dotenv import load_dotenv
 from litellm import completion
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 
 from mcs.driver.rest import RestDriver
-from mcs.driver.core import DriverMeta, DriverResponse, MCSDriver, SupportsNativeTools
+from mcs.driver.core import (
+    DriverMeta, DriverResponse, LLMStreamBuffer, MCSDriver,
+    SupportsNativeTools, SupportsStreaming,
+)
 
 console = Console()
 
@@ -54,7 +59,7 @@ DEFAULT_TAGS = ["search"]
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="MCS streaming chat client (REST)")
-    p.add_argument("--model", default="gpt-4o", help="LiteLLM model identifier (default: gpt-4o)")
+    p.add_argument("--model", default="gpt-5.5", help="LiteLLM model identifier (default: gpt-5.5)")
     p.add_argument("--url", default=GITHUB_SPEC, help="OpenAPI spec URL")
     p.add_argument("--include-tags", nargs="*", default=None,
                    help="Only include operations with these OpenAPI tags (default: repos search for GitHub)")
@@ -72,11 +77,13 @@ def _stream_one_turn(
     api_base: str | None = None,
     api_key: str | None = None,
     tools: list[dict] | None = None,
-) -> dict:
-    """Stream one LLM turn, display tokens live, return accumulated message dict.
+):
+    """Build and return the streaming completion for one LLM turn.
 
-    The client collects text and displays it live, but passes the full
-    accumulated message dict to the driver without interpretation.
+    Only the LLM call lives here. The caller consumes the stream chunk by chunk
+    (the *view*) and hands the accumulated message to the driver (the
+    *processing*) -- keeping the two cleanly separate, exactly like the
+    non-streaming variant's ``_llm_call``.
     """
     kwargs: dict = {"model": model, "messages": messages, "stream": True}
     if api_base:
@@ -84,51 +91,7 @@ def _stream_one_turn(
         kwargs["api_key"] = api_key or "no-key"
     if tools:
         kwargs["tools"] = tools
-    stream = completion(**kwargs)
-
-    content_buffer = ""
-    tool_calls_buffer: list[dict] = []
-    printed_header = False
-
-    for chunk in stream:  # type: ignore[union-attr]
-        choices = getattr(chunk, "choices", None)
-        delta = choices[0].delta if choices else None
-        if delta is None:
-            continue
-
-        token = getattr(delta, "content", None) or ""
-        if token:
-            content_buffer += token
-            if not printed_header:
-                console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
-                printed_header = True
-            print(token, end="", flush=True)
-
-        tc_deltas = getattr(delta, "tool_calls", None)
-        if tc_deltas:
-            for tc in tc_deltas:
-                idx = getattr(tc, "index", 0) or 0
-                while len(tool_calls_buffer) <= idx:
-                    tool_calls_buffer.append({"function": {"name": "", "arguments": ""}})
-                entry = tool_calls_buffer[idx]
-                fn = getattr(tc, "function", None)
-                if fn:
-                    if getattr(fn, "name", None):
-                        entry["function"]["name"] = fn.name
-                    if getattr(fn, "arguments", None):
-                        entry["function"]["arguments"] += fn.arguments
-                tc_id = getattr(tc, "id", None)
-                if tc_id:
-                    entry["id"] = tc_id
-                    entry["type"] = "function"
-
-    if printed_header:
-        print()
-
-    msg: dict = {"role": "assistant", "content": content_buffer or None}
-    if tool_calls_buffer:
-        msg["tool_calls"] = tool_calls_buffer
-    return msg
+    return completion(**kwargs)
 
 
 def _print_debug_dr(dr: DriverResponse) -> None:
@@ -147,6 +110,13 @@ def _print_debug_dr(dr: DriverResponse) -> None:
 
 def chat_loop(driver: MCSDriver, model: str, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
+    # This client depends on the SupportsStreaming *capability* for the
+    # streaming-aware process_llm_response. The buffer it creates itself: reassembly
+    # is an LLM/SDK concern, identical for every driver and not driver-bound.
+    streamer = DriverMeta.resolve_capability(driver, SupportsStreaming)
+    if streamer is None:
+        raise SystemExit(f"{driver.meta.name} does not support streaming.")
+
     native_tools: list[dict] | None = None
     if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)):
         ctx = dc.get_native_tool_context(model)
@@ -189,26 +159,41 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
         messages.append({"role": "user", "content": user_input})
 
         for _round in range(MAX_TOOL_ROUNDS):
-            llm_out = _stream_one_turn(model, messages, api_base, api_key, native_tools)
-            response = driver.process_llm_response(llm_out)
+            stream = _stream_one_turn(model, messages, api_base, api_key, native_tools)
 
-            if debug and (response.call_executed or response.call_failed):
-                _print_debug_dr(response)
+            # Per chunk, exactly one of three things happens -- the buffer and
+            # driver decide which, the client never inspects the chunk:
+            #   (a) a content token -> print it live and keep the transcript
+            #   (b) a tool call is building up -> the buffer signals "pending"
+            #   (c) the call is complete -> the driver executes it; reset the
+            #       buffer and keep reading (a stream may hold several calls)
+            buf = LLMStreamBuffer()
+            console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
 
-            if response.messages:
-                messages.extend(response.messages)
+            content = ""
+            ran_a_tool = False
+            for chunk in stream:  # type: ignore[union-attr]
+                text = buf.add(chunk)
+                response = streamer.process_llm_response(buf.as_dict(), streaming=True)
 
-            if response.call_executed:
-                if debug:
-                    console.print("[dim]Tool executed -- streaming next LLM turn...[/dim]")
-                continue
+                if response.messages:                 # tool result -> back to the LLM
+                    messages.extend(response.messages)
+                if response.call_executed or response.call_failed:
+                    if debug:
+                        _print_debug_dr(response)
+                    ran_a_tool = True
+                    buf.reset()                       # (c) done with this call; find the next
+                elif response.call_pending:           # (b) a tool call is coming
+                    print(".", end="", flush=True)
+                elif text:                            # (a) content token
+                    content += text
+                    print(text, end="", flush=True)
+            print()
 
-            if response.call_failed:
-                if debug:
-                    console.print(f"[yellow]Tool call failed: {response.call_detail}[/yellow]")
-                continue
+            if ran_a_tool:
+                continue                              # tool ran -> next LLM turn
 
-            content = llm_out.get("content", "") or ""
+            # No tool call -> the stream was the final answer.
             messages.append({"role": "assistant", "content": content})
             break
         else:

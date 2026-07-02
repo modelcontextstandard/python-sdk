@@ -156,8 +156,14 @@ class TestProcessLlmResponse:
         assert resp.retry_prompt is not None
 
     def test_dict_input_handled(self, driver):
+        """A native OpenAI tool_calls dict is handled (not just str input)."""
         driver._execute_result = "ok"
-        resp = driver.process_llm_response({"tool": "add", "arguments": {"a": 1, "b": 2}})
+        resp = driver.process_llm_response({
+            "tool_calls": [{
+                "id": "c1", "type": "function",
+                "function": {"name": "add", "arguments": '{"a": 1, "b": 2}'},
+            }],
+        })
         assert resp.call_executed is True
 
     def test_name_alias_works(self, driver):

@@ -180,6 +180,10 @@ class DriverResponse:
     call_failed :
         ``True`` when a tool-call signature was found but could not be
         parsed or executed.
+    call_pending :
+        ``True`` -- only under ``streaming=True`` -- when the accumulated
+        output already looks like a tool call but is not yet complete. The
+        client should keep feeding chunks; nothing was executed.
     call_detail :
         Optional human-readable string explaining why the call failed
         (for debugging / logging).
@@ -197,6 +201,7 @@ class DriverResponse:
     tool_call_result: Any = None
     call_executed: bool = False
     call_failed: bool = False
+    call_pending: bool = False
     call_detail: str | None = None
     retry_prompt: str | None = None
     messages: list[dict[str, Any]] | None = field(default=None)
@@ -271,7 +276,7 @@ class MCSDriver(ABC):
         """
 
     @abstractmethod
-    def process_llm_response(self, llm_response: str | dict, *, streaming: bool = False) -> DriverResponse:  # noqa: D401
+    def process_llm_response(self, llm_response: str | dict) -> DriverResponse:  # noqa: D401
         """Parse the LLM output for a structured call. If found, execute it.
 
         The returned :class:`DriverResponse` tells the client what happened:
@@ -303,10 +308,12 @@ class MCSDriver(ABC):
             The raw content of the assistant message (``str``) or a
             structured native tool-call object (``dict``) for LLMs
             that emit tool calls as structured data rather than text.
-        streaming :
-            When ``True``, the driver knows it is receiving incremental
-            chunks.  It may skip expensive operations like self-healing
-            on intermediate chunks and only apply them on the final call.
+
+        For chunk-by-chunk streaming, use the ``SupportsStreaming``
+        capability -- it extends this method with a ``streaming`` flag
+        (reporting ``call_pending`` for an incomplete call) plus a
+        ``stream_buffer`` factory. The base contract itself stays
+        streaming-agnostic.
 
         Returns
         -------
