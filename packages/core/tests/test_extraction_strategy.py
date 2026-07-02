@@ -19,6 +19,7 @@ from mcs.driver.core import (
 )
 from mcs.driver.core.extraction_strategy import (
     ExtractionStrategy,
+    ExtractedCall,
     TextExtractionStrategy,
     OpenAICompletionExtractionStrategy,
 )
@@ -79,21 +80,19 @@ class TestTextExtractionStrategy:
     def test_extracts_json_from_text(self):
         text = 'Sure! {"tool": "greet", "arguments": {"name": "Alice"}}'
         result = self.strategy.extract(text)
-        assert result is not None
-        assert result[0] == "greet"
-        assert result[1] == {"name": "Alice"}
+        assert result == [ExtractedCall("greet", {"name": "Alice"})]
 
-    def test_returns_none_for_dict_input(self):
-        assert self.strategy.extract({"tool": "greet"}) is None
+    def test_returns_empty_for_dict_input(self):
+        assert self.strategy.extract({"tool": "greet"}) == []
 
-    def test_returns_none_for_no_json(self):
-        assert self.strategy.extract("Just a regular message.") is None
+    def test_returns_empty_for_no_json(self):
+        assert self.strategy.extract("Just a regular message.") == []
 
-    def test_returns_none_for_invalid_json(self):
-        assert self.strategy.extract("Here: {broken json}}") is None
+    def test_returns_empty_for_invalid_json(self):
+        assert self.strategy.extract("Here: {broken json}}") == []
 
-    def test_returns_none_for_json_without_tool(self):
-        assert self.strategy.extract('{"foo": "bar"}') is None
+    def test_returns_empty_for_json_without_tool(self):
+        assert self.strategy.extract('{"foo": "bar"}') == []
 
 
 # -- OpenAICompletionExtractionStrategy -------------------------------------------------
@@ -113,7 +112,7 @@ class TestOpenAICompletionExtractionStrategy:
             }],
         }
         result = self.strategy.extract(payload)
-        assert result == ("greet", {"name": "Dana"})
+        assert result == [ExtractedCall("greet", {"name": "Dana"}, id="call_123")]
 
     def test_handles_dict_arguments(self):
         payload = {
@@ -125,29 +124,42 @@ class TestOpenAICompletionExtractionStrategy:
             }],
         }
         result = self.strategy.extract(payload)
-        assert result == ("greet", {"name": "Eve"})
+        assert result == [ExtractedCall("greet", {"name": "Eve"})]
 
-    def test_returns_none_for_str_input(self):
-        assert self.strategy.extract("not a dict") is None
+    def test_extracts_all_parallel_calls(self):
+        """A native batch yields one ExtractedCall per tool_call, in order."""
+        payload = {
+            "tool_calls": [
+                {"id": "c1", "function": {"name": "greet", "arguments": '{"name": "A"}'}},
+                {"id": "c2", "function": {"name": "greet", "arguments": '{"name": "B"}'}},
+            ],
+        }
+        assert self.strategy.extract(payload) == [
+            ExtractedCall("greet", {"name": "A"}, id="c1"),
+            ExtractedCall("greet", {"name": "B"}, id="c2"),
+        ]
 
-    def test_returns_none_for_missing_tool_calls(self):
-        assert self.strategy.extract({"content": "hello"}) is None
+    def test_returns_empty_for_str_input(self):
+        assert self.strategy.extract("not a dict") == []
 
-    def test_returns_none_for_empty_tool_calls(self):
-        assert self.strategy.extract({"tool_calls": []}) is None
+    def test_returns_empty_for_missing_tool_calls(self):
+        assert self.strategy.extract({"content": "hello"}) == []
 
-    def test_returns_none_for_missing_function(self):
-        assert self.strategy.extract({"tool_calls": [{"id": "x"}]}) is None
+    def test_returns_empty_for_empty_tool_calls(self):
+        assert self.strategy.extract({"tool_calls": []}) == []
 
-    def test_returns_none_for_missing_name(self):
+    def test_returns_empty_for_missing_function(self):
+        assert self.strategy.extract({"tool_calls": [{"id": "x"}]}) == []
+
+    def test_returns_empty_for_missing_name(self):
         payload = {"tool_calls": [{"function": {"arguments": "{}"}}]}
-        assert self.strategy.extract(payload) is None
+        assert self.strategy.extract(payload) == []
 
-    def test_incomplete_or_broken_arguments_return_none(self):
-        """Non-empty but unparseable arguments -> None (incomplete/broken call).
+    def test_incomplete_or_broken_arguments_are_omitted(self):
+        """Non-empty but unparseable arguments -> the call is omitted (not runnable).
 
-        Lets the driver report INCOMPLETE: keep buffering while streaming, or
-        skip/heal otherwise, rather than executing with silently-dropped args.
+        Lets the driver keep buffering while streaming, or skip/heal otherwise,
+        rather than executing with silently-dropped args.
         """
         payload = {
             "tool_calls": [{
@@ -157,10 +169,10 @@ class TestOpenAICompletionExtractionStrategy:
                 },
             }],
         }
-        assert self.strategy.extract(payload) is None
+        assert self.strategy.extract(payload) == []
 
-    def test_returns_none_for_direct_dict_format(self):
-        assert self.strategy.extract({"tool": "greet", "arguments": {}}) is None
+    def test_returns_empty_for_direct_dict_format(self):
+        assert self.strategy.extract({"tool": "greet", "arguments": {}}) == []
 
 
 # -- BaseDriver extraction chain ----------------------------------------------
@@ -259,7 +271,7 @@ class TestCustomExtractionStrategy:
                 return True
 
             def extract(self, llm_response):
-                return ("greet", {"name": "Custom"})
+                return [ExtractedCall("greet", {"name": "Custom"})]
 
         driver = SimpleBaseDriver(
             _extraction_strategies=[AlwaysGreetStrategy()],

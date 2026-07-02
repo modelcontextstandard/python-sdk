@@ -18,6 +18,7 @@ from typing import Any
 from mcs.driver.core import (
     BaseDriver,
     LLMStreamBuffer,
+    ExtractedCall,
     OpenAICompletionExtractionStrategy,
     OpenAIResponseExtractionStrategy,
     AnthropicExtractionStrategy,
@@ -47,6 +48,18 @@ class EchoDriver(BaseDriver):
 
     def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         return {"sent": tool_name, "args": arguments}
+
+
+class FailingDriver(BaseDriver):
+    """Owns ``send_mail`` but its execution always raises."""
+
+    meta: DriverMeta = _Meta()
+
+    def list_tools(self) -> list[Tool]:
+        return [Tool("send_mail", description="Send a mail")]
+
+    def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        raise RuntimeError("smtp down")
 
 
 _CANONICAL = OpenAICompletionExtractionStrategy()  # the shared extractor
@@ -95,7 +108,9 @@ class TestOpenAIResponses:
         buf = LLMStreamBuffer()
         buf.add(_resp_item_added("send_mail", "call_1"))
         buf.add(_resp_args_delta('{"to": "a@b.c"}'))
-        assert _CANONICAL.extract(buf.as_dict()) == ("send_mail", {"to": "a@b.c"})
+        assert _CANONICAL.extract(buf.as_dict()) == [
+            ExtractedCall("send_mail", {"to": "a@b.c"}, id="call_1")
+        ]
 
     def test_executes_via_driver(self):
         driver = EchoDriver()
@@ -168,7 +183,9 @@ class TestAnthropic:
         buf = LLMStreamBuffer()
         buf.add(_anthropic_block_start("send_mail", "toolu_1"))
         buf.add(_anthropic_json_delta('{"to": "a@b.c"}'))
-        assert _CANONICAL.extract(buf.as_dict()) == ("send_mail", {"to": "a@b.c"})
+        assert _CANONICAL.extract(buf.as_dict()) == [
+            ExtractedCall("send_mail", {"to": "a@b.c"}, id="toolu_1")
+        ]
 
     def test_executes_via_driver(self):
         driver = EchoDriver()
@@ -362,8 +379,12 @@ class TestParallelCalls:
         assert dr.executed_calls[0].result is not None
         assert dr.executed_calls[0].error is None
 
-    def test_partial_failure(self):
-        """One unknown tool in the batch -> call_failed, but every id still answered."""
+    def test_foreign_tool_in_batch_is_ignored(self):
+        """A tool this driver does not own is left untouched -- never errored.
+
+        In a client's list of drivers another driver may own it (fan-out). Only the
+        driver's own call runs, is reported, and is echoed + answered; the foreign
+        call leaves no record and no dangling id in *this* driver's history."""
         driver = EchoDriver()
         buf = LLMStreamBuffer()
         buf.add({"choices": [{"delta": {"content": None, "tool_calls": [
@@ -374,11 +395,24 @@ class TestParallelCalls:
         ]}, "finish_reason": "tool_calls"}]})
         dr = driver.process_llm_response(buf)
         assert dr.call_executed is True
+        assert dr.call_failed is False                        # nothing the driver ran failed
+        assert [r.name for r in dr.executed_calls] == ["send_mail"]   # only its own
+        # only the owned call is echoed and answered -- the foreign id is not ours
+        assert [tc["id"] for tc in dr.messages[0]["tool_calls"]] == ["call_1"]
+        assert [m["tool_call_id"] for m in dr.messages[1:]] == ["call_1"]
+
+    def test_own_tool_error_still_answers_its_id(self):
+        """When the driver's *own* tool raises, the batch fails but the call is still
+        answered by id -- the error rides back as the tool result for self-heal."""
+        driver = FailingDriver()
+        buf = LLMStreamBuffer()
+        buf.add(_oai_tool_chunk("call_9", "send_mail", "{}"))
+        dr = driver.process_llm_response(buf)
         assert dr.call_failed is True
-        assert dr.executed_calls[0].error is None
-        assert dr.executed_calls[1].error is not None
-        # every tool_call still gets a tool result -- no dangling id (OpenAI 400)
-        assert [m["tool_call_id"] for m in dr.messages[1:]] == ["call_1", "call_2"]
+        assert dr.call_executed is False                      # nothing succeeded
+        assert dr.executed_calls[0].error is not None
+        assert dr.messages[1]["tool_call_id"] == "call_9"
+        assert "smtp down" in dr.messages[1]["content"]
 
 
 class TestFormatIsolation:

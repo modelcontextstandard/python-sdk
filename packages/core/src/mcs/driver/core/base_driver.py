@@ -21,6 +21,7 @@ from .mcs_tool_driver_interface import MCSToolDriver, Tool
 from .prompt_strategy import PromptStrategy, UnknownToolBehavior
 from .extraction_strategy import (
     ExtractionStrategy,
+    ExtractedCall,
     TextExtractionStrategy,
     OpenAICompletionExtractionStrategy,
 )
@@ -30,12 +31,6 @@ from .mixins.native_tools import SupportsNativeTools, NativeToolContext
 from .mixins.streaming import SupportsStreaming
 
 logger = logging.getLogger(__name__)
-
-#: Sentinel returned by ``_extract`` when a strategy claimed the response's
-#: format but no complete tool call could be parsed (yet). Distinct from
-#: ``None`` (= no tool call at all) -- the difference is what lets streaming
-#: tell "keep buffering" from "plain text".
-_INCOMPLETE: object = object()
 
 
 class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreaming):
@@ -102,222 +97,158 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
     ) -> DriverResponse:
         # The *type* is the streaming signal: an LLMStreamBuffer means mid-stream
         # (only a stream-aware driver ever sees one); str | dict is the base path.
+        # Both converge on _execute_tools -- the driver only ever asks "is there a
+        # call here that is mine to run?"; the ExtractionStrategy owns the format.
         if isinstance(llm_response, LLMStreamBuffer):
             return self._process_stream(llm_response)
-
-        parsed = self._extract(llm_response)
-        if parsed is _INCOMPLETE or parsed is None:
-            # Non-streaming: an incomplete/absent call is simply "no call".
-            return DriverResponse()
-
-        assert isinstance(parsed, tuple)   # narrowed: not _INCOMPLETE, not None
-        tool_name, arguments = parsed
-        native_call = None
-        if isinstance(llm_response, dict) and llm_response.get("tool_calls"):
-            native_call = llm_response["tool_calls"][0]
-        return self._run_tool(
-            tool_name, arguments, self._llm_text(llm_response), native_call=native_call,
-        )
+        return self._process_message(llm_response)
 
     # -- Streaming --------------------------------------------------------------
 
     def _process_stream(self, buf: LLMStreamBuffer) -> DriverResponse:
-        """Process the accumulated stream so far; do the "magic" on the buffer.
+        """Gate execution on the stream's completion, then run the uniform path.
 
-        Native tool calls are **batched**: a provider may emit several in parallel
-        (``tool_calls[0..n]``), and we only know the batch is complete at the
+        A native batch may carry several parallel calls that only complete at the
         turn's DONE signal (``buf.is_finished()`` -- ``finish_reason`` /
-        ``response.completed`` / ``message_stop``). So while the turn streams we
-        report ``call_pending``; once finished we execute **all** the calls at once
-        and feed each result back by its ``tool_call_id``. Executing ``[0]`` early
-        (before the siblings arrive) is exactly what stranded the parallel calls.
+        ``response.completed`` / ``message_stop``); until then any forming call is
+        reported as ``call_pending`` -- executing early strands the siblings still
+        streaming. A text-embedded call has no batch and runs as soon as the codec
+        parses it. Both distinctions live in the *strategy* (``is_forming`` /
+        ``extract``), not in a native-vs-text branch here. Display stays with the
+        buffer -- the client reads ``buf.text()``.
 
-        A text-embedded call is single and resolves as soon as the codec parses it.
-        Display stays with the buffer -- the client reads ``buf.text()``.
+        The pending gate is the one thing streaming adds over the base path; the
+        resolved strategy is then reused for :meth:`_execute_tools`, so this path --
+        like the non-streaming one -- resolves exactly once.
         """
-        if buf.has_tool_call():
-            if not buf.is_finished():
-                return DriverResponse(call_pending=True)   # batch still forming
-            return self._run_native_batch(buf)
-
-        # No native tool_calls: a text-embedded call (or plain text).
-        parsed = self._extract(buf.as_dict())
-        if parsed is _INCOMPLETE:
-            return DriverResponse(call_pending=True)
-        if parsed is None:
+        message = buf.as_dict()
+        strategy = self._chain.resolve(message) or self._chain.text_fallback
+        if strategy is None:
             return DriverResponse()
+        if strategy.is_forming(message) and not buf.is_finished():
+            return DriverResponse(call_pending=True)
 
-        assert isinstance(parsed, tuple)
-        tool_name, arguments = parsed
-        dr = self._run_tool(tool_name, arguments, buf.get_content() or "")
+        dr = self._execute_tools(strategy, message)
         if dr.call_executed or dr.call_failed:
-            buf.reset()   # text call consumed -- clear to hunt for the next
+            buf.reset()   # call consumed -- clear to hunt for the next
         return dr
 
-    # -- Tool execution (shared by both paths) --------------------------------
+    # -- Tool execution (one uniform path for every format) -------------------
 
-    @staticmethod
-    def _llm_text(llm_response: str | dict) -> str:
-        if isinstance(llm_response, str):
-            return llm_response
-        return llm_response.get("content") or json.dumps(llm_response)
+    def _process_message(self, message: str | dict) -> DriverResponse:
+        """Non-streaming entry: resolve the owning strategy, then run its calls."""
+        strategy = self._chain.resolve(message) or self._chain.text_fallback
+        if strategy is None:
+            return DriverResponse()
+        return self._execute_tools(strategy, message)
 
-    def _run_tool(
-        self,
-        tool_name: str,
-        arguments: dict[str, Any],
-        llm_text: str,
-        *,
-        native_call: dict[str, Any] | None = None,
+    def _execute_tools(
+        self, strategy: ExtractionStrategy, message: str | dict,
     ) -> DriverResponse:
-        # ``native_call`` is the raw tool-call dict (with its ``id``) when the call
-        # came in native form. The result must then be fed back in native shape --
-        # an assistant message carrying the ``tool_calls`` and a ``role="tool"``
-        # result keyed by ``tool_call_id`` -- so the model sees its call answered
-        # (a ``system`` message with the raw text does not close a native call).
-        known = {t.name for t in self.list_tools()}
-        tc_id = (native_call or {}).get("id")
+        """Run the calls in *message* that are this driver's own; ignore the rest.
 
-        if tool_name not in known:
-            if self._strategy.unknown_tool_behavior == UnknownToolBehavior.RETRY_WITH_LIST:
-                available = ", ".join(sorted(known))
-                retry = self._strategy.retry_unknown_tool(tool_name, available)
-                detail = f"No matching tool '{tool_name}' found."
-                return DriverResponse(
-                    call_failed=True,
-                    call_detail=detail,
-                    retry_prompt=retry,
-                    messages=[
-                        {"role": "assistant", "content": llm_text},
-                        {"role": "system", "content": retry},
-                    ],
-                    executed_calls=[ToolCallRecord(
-                        name=tool_name, arguments=arguments, error=detail, tool_call_id=tc_id,
-                    )],
-                )
+        The driver knows only itself: it extracts every call the format carries,
+        keeps the ones it can run, and executes those. Calls it does not own are
+        left untouched -- silently, because another driver in the client's list may
+        own them (fan-out). The :class:`ExtractionStrategy` owns *how* the calls are
+        found and *how* the result history is shaped, so this method never branches
+        on native vs. text. *strategy* is passed in already resolved so each entry
+        point (streaming / non-streaming) resolves exactly once.
+        """
+        calls = strategy.extract(message)
+        if not calls:
             return DriverResponse()
 
-        logger.info("Executing tool: %s", tool_name)
+        known = {t.name for t in self.list_tools()}
+        mine = [c for c in calls if c.name in known]
+        if not mine:
+            return self._no_owned(calls, message)
 
-        try:
-            result = self.execute_tool(tool_name, arguments)
-            result_text = result if isinstance(result, str) else json.dumps(result)
-        except Exception as e:
-            retry = self._strategy.retry_execution_failed(tool_name, str(e))
-            detail = f"Tool '{tool_name}' failed: {e}"
+        records = [self._run_one(c) for c in mine]
+        failed = [r for r in records if r.error is not None]
+        return DriverResponse(
+            call_executed=any(r.error is None for r in records),
+            call_failed=bool(failed),
+            executed_calls=records,
+            messages=strategy.result_messages(message, records),
+            tool_call_result=self._back_compat_result(records),
+            retry_prompt=(
+                self._strategy.retry_execution_failed(failed[0].name, failed[0].error or "")
+                if failed else None
+            ),
+            call_detail=failed[0].error if failed else None,
+        )
+
+    def _no_owned(
+        self, calls: list[ExtractedCall], message: str | dict,
+    ) -> DriverResponse:
+        """No call was this driver's own.
+
+        Default (fan-out safe): stay silent -- the calls belong to no tool of ours,
+        so return an empty response and let another driver in the list handle them.
+        When the codec opts into ``RETRY_WITH_LIST`` (single-driver self-heal), nudge
+        the model with the tools it *does* have instead of ignoring the call.
+        """
+        if self._strategy.unknown_tool_behavior == UnknownToolBehavior.RETRY_WITH_LIST and calls:
+            bad = calls[0]
+            available = ", ".join(sorted(t.name for t in self.list_tools()))
+            retry = self._strategy.retry_unknown_tool(bad.name, available)
+            detail = f"No matching tool '{bad.name}' found."
             return DriverResponse(
                 call_failed=True,
                 call_detail=detail,
                 retry_prompt=retry,
                 messages=[
-                    {"role": "assistant", "content": llm_text},
+                    {"role": "assistant", "content": self._llm_text(message)},
                     {"role": "system", "content": retry},
                 ],
                 executed_calls=[ToolCallRecord(
-                    name=tool_name, arguments=arguments, error=detail, tool_call_id=tc_id,
+                    name=bad.name, arguments=bad.arguments, error=detail,
                 )],
             )
+        return DriverResponse()
 
-        if native_call is not None:
-            messages = [
-                {"role": "assistant", "content": None, "tool_calls": [native_call]},
-                {"role": "tool", "tool_call_id": tc_id, "content": result_text},
-            ]
-        else:
-            messages = [
-                {"role": "assistant", "content": llm_text},
-                {"role": "system", "content": result_text},
-            ]
+    def _run_one(self, call: ExtractedCall) -> ToolCallRecord:
+        """Execute one owned call; capture the outcome as a :class:`ToolCallRecord`.
 
-        return DriverResponse(
-            tool_call_result=result_text,
-            call_executed=True,
-            messages=messages,
-            executed_calls=[ToolCallRecord(
-                name=tool_name, arguments=arguments, result=result, tool_call_id=tc_id,
-            )],
-        )
-
-    def _run_native_batch(self, buf: LLMStreamBuffer) -> DriverResponse:
-        """Execute *all* native tool calls in the finished batch, native-shaped.
-
-        OpenAI requires a ``role="tool"`` result for **every** ``tool_call`` in the
-        assistant message, so each call gets one -- successes carry the result,
-        failures carry the error (the model self-heals from that). The assistant
-        message carries the whole ``tool_calls`` array; the buffer is cleared after.
+        A raised exception becomes ``record.error`` (it never propagates) -- the
+        model reads the error back through ``result_messages`` and self-heals.
         """
-        known = {t.name for t in self.list_tools()}
-        tool_calls = buf.get_tool_calls()
-
-        assistant_msg: dict[str, Any] = {
-            "role": "assistant",
-            "content": buf.get_content(),
-            "tool_calls": tool_calls,
-        }
-        tool_msgs: list[dict[str, Any]] = []
-        records: list[ToolCallRecord] = []
-        for tc in tool_calls:
-            record = self._exec_native_one(tc, known)
-            records.append(record)
-            content = record.error if record.error is not None else self._result_text(record.result)
-            tool_msgs.append(
-                {"role": "tool", "tool_call_id": record.tool_call_id, "content": content}
-            )
-
-        buf.reset()
-        return DriverResponse(
-            call_executed=True,
-            call_failed=any(r.error is not None for r in records),
-            messages=[assistant_msg, *tool_msgs],
-            executed_calls=records,
-            tool_call_result=(  # back-compat: first result, or the list
-                records[0].result if len(records) == 1 else [r.result for r in records]
-            ),
-        )
-
-    def _exec_native_one(self, tc: dict[str, Any], known: set[str]) -> ToolCallRecord:
-        """Run one native tool call; return a :class:`ToolCallRecord`.
-
-        Native errors are carried on the record (and become that call's tool-result
-        content) -- the model reads them and self-heals; no client-side retry prompt.
-        """
-        fn = tc.get("function") or {}
-        name = fn.get("name") or ""
-        tc_id = tc.get("id")
-
-        arguments, parse_error = self._parse_args(fn.get("arguments", "{}"))
-        if parse_error is not None:
-            return ToolCallRecord(name=name, arguments={}, error=parse_error, tool_call_id=tc_id)
-        if not name or name not in known:
-            return ToolCallRecord(
-                name=name, arguments=arguments,
-                error=f"No matching tool '{name}'.", tool_call_id=tc_id,
-            )
-
-        logger.info("Executing tool: %s", name)
+        logger.info("Executing tool: %s", call.name)
         try:
-            result = self.execute_tool(name, arguments)
-            return ToolCallRecord(name=name, arguments=arguments, result=result, tool_call_id=tc_id)
+            result = self.execute_tool(call.name, call.arguments)
+            return ToolCallRecord(
+                name=call.name, arguments=call.arguments,
+                result=result, tool_call_id=call.id,
+            )
         except Exception as e:
             return ToolCallRecord(
-                name=name, arguments=arguments,
-                error=f"Tool '{name}' failed: {e}", tool_call_id=tc_id,
+                name=call.name, arguments=call.arguments,
+                error=f"Tool '{call.name}' failed: {e}", tool_call_id=call.id,
             )
 
+    # -- Back-compat / helpers ------------------------------------------------
+
     @staticmethod
-    def _parse_args(raw: Any) -> tuple[dict[str, Any], str | None]:
-        """Return ``(arguments, error)`` -- parse a JSON-string / dict argument blob."""
-        if isinstance(raw, dict):
-            return raw, None
-        if isinstance(raw, str):
-            stripped = raw.strip()
-            if not stripped:
-                return {}, None
-            try:
-                return json.loads(stripped), None
-            except json.JSONDecodeError:
-                return {}, "Could not parse arguments."
-        return {}, None
+    def _llm_text(message: str | dict) -> str:
+        """The assistant-visible text of a message, for a retry echo."""
+        if isinstance(message, str):
+            return message
+        return message.get("content") or json.dumps(message)
+
+    @staticmethod
+    def _back_compat_result(records: list[ToolCallRecord]) -> Any:
+        """Legacy ``tool_call_result`` (superseded by ``executed_calls``).
+
+        One successful call -> its result as text; several -> the raw list; ``None``
+        when nothing ran successfully. Kept because existing examples still read it.
+        """
+        successes = [r for r in records if r.error is None]
+        if not successes:
+            return None
+        if len(successes) == 1:
+            return BaseDriver._result_text(successes[0].result)
+        return [r.result for r in successes]
 
     @staticmethod
     def _result_text(result: Any) -> str:
@@ -379,27 +310,3 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         """Return tools as native API dicts via the active ``PromptStrategy``."""
         schemas = json.loads(self._strategy.format_tools(self.list_tools()))["tools"]
         return [{"type": "function", "function": s} for s in schemas]
-
-    # -- Extraction chain -----------------------------------------------------
-
-    def _extract(
-        self, llm_response: str | dict,
-    ) -> tuple[str, dict[str, Any]] | object | None:
-        """Resolve the owning strategy via the chain, then extract.
-
-        :class:`ExtractionChain` finds the strategy whose *shape* matches
-        (``recognizes``) and caches it; this driver then calls ``extract``
-        on the winner.  A recognised strategy that yields no complete call
-        returns :data:`_INCOMPLETE` -- distinct from ``None`` (no call at
-        all) -- so streaming can tell "keep buffering" from "plain text".
-        When nothing claims the shape, the chain's text fallback is used.
-        """
-        strategy = self._chain.resolve(llm_response)
-        if strategy is not None:
-            result = strategy.extract(llm_response)
-            return result if result is not None else _INCOMPLETE
-
-        fallback = self._chain.text_fallback
-        if fallback is not None:
-            return fallback.extract(llm_response)
-        return None

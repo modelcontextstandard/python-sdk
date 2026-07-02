@@ -8,6 +8,7 @@ from .llm_stream_buffer import LLMStreamBuffer
 from .prompt_strategy import PromptStrategy, JsonPromptStrategy, UnknownToolBehavior
 from .extraction_strategy import (
     ExtractionStrategy,
+    ExtractedCall,
     TextExtractionStrategy,
     OpenAICompletionExtractionStrategy,
     OpenAIResponseExtractionStrategy,
@@ -26,7 +27,7 @@ __all__ = [
     "Tool", "ToolParameter", "MCSToolDriver",
     "BaseDriver", "BaseDecorator", "LLMStreamBuffer",
     "PromptStrategy", "JsonPromptStrategy", "UnknownToolBehavior",
-    "ExtractionStrategy", "TextExtractionStrategy",
+    "ExtractionStrategy", "ExtractedCall", "TextExtractionStrategy",
     "OpenAICompletionExtractionStrategy", "OpenAIResponseExtractionStrategy",
     "AnthropicExtractionStrategy", "ExtractionChain",
     "SupportsHealthcheck", "HealthCheckResult", "HealthStatus",
