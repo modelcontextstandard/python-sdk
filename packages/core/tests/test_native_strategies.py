@@ -349,6 +349,37 @@ class TestParallelCalls:
         assert dr.call_pending is True
         assert dr.call_executed is False
 
+    def test_executed_calls_report(self):
+        """executed_calls carries a per-call record for the client."""
+        driver = EchoDriver()
+        buf = LLMStreamBuffer()
+        buf.add(_oai_parallel_chunk())
+        dr = driver.process_llm_response(buf)
+        assert dr.executed_calls is not None
+        assert [r.name for r in dr.executed_calls] == ["send_mail", "send_mail"]
+        assert [r.tool_call_id for r in dr.executed_calls] == ["call_1", "call_2"]
+        assert dr.executed_calls[0].arguments == {"to": "a@b.c"}
+        assert dr.executed_calls[0].result is not None
+        assert dr.executed_calls[0].error is None
+
+    def test_partial_failure(self):
+        """One unknown tool in the batch -> call_failed, but every id still answered."""
+        driver = EchoDriver()
+        buf = LLMStreamBuffer()
+        buf.add({"choices": [{"delta": {"content": None, "tool_calls": [
+            {"index": 0, "id": "call_1", "type": "function",
+             "function": {"name": "send_mail", "arguments": "{}"}},
+            {"index": 1, "id": "call_2", "type": "function",
+             "function": {"name": "nonexistent", "arguments": "{}"}},
+        ]}, "finish_reason": "tool_calls"}]})
+        dr = driver.process_llm_response(buf)
+        assert dr.call_executed is True
+        assert dr.call_failed is True
+        assert dr.executed_calls[0].error is None
+        assert dr.executed_calls[1].error is not None
+        # every tool_call still gets a tool result -- no dangling id (OpenAI 400)
+        assert [m["tool_call_id"] for m in dr.messages[1:]] == ["call_1", "call_2"]
+
 
 class TestFormatIsolation:
     """Each format's events are recognised only by its own strategy."""

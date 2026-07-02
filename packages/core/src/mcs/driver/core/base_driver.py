@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any
 
-from .mcs_driver_interface import MCSDriver, DriverMeta, DriverResponse
+from .mcs_driver_interface import MCSDriver, DriverMeta, DriverResponse, ToolCallRecord
 from .mcs_tool_driver_interface import MCSToolDriver, Tool
 from .prompt_strategy import PromptStrategy, UnknownToolBehavior
 from .extraction_strategy import (
@@ -176,18 +176,24 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         # result keyed by ``tool_call_id`` -- so the model sees its call answered
         # (a ``system`` message with the raw text does not close a native call).
         known = {t.name for t in self.list_tools()}
+        tc_id = (native_call or {}).get("id")
+
         if tool_name not in known:
             if self._strategy.unknown_tool_behavior == UnknownToolBehavior.RETRY_WITH_LIST:
                 available = ", ".join(sorted(known))
                 retry = self._strategy.retry_unknown_tool(tool_name, available)
+                detail = f"No matching tool '{tool_name}' found."
                 return DriverResponse(
                     call_failed=True,
-                    call_detail=f"No matching tool '{tool_name}' found.",
+                    call_detail=detail,
                     retry_prompt=retry,
                     messages=[
                         {"role": "assistant", "content": llm_text},
                         {"role": "system", "content": retry},
                     ],
+                    executed_calls=[ToolCallRecord(
+                        name=tool_name, arguments=arguments, error=detail, tool_call_id=tc_id,
+                    )],
                 )
             return DriverResponse()
 
@@ -198,20 +204,24 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
             result_text = result if isinstance(result, str) else json.dumps(result)
         except Exception as e:
             retry = self._strategy.retry_execution_failed(tool_name, str(e))
+            detail = f"Tool '{tool_name}' failed: {e}"
             return DriverResponse(
                 call_failed=True,
-                call_detail=f"Tool '{tool_name}' failed: {e}",
+                call_detail=detail,
                 retry_prompt=retry,
                 messages=[
                     {"role": "assistant", "content": llm_text},
                     {"role": "system", "content": retry},
                 ],
+                executed_calls=[ToolCallRecord(
+                    name=tool_name, arguments=arguments, error=detail, tool_call_id=tc_id,
+                )],
             )
 
         if native_call is not None:
             messages = [
                 {"role": "assistant", "content": None, "tool_calls": [native_call]},
-                {"role": "tool", "tool_call_id": native_call.get("id"), "content": result_text},
+                {"role": "tool", "tool_call_id": tc_id, "content": result_text},
             ]
         else:
             messages = [
@@ -223,6 +233,9 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
             tool_call_result=result_text,
             call_executed=True,
             messages=messages,
+            executed_calls=[ToolCallRecord(
+                name=tool_name, arguments=arguments, result=result, tool_call_id=tc_id,
+            )],
         )
 
     def _run_native_batch(self, buf: LLMStreamBuffer) -> DriverResponse:
@@ -242,48 +255,73 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
             "tool_calls": tool_calls,
         }
         tool_msgs: list[dict[str, Any]] = []
-        results: list[Any] = []
+        records: list[ToolCallRecord] = []
         for tc in tool_calls:
-            fn = tc.get("function") or {}
-            result_text = self._exec_native_one(fn.get("name"), fn.get("arguments", "{}"), known)
-            results.append(result_text)
+            record = self._exec_native_one(tc, known)
+            records.append(record)
+            content = record.error if record.error is not None else self._result_text(record.result)
             tool_msgs.append(
-                {"role": "tool", "tool_call_id": tc.get("id"), "content": result_text}
+                {"role": "tool", "tool_call_id": record.tool_call_id, "content": content}
             )
 
         buf.reset()
         return DriverResponse(
-            tool_call_result=results[0] if len(results) == 1 else results,
             call_executed=True,
+            call_failed=any(r.error is not None for r in records),
             messages=[assistant_msg, *tool_msgs],
+            executed_calls=records,
+            tool_call_result=(  # back-compat: first result, or the list
+                records[0].result if len(records) == 1 else [r.result for r in records]
+            ),
         )
 
-    def _exec_native_one(self, name: str | None, raw_args: Any, known: set[str]) -> str:
-        """Run one native call; return the result text, or an error string.
+    def _exec_native_one(self, tc: dict[str, Any], known: set[str]) -> ToolCallRecord:
+        """Run one native tool call; return a :class:`ToolCallRecord`.
 
-        Native errors go back as the *tool result* content -- the model reads them
-        and decides what to do (no client-side retry prompt).
+        Native errors are carried on the record (and become that call's tool-result
+        content) -- the model reads them and self-heals; no client-side retry prompt.
         """
-        if not name or name not in known:
-            return f"Error: no matching tool '{name}'."
+        fn = tc.get("function") or {}
+        name = fn.get("name") or ""
+        tc_id = tc.get("id")
 
-        arguments = raw_args
-        if isinstance(arguments, str):
-            stripped = arguments.strip()
-            if not stripped:
-                arguments = {}
-            else:
-                try:
-                    arguments = json.loads(stripped)
-                except json.JSONDecodeError:
-                    return f"Error: could not parse arguments for tool '{name}'."
+        arguments, parse_error = self._parse_args(fn.get("arguments", "{}"))
+        if parse_error is not None:
+            return ToolCallRecord(name=name, arguments={}, error=parse_error, tool_call_id=tc_id)
+        if not name or name not in known:
+            return ToolCallRecord(
+                name=name, arguments=arguments,
+                error=f"No matching tool '{name}'.", tool_call_id=tc_id,
+            )
 
         logger.info("Executing tool: %s", name)
         try:
             result = self.execute_tool(name, arguments)
-            return result if isinstance(result, str) else json.dumps(result)
+            return ToolCallRecord(name=name, arguments=arguments, result=result, tool_call_id=tc_id)
         except Exception as e:
-            return f"Error: tool '{name}' failed: {e}"
+            return ToolCallRecord(
+                name=name, arguments=arguments,
+                error=f"Tool '{name}' failed: {e}", tool_call_id=tc_id,
+            )
+
+    @staticmethod
+    def _parse_args(raw: Any) -> tuple[dict[str, Any], str | None]:
+        """Return ``(arguments, error)`` -- parse a JSON-string / dict argument blob."""
+        if isinstance(raw, dict):
+            return raw, None
+        if isinstance(raw, str):
+            stripped = raw.strip()
+            if not stripped:
+                return {}, None
+            try:
+                return json.loads(stripped), None
+            except json.JSONDecodeError:
+                return {}, "Could not parse arguments."
+        return {}, None
+
+    @staticmethod
+    def _result_text(result: Any) -> str:
+        return result if isinstance(result, str) else json.dumps(result)
 
     # -- SupportsNativeTools implementation ------------------------------------
 

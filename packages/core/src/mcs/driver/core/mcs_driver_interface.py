@@ -162,6 +162,24 @@ class DriverMeta:
 
 
 @dataclass
+class ToolCallRecord:
+    """What the driver did for one tool call -- for client observability / UX.
+
+    The client *displays* this (which tool ran, with what arguments, what came
+    back); control flow stays on the :class:`DriverResponse` status flags. One
+    record is produced for **every** call the driver processed this response --
+    ``result`` on success, ``error`` on failure. This keeps the two concerns
+    separate: ``messages`` is for the LLM (native history, opaque), while
+    ``executed_calls`` is the readable, per-call report for the client.
+    """
+    name: str
+    arguments: dict[str, Any]
+    result: Any = None
+    error: str | None = None
+    tool_call_id: str | None = None
+
+
+@dataclass
 class DriverResponse:
     """Self-contained result of a single ``process_llm_response`` call.
 
@@ -171,22 +189,27 @@ class DriverResponse:
 
     Attributes
     ----------
-    tool_call_result :
-        Raw output of the executed tool operation.  Only meaningful when
-        ``call_executed`` is ``True``.  ``None`` when no call was detected
-        or when the call failed.
+    executed_calls :
+        Per-call report (:class:`ToolCallRecord` list) for client observability
+        -- which tools ran, with what arguments, what came back (result or error).
+        This is the readable surface for UX; the client displays it and never
+        drives control flow from it. One record per call the driver processed
+        (a batch may hold several parallel calls).
     call_executed :
-        ``True`` when a tool call was found and successfully executed.
+        ``True`` once the driver executed the call(s) -- regardless of how many,
+        and regardless of whether some of them failed.
     call_failed :
-        ``True`` when a tool-call signature was found but could not be
-        parsed or executed.
+        ``True`` when **any** processed call failed (unknown tool, bad arguments,
+        execution error). May be ``True`` **together with** ``call_executed`` for a
+        partially-successful batch; the per-call detail is in ``executed_calls``.
     call_pending :
-        ``True`` -- only under ``streaming=True`` -- when the accumulated
-        output already looks like a tool call but is not yet complete. The
-        client should keep feeding chunks; nothing was executed.
+        ``True`` while a call is still forming in the stream (the batch is not yet
+        complete). The client keeps feeding chunks; nothing was executed.
+    tool_call_result :
+        *Superseded by* ``executed_calls`` (kept for back-compat). Raw output of the
+        first/only executed call.
     call_detail :
-        Optional human-readable string explaining why the call failed
-        (for debugging / logging).
+        *Superseded by* ``ToolCallRecord.error`` (kept for back-compat).
     retry_prompt :
         Driver-authored prompt hint that the client can append to the
         conversation so the LLM can correct its output and retry.
@@ -210,6 +233,7 @@ class DriverResponse:
     call_detail: str | None = None
     retry_prompt: str | None = None
     messages: list[dict[str, Any]] | None = field(default=None)
+    executed_calls: list[ToolCallRecord] | None = field(default=None)
 
 
 class MCSDriver(ABC):

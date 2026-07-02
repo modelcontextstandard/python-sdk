@@ -96,13 +96,15 @@ def _stream_one_turn(
 
 def _print_debug_dr(dr: DriverResponse) -> None:
     parts = [f"call_executed={dr.call_executed}  call_failed={dr.call_failed}"]
-    if dr.call_detail:
-        parts.append(f"detail: {dr.call_detail}")
-    if dr.tool_call_result is not None:
-        r = str(dr.tool_call_result)
-        if len(r) > 200:
-            r = r[:197] + "..."
-        parts.append(f"tool_call_result: {r}")
+    # executed_calls is the per-call report -- one line each, so a parallel batch
+    # is readable (name, args, result/error) instead of one raw blob.
+    for rec in dr.executed_calls or []:
+        if rec.error:
+            outcome = f"[red]error:[/red] {rec.error}"
+        else:
+            r = str(rec.result)
+            outcome = "-> " + (r[:157] + "..." if len(r) > 160 else r)
+        parts.append(f"  • {rec.name}({rec.arguments}) {outcome}")
     if dr.retry_prompt:
         parts.append(f"retry_prompt: {dr.retry_prompt}")
     console.print(Panel("\n".join(parts), title="DriverResponse", border_style="dim"))
