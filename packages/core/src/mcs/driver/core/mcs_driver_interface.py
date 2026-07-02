@@ -197,6 +197,11 @@ class DriverResponse:
         with the original LLM output, followed by a tool-result message).
         ``None`` when no messages need to be appended (e.g. final answer
         with no tool call detected).
+
+    Streaming display is *not* on this object -- it is the buffer's concern:
+    after ``process_llm_response(buf)`` the client reads ``buf.text()``. The
+    driver only manipulates the buffer (holds a forming call) and reports status
+    here; display stays with the buffer, keeping the two concerns separate.
     """
     tool_call_result: Any = None
     call_executed: bool = False

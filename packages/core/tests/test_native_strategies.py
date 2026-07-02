@@ -102,7 +102,8 @@ class TestOpenAIResponses:
         buf = LLMStreamBuffer()
         buf.add(_resp_item_added("send_mail", "call_1"))
         buf.add(_resp_args_delta('{"to": "a@b.c"}'))
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        buf.add({"type": "response.completed"})     # batch done
+        dr = driver.process_llm_response(buf)
         assert dr.call_executed is True
 
     def test_is_finished_on_completed(self):
@@ -114,9 +115,9 @@ class TestOpenAIResponses:
 
     def test_text_delta_is_content(self):
         buf = LLMStreamBuffer()
-        assert buf.add(_resp_text_delta("Hel")) == "Hel"
+        buf.add(_resp_text_delta("Hel"))
         buf.add(_resp_text_delta("lo"))
-        assert buf.as_dict()["content"] == "Hello"
+        assert buf.get_content() == "Hello"
 
 
 # -- Anthropic fixtures -------------------------------------------------------
@@ -174,7 +175,8 @@ class TestAnthropic:
         buf = LLMStreamBuffer()
         buf.add(_anthropic_block_start("send_mail", "toolu_1"))
         buf.add(_anthropic_json_delta('{"to": "a@b.c"}'))
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        buf.add({"type": "message_stop"})           # batch done
+        dr = driver.process_llm_response(buf)
         assert dr.call_executed is True
 
     def test_is_finished_on_message_stop(self):
@@ -187,8 +189,8 @@ class TestAnthropic:
     def test_text_delta_is_content(self):
         buf = LLMStreamBuffer()
         buf.add({"type": "message_start"})
-        assert buf.add(_anthropic_text_delta("I'll check. ")) == "I'll check. "
-        assert buf.as_dict()["content"] == "I'll check. "
+        buf.add(_anthropic_text_delta("I'll check. "))
+        assert buf.get_content() == "I'll check. "
 
     def test_text_then_tool_interleaved(self):
         """Claude streams a text preamble, then a tool_use block."""
@@ -229,7 +231,7 @@ class TestTextEmbeddedToolCall:
         buf = LLMStreamBuffer()
         for frag in (self._CALL[:10], self._CALL[10:28], self._CALL[28:]):
             buf.add(_oai_content_chunk(frag))
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        dr = driver.process_llm_response(buf)
         assert dr.call_executed is True
 
     def test_partial_reads_as_plain_text_not_pending(self):
@@ -237,7 +239,7 @@ class TestTextEmbeddedToolCall:
         driver = EchoDriver()
         buf = LLMStreamBuffer()
         buf.add(_oai_content_chunk(self._CALL[:20]))     # incomplete JSON in content
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        dr = driver.process_llm_response(buf)
         assert dr.call_pending is False
         assert dr.call_executed is False
 
@@ -249,7 +251,7 @@ class TestTextEmbeddedToolCall:
         for frag in (call[:12], call[12:30], call[30:]):
             buf.add(_oai_content_chunk(frag))
         assert "tool_calls" not in buf.as_dict()
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        dr = driver.process_llm_response(buf)
         assert dr.call_executed is True
         assert dr.tool_call_result is not None
 
@@ -261,8 +263,91 @@ class TestTextEmbeddedToolCall:
                      '{"name": "send_mail", ',
                      '"arguments": {"to": "a@b.c"}}'):
             buf.add(_oai_content_chunk(frag))
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        dr = driver.process_llm_response(buf)
         assert dr.call_executed is True
+
+
+def _oai_tool_chunk(call_id: str, name: str, args: str) -> dict:
+    return {"choices": [{"delta": {"content": None, "tool_calls": [
+        {"index": 0, "id": call_id, "type": "function",
+         "function": {"name": name, "arguments": args}}]},
+        "finish_reason": "tool_calls"}]}   # single complete chunk -> batch done
+
+
+class TestNativeHistoryFormat:
+    """A native tool call must be fed back in native shape (assistant.tool_calls +
+    role='tool' result keyed by tool_call_id) so the model sees its call answered
+    -- a `system` message with the raw result does not close a native call."""
+
+    def test_native_call_uses_tool_role_and_call_id(self):
+        driver = EchoDriver()
+        buf = LLMStreamBuffer()
+        buf.add(_oai_tool_chunk("call_9", "send_mail", '{"to": "a@b.c"}'))
+        dr = driver.process_llm_response(buf)
+        assert dr.call_executed is True
+        assert dr.messages is not None
+        assistant, result = dr.messages
+        assert assistant["role"] == "assistant"
+        assert assistant["tool_calls"][0]["id"] == "call_9"
+        assert result["role"] == "tool"
+        assert result["tool_call_id"] == "call_9"
+
+    def test_text_embedded_call_keeps_simple_format(self):
+        """A text-embedded call has no native id -> the simple assistant/system pair."""
+        driver = EchoDriver()
+        buf = LLMStreamBuffer()
+        call = '{"name": "send_mail", "arguments": {"to": "a@b.c"}}'
+        for frag in (call[:20], call[20:]):
+            buf.add(_oai_content_chunk(frag))
+        dr = driver.process_llm_response(buf)
+        assert dr.call_executed is True
+        assert dr.messages is not None
+        _, result = dr.messages
+        assert result["role"] == "system"          # text path: no tool_call_id
+
+
+def _oai_parallel_chunk() -> dict:
+    """One chunk carrying two parallel tool calls + finish_reason (batch done)."""
+    return {"choices": [{"delta": {"content": None, "tool_calls": [
+        {"index": 0, "id": "call_1", "type": "function",
+         "function": {"name": "send_mail", "arguments": '{"to": "a@b.c"}'}},
+        {"index": 1, "id": "call_2", "type": "function",
+         "function": {"name": "send_mail", "arguments": '{"to": "x@y.z"}'}},
+    ]}, "finish_reason": "tool_calls"}]}
+
+
+class TestParallelCalls:
+    """OpenAI parallel calls: the whole batch executes at the DONE signal, and the
+    native history carries all tool_calls + one role='tool' result per id."""
+
+    def test_all_execute_with_native_history(self):
+        driver = EchoDriver()
+        buf = LLMStreamBuffer()
+        buf.add(_oai_parallel_chunk())
+        dr = driver.process_llm_response(buf)
+        assert dr.call_executed is True
+
+        assert dr.messages is not None
+        assistant = dr.messages[0]
+        assert assistant["role"] == "assistant"
+        assert [tc["id"] for tc in assistant["tool_calls"]] == ["call_1", "call_2"]
+
+        tool_results = dr.messages[1:]
+        assert all(m["role"] == "tool" for m in tool_results)
+        assert [m["tool_call_id"] for m in tool_results] == ["call_1", "call_2"]
+
+    def test_pending_until_the_batch_is_done(self):
+        """No early execute: a complete first call stays pending until finish."""
+        driver = EchoDriver()
+        buf = LLMStreamBuffer()
+        # First call fully streamed, but the turn is not finished yet.
+        buf.add(_oai_content_chunk(""))  # noop content to establish the OpenAI wire
+        buf.add({"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "call_1", "type": "function",
+             "function": {"name": "send_mail", "arguments": '{"to": "a@b.c"}'}}]}}]})
+        dr = driver.process_llm_response(buf)
+        assert dr.call_pending is True
+        assert dr.call_executed is False
 
 
 class TestFormatIsolation:

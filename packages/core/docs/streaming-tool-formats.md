@@ -255,6 +255,41 @@ Reference implementations if we add delimited start-detection: Ollama `tools.Par
 (release-if-not-a-call), vLLM `ToolParser.extract_tool_calls_streaming` (per-model marker
 catalog), llama.cpp PEG parser + JSON healer.
 
+### Planned: "Streaming interface v2" — driver-side hold/release, tool-name confirmed
+
+Target design (not built yet): the **streaming** `process_llm_response` takes the
+`LLMStreamBuffer` itself (not `as_dict()`); the buffer holds a **display cursor**
+(stream-state; driver stays stateless); the driver returns the **released text** in
+`DriverResponse.display_text`. The client loop becomes format-agnostic — identical for
+native and text-embedded calls — and just prints `display_text` + reacts to signals:
+
+Interface shape:
+- **No `streaming` flag** — the *type* is the signal. `MCSDriver.process_llm_response`
+  stays `(str | dict)` (streaming-agnostic); `SupportsStreaming` *widens* it to
+  `(str | dict | LLMStreamBuffer)`; a buffer argument means streaming. Liskov-safe
+  (contravariant input widening). Only a stream-aware driver knows the buffer type.
+- **Direct buffer API**, not `as_dict()`: `get_content() -> str|None`,
+  `get_tool_calls() -> list`, `has_tool_call()`, `is_finished()`, plus the display cursor
+  (`unshown()`, `release()`, `hold()`, `reset()`). `add(chunk)` returns nothing (display is
+  driver-managed via the cursor, not `add`'s return). `as_dict()` becomes internal (bridges
+  the buffer's fields to the `str|dict`-based `ExtractionStrategy`s, which also serve the
+  non-streaming path) or is dropped if `extract` is refactored onto direct fields.
+
+
+- content forms as a call (name pending/known) → **hold** (`display_text=""`, `call_pending`);
+- name resolves to a **known** tool → stay pending, accumulate args, **execute** (discard held);
+- name is **unknown** to the driver (or, in a chain, to *every* driver) → **release** as text;
+- `is_finished()` with an unresolved call → **flush** the held content as text.
+
+Chain: all drivers go pending initially; each releases when the name isn't its tool; the
+owner stays pending and executes (orchestrator aggregates — the proactive "union of tool
+names" guard). Graceful by design: a mis-configured client (no `tools`, model leaks) never
+fails — the call just runs the text path.
+
+**TODO (hardening):** a release heuristic for **malformed JSON** — a structural break / new
+control marker that cancels the "call forming" assumption, so a broken JSON never holds
+`pending` forever. Also: firewall reasoning (`<think>`) content from the forming-call scan.
+
 **False-positive guard (design intent, likely a later release).** Text that *resembles* a
 call but names a non-existent tool must **not** execute. Today: `unknown_tool_behavior` /
 `retry_unknown_tool` in `process_llm_response` (RETRY_WITH_LIST or ignore) when the name is

@@ -47,7 +47,7 @@ from mcs.driver.core import (
 
 console = Console()
 
-MAX_TOOL_ROUNDS = 10
+MAX_TOOL_ROUNDS = 4
 
 
 GITHUB_SPEC = (
@@ -161,33 +161,34 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
         for _round in range(MAX_TOOL_ROUNDS):
             stream = _stream_one_turn(model, messages, api_base, api_key, native_tools)
 
-            # Per chunk, exactly one of three things happens -- the buffer and
-            # driver decide which, the client never inspects the chunk:
-            #   (a) a content token -> print it live and keep the transcript
-            #   (b) a tool call is building up -> the buffer signals "pending"
-            #   (c) the call is complete -> the driver executes it; reset the
-            #       buffer and keep reading (a stream may hold several calls)
+            # The client is format-agnostic: feed the chunk, let the driver do its
+            # work on the buffer, then read what the buffer lets through. Native and
+            # text-embedded tool calls look identical from here -- the client never
+            # inspects the chunk. Per chunk, exactly one of:
+            #   (a) a content token -> buf.text() returns it -> print live
+            #   (b) a tool call is building up -> buf.text() is empty, call_pending
+            #   (c) the call is complete -> the driver executes it; reset and read on
             buf = LLMStreamBuffer()
             console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
 
             content = ""
             ran_a_tool = False
             for chunk in stream:  # type: ignore[union-attr]
-                text = buf.add(chunk)
-                response = streamer.process_llm_response(buf.as_dict(), streaming=True)
+                buf.add(chunk)
+                response = streamer.process_llm_response(buf)   # the buffer IS the signal
 
                 if response.messages:                 # tool result -> back to the LLM
                     messages.extend(response.messages)
-                if response.call_executed or response.call_failed:
-                    if debug:
-                        _print_debug_dr(response)
-                    ran_a_tool = True
-                    buf.reset()                       # (c) done with this call; find the next
-                elif response.call_pending:           # (b) a tool call is coming
-                    print(".", end="", flush=True)
-                elif text:                            # (a) content token
+                if (text := buf.text()):              # (a) what the driver let through
                     content += text
                     print(text, end="", flush=True)
+                elif response.call_pending:           # (b) a tool call is building up
+                    print(".", end="", flush=True)
+                if response.call_executed or response.call_failed:
+                    if debug:
+                        print()
+                        _print_debug_dr(response)
+                    ran_a_tool = True                 # (c) the driver already cleared the buffer
             print()
 
             if ran_a_tool:

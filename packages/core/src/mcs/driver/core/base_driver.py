@@ -25,6 +25,7 @@ from .extraction_strategy import (
     OpenAICompletionExtractionStrategy,
 )
 from .extraction_chain import ExtractionChain
+from .llm_stream_buffer import LLMStreamBuffer
 from .mixins.native_tools import SupportsNativeTools, NativeToolContext
 from .mixins.streaming import SupportsStreaming
 
@@ -97,27 +98,83 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         )
 
     def process_llm_response(
-        self, llm_response: str | dict, *, streaming: bool = False
+        self, llm_response: str | dict | LLMStreamBuffer,
     ) -> DriverResponse:
-        if isinstance(llm_response, str):
-            llm_text = llm_response
-        elif isinstance(llm_response, dict):
-            llm_text = llm_response.get("content") or json.dumps(llm_response)
-        else:
-            llm_text = str(llm_response)
+        # The *type* is the streaming signal: an LLMStreamBuffer means mid-stream
+        # (only a stream-aware driver ever sees one); str | dict is the base path.
+        if isinstance(llm_response, LLMStreamBuffer):
+            return self._process_stream(llm_response)
 
         parsed = self._extract(llm_response)
-        if parsed is _INCOMPLETE:
-            # A tool-call format was recognised but the call is not yet complete.
-            if streaming:
-                return DriverResponse(call_pending=True)   # keep feeding chunks
-            return DriverResponse()                        # non-streaming: treat as no call
-        if parsed is None:
+        if parsed is _INCOMPLETE or parsed is None:
+            # Non-streaming: an incomplete/absent call is simply "no call".
             return DriverResponse()
 
         assert isinstance(parsed, tuple)   # narrowed: not _INCOMPLETE, not None
         tool_name, arguments = parsed
+        native_call = None
+        if isinstance(llm_response, dict) and llm_response.get("tool_calls"):
+            native_call = llm_response["tool_calls"][0]
+        return self._run_tool(
+            tool_name, arguments, self._llm_text(llm_response), native_call=native_call,
+        )
 
+    # -- Streaming --------------------------------------------------------------
+
+    def _process_stream(self, buf: LLMStreamBuffer) -> DriverResponse:
+        """Process the accumulated stream so far; do the "magic" on the buffer.
+
+        Native tool calls are **batched**: a provider may emit several in parallel
+        (``tool_calls[0..n]``), and we only know the batch is complete at the
+        turn's DONE signal (``buf.is_finished()`` -- ``finish_reason`` /
+        ``response.completed`` / ``message_stop``). So while the turn streams we
+        report ``call_pending``; once finished we execute **all** the calls at once
+        and feed each result back by its ``tool_call_id``. Executing ``[0]`` early
+        (before the siblings arrive) is exactly what stranded the parallel calls.
+
+        A text-embedded call is single and resolves as soon as the codec parses it.
+        Display stays with the buffer -- the client reads ``buf.text()``.
+        """
+        if buf.has_tool_call():
+            if not buf.is_finished():
+                return DriverResponse(call_pending=True)   # batch still forming
+            return self._run_native_batch(buf)
+
+        # No native tool_calls: a text-embedded call (or plain text).
+        parsed = self._extract(buf.as_dict())
+        if parsed is _INCOMPLETE:
+            return DriverResponse(call_pending=True)
+        if parsed is None:
+            return DriverResponse()
+
+        assert isinstance(parsed, tuple)
+        tool_name, arguments = parsed
+        dr = self._run_tool(tool_name, arguments, buf.get_content() or "")
+        if dr.call_executed or dr.call_failed:
+            buf.reset()   # text call consumed -- clear to hunt for the next
+        return dr
+
+    # -- Tool execution (shared by both paths) --------------------------------
+
+    @staticmethod
+    def _llm_text(llm_response: str | dict) -> str:
+        if isinstance(llm_response, str):
+            return llm_response
+        return llm_response.get("content") or json.dumps(llm_response)
+
+    def _run_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        llm_text: str,
+        *,
+        native_call: dict[str, Any] | None = None,
+    ) -> DriverResponse:
+        # ``native_call`` is the raw tool-call dict (with its ``id``) when the call
+        # came in native form. The result must then be fed back in native shape --
+        # an assistant message carrying the ``tool_calls`` and a ``role="tool"``
+        # result keyed by ``tool_call_id`` -- so the model sees its call answered
+        # (a ``system`` message with the raw text does not close a native call).
         known = {t.name for t in self.list_tools()}
         if tool_name not in known:
             if self._strategy.unknown_tool_behavior == UnknownToolBehavior.RETRY_WITH_LIST:
@@ -151,14 +208,82 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
                 ],
             )
 
+        if native_call is not None:
+            messages = [
+                {"role": "assistant", "content": None, "tool_calls": [native_call]},
+                {"role": "tool", "tool_call_id": native_call.get("id"), "content": result_text},
+            ]
+        else:
+            messages = [
+                {"role": "assistant", "content": llm_text},
+                {"role": "system", "content": result_text},
+            ]
+
         return DriverResponse(
             tool_call_result=result_text,
             call_executed=True,
-            messages=[
-                {"role": "assistant", "content": llm_text},
-                {"role": "system", "content": result_text},
-            ],
+            messages=messages,
         )
+
+    def _run_native_batch(self, buf: LLMStreamBuffer) -> DriverResponse:
+        """Execute *all* native tool calls in the finished batch, native-shaped.
+
+        OpenAI requires a ``role="tool"`` result for **every** ``tool_call`` in the
+        assistant message, so each call gets one -- successes carry the result,
+        failures carry the error (the model self-heals from that). The assistant
+        message carries the whole ``tool_calls`` array; the buffer is cleared after.
+        """
+        known = {t.name for t in self.list_tools()}
+        tool_calls = buf.get_tool_calls()
+
+        assistant_msg: dict[str, Any] = {
+            "role": "assistant",
+            "content": buf.get_content(),
+            "tool_calls": tool_calls,
+        }
+        tool_msgs: list[dict[str, Any]] = []
+        results: list[Any] = []
+        for tc in tool_calls:
+            fn = tc.get("function") or {}
+            result_text = self._exec_native_one(fn.get("name"), fn.get("arguments", "{}"), known)
+            results.append(result_text)
+            tool_msgs.append(
+                {"role": "tool", "tool_call_id": tc.get("id"), "content": result_text}
+            )
+
+        buf.reset()
+        return DriverResponse(
+            tool_call_result=results[0] if len(results) == 1 else results,
+            call_executed=True,
+            messages=[assistant_msg, *tool_msgs],
+        )
+
+    def _exec_native_one(self, name: str | None, raw_args: Any, known: set[str]) -> str:
+        """Run one native call; return the result text, or an error string.
+
+        Native errors go back as the *tool result* content -- the model reads them
+        and decides what to do (no client-side retry prompt).
+        """
+        if not name or name not in known:
+            return f"Error: no matching tool '{name}'."
+
+        arguments = raw_args
+        if isinstance(arguments, str):
+            stripped = arguments.strip()
+            if not stripped:
+                arguments = {}
+            else:
+                try:
+                    arguments = json.loads(stripped)
+                except json.JSONDecodeError:
+                    return f"Error: could not parse arguments for tool '{name}'."
+
+        logger.info("Executing tool: %s", name)
+        try:
+            result = self.execute_tool(name, arguments)
+            return result if isinstance(result, str) else json.dumps(result)
+        except Exception as e:
+            return f"Error: tool '{name}' failed: {e}"
 
     # -- SupportsNativeTools implementation ------------------------------------
 

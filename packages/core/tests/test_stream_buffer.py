@@ -59,6 +59,12 @@ def _tool_chunk(index: int = 0, id: str | None = None,
     return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
 
 
+def _finish() -> SimpleNamespace:
+    """The terminal chunk: finish_reason marks the tool-call batch complete."""
+    delta = SimpleNamespace(content=None, tool_calls=None)
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason="tool_calls")])
+
+
 class TestLLMStreamBufferAccumulation:
 
     def test_content_deltas_concatenated(self):
@@ -102,7 +108,7 @@ class TestStreamingProcessLlmResponse:
         buf = LLMStreamBuffer()
         buf.add(_tool_chunk(0, id="c1", name="send_mail"))
         buf.add(_tool_chunk(0, args='{"to":'))          # partial, unparseable
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        dr = driver.process_llm_response(buf)
         assert dr.call_pending is True
         assert dr.call_executed is False
         assert dr.call_failed is False
@@ -117,7 +123,7 @@ class TestStreamingProcessLlmResponse:
         driver = EchoDriver()
         buf = LLMStreamBuffer()
         buf.add(_tool_chunk(0, id="c1", name="send_mail"))   # args stays ""
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        dr = driver.process_llm_response(buf)
         assert dr.call_pending is True
         assert dr.call_executed is False
 
@@ -126,7 +132,8 @@ class TestStreamingProcessLlmResponse:
         buf = LLMStreamBuffer()
         buf.add(_tool_chunk(0, id="c1", name="send_mail"))
         buf.add(_tool_chunk(0, args='{"to": "a@b.c"}'))
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        buf.add(_finish())                          # batch complete -> execute
+        dr = driver.process_llm_response(buf)
         assert dr.call_executed is True
         assert dr.call_pending is False
         assert dr.tool_call_result is not None
@@ -136,7 +143,8 @@ class TestStreamingProcessLlmResponse:
         driver = EchoDriver()
         buf = LLMStreamBuffer()
         buf.add(_tool_chunk(0, id="c1", name="send_mail", args="{}"))
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        buf.add(_finish())
+        dr = driver.process_llm_response(buf)
         assert dr.call_executed is True
 
     def test_plain_text_is_not_pending(self):
@@ -144,7 +152,7 @@ class TestStreamingProcessLlmResponse:
         driver = EchoDriver()
         buf = LLMStreamBuffer()
         buf.add(_content_chunk("Just a normal answer."))
-        dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+        dr = driver.process_llm_response(buf)
         assert dr.call_pending is False
         assert dr.call_executed is False
         assert dr.call_failed is False
@@ -155,22 +163,28 @@ class TestStreamingProcessLlmResponse:
         buf = LLMStreamBuffer()
         buf.add(_tool_chunk(0, id="c1", name="send_mail"))
         buf.add(_tool_chunk(0, args='{"to":'))
-        dr = driver.process_llm_response(buf.as_dict(), streaming=False)
+        dr = driver.process_llm_response(buf.as_dict())
         assert dr.call_pending is False
         assert dr.call_executed is False
 
     def test_full_streaming_loop(self):
-        """End-to-end: feed chunks one by one, pending until the last fragment."""
+        """End-to-end: feed chunks one by one; pending until the DONE signal.
+
+        A native call executes at the batch's completion (``finish_reason``), not
+        the moment its arguments happen to parse -- so a parallel sibling still
+        streaming is never stranded.
+        """
         driver = EchoDriver()
         buf = LLMStreamBuffer()
         fragments = [
-            _tool_chunk(0, id="c1", name="send_mail"),        # name only, args="" -> pending
+            _tool_chunk(0, id="c1", name="send_mail"),        # name only        -> pending
             _tool_chunk(0, args='{"to"'),                      # partial JSON     -> pending
-            _tool_chunk(0, args=': "a@b.c"}'),                 # complete          -> execute
+            _tool_chunk(0, args=': "a@b.c"}'),                 # complete, not done -> pending
+            _finish(),                                          # finish_reason    -> execute
         ]
         states = []
         for chunk in fragments:
             buf.add(chunk)
-            dr = driver.process_llm_response(buf.as_dict(), streaming=True)
+            dr = driver.process_llm_response(buf)
             states.append((dr.call_pending, dr.call_executed))
-        assert states == [(True, False), (True, False), (False, True)]
+        assert states == [(True, False), (True, False), (True, False), (False, True)]
