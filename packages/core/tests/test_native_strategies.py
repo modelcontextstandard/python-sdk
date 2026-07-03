@@ -225,13 +225,25 @@ def _oai_content_chunk(text: str) -> dict:
     return {"choices": [{"delta": {"content": text, "tool_calls": None}}]}
 
 
+def _feed(driver, buf, frags):
+    """Stream *frags* (content) chunk by chunk; return the response after the last.
+
+    A text-embedded call is self-delimited, so it resolves on the content chunk that
+    completes it -- no separate finish chunk needed (that is the native batch's gate)."""
+    dr = None
+    for frag in frags:
+        buf.add(_oai_content_chunk(frag))
+        dr = driver.process_llm_response(buf)
+    return dr
+
+
 class TestTextEmbeddedToolCall:
     """OpenAI models sometimes emit a tool call as JSON in `content`, not via native
     `tool_calls`. The buffer accumulates it as plain content (the wire is still
     OpenAI Completions); the driver's Text fallback (in its ExtractionChain)
-    extracts it -- so it executes end to end. Known gap: mid-stream there is no
-    `call_pending` for text mode; the partial JSON reads as plain content until it
-    parses."""
+    extracts it -- so it executes end to end. While it forms, the driver holds the
+    buffer (`call_pending`, `buf.text()` empty) so the raw JSON does not leak into
+    the display, then executes once the codec parses the complete call."""
 
     _CALL = '{"tool": "send_mail", "arguments": {"to": "a@b.c"}}'
 
@@ -246,29 +258,96 @@ class TestTextEmbeddedToolCall:
     def test_driver_text_fallback_executes_it(self):
         driver = EchoDriver()
         buf = LLMStreamBuffer()
-        for frag in (self._CALL[:10], self._CALL[10:28], self._CALL[28:]):
-            buf.add(_oai_content_chunk(frag))
-        dr = driver.process_llm_response(buf)
+        dr = _feed(driver, buf, (self._CALL[:10], self._CALL[10:28], self._CALL[28:]))
         assert dr.call_executed is True
 
-    def test_partial_reads_as_plain_text_not_pending(self):
-        """The current limitation: a forming text call is not `call_pending`."""
+    def test_partial_call_is_pending_and_held(self):
+        """A forming text call for a known tool is held: call_pending, and buf.text()
+        stays empty so the raw JSON never leaks into the display."""
         driver = EchoDriver()
         buf = LLMStreamBuffer()
-        buf.add(_oai_content_chunk(self._CALL[:20]))     # incomplete JSON in content
+        buf.add(_oai_content_chunk(self._CALL[:20]))     # {"tool": "send_mail" -- forming
+        dr = driver.process_llm_response(buf)
+        assert dr.call_pending is True
+        assert dr.call_executed is False
+        assert buf.text() == ""                           # held -- nothing leaks
+
+    def test_foreign_tool_flows_as_text(self):
+        """A text call naming a tool this driver does not own is released as text as
+        soon as the name is clear -- a model *explaining* a call, not one to run. It
+        is not held (short pending), not executed, not failed (SILENT default)."""
+        driver = EchoDriver()                             # owns only send_mail
+        buf = LLMStreamBuffer()
+        buf.add(_oai_content_chunk('{"tool": "other_tool"'))
+        dr = driver.process_llm_response(buf)
+        assert dr.call_pending is False                   # name known + not mine -> released
+        assert dr.call_executed is False
+        assert dr.call_failed is False
+        assert buf.text() == '{"tool": "other_tool"'      # flows as text
+
+    def test_fenced_call_is_held(self):
+        driver = EchoDriver()
+        buf = LLMStreamBuffer()
+        buf.add(_oai_content_chunk('```json\n{"tool": "send_mail"'))
+        dr = driver.process_llm_response(buf)
+        assert dr.call_pending is True
+        assert buf.text() == ""
+
+    def test_python_fence_is_not_held(self):
+        """A ```python block is display content, not a call -- it must flow."""
+        driver = EchoDriver()
+        buf = LLMStreamBuffer()
+        buf.add(_oai_content_chunk("```python\nprint("))
         dr = driver.process_llm_response(buf)
         assert dr.call_pending is False
-        assert dr.call_executed is False
+        assert buf.text() == "```python\nprint("
+
+    def test_forming_holds_then_executes_without_leaking(self):
+        """Chunk by chunk: held+pending while forming, executes on the chunk that
+        completes the call, and the raw JSON is never shown (reset discards it)."""
+        driver = EchoDriver()
+        buf = LLMStreamBuffer()
+        frags = [self._CALL[i:i + 12] for i in range(0, len(self._CALL), 12)]
+        shown, states = "", []
+        for f in frags:
+            buf.add(_oai_content_chunk(f))
+            dr = driver.process_llm_response(buf)
+            shown += buf.text()
+            states.append((dr.call_pending, dr.call_executed))
+        assert states[-1] == (False, True)                # last chunk completes -> executed
+        assert all(pending for pending, _ in states[:-1])  # all earlier: held/pending
+        assert shown == ""                                # nothing ever leaked
+
+    def test_text_then_call_then_text(self):
+        """One turn can stream text, then a tool call, then more text: both text spans
+        are shown, the call is executed (its JSON never shown), the result is fed back.
+
+        This is the interleaving the user saw live -- narration around a call in a
+        single stream. Eager execution runs the call the moment it completes and
+        ``reset``s, so the trailing text flows as fresh content afterwards."""
+        driver = EchoDriver()                              # owns send_mail
+        buf = LLMStreamBuffer()
+        shown, executed, messages = "", False, None
+        for c in ["I'll send it. ",                        # text BEFORE the call
+                  '{"tool": "send_mail", ',                # call forms (held)
+                  '"arguments": {"to": "a@b.c"}}',         # call completes -> execute
+                  " All done."]:                           # text AFTER the call
+            buf.add(_oai_content_chunk(c))
+            dr = driver.process_llm_response(buf)
+            shown += buf.text()
+            if dr.call_executed:
+                executed, messages = True, dr.messages
+        assert executed is True
+        assert "I'll send it." in shown and "All done." in shown   # both text spans shown
+        assert "send_mail" not in shown and "{" not in shown       # the call JSON never leaked
+        assert messages is not None                                # tool result fed back to the LLM
 
     def test_openai_style_name_arguments_leak_executes(self):
         """The exact OpenAI leak shape: {"name": ..., "arguments": ...} in content."""
         driver = EchoDriver()
         buf = LLMStreamBuffer()
         call = '{"name": "send_mail", "arguments": {"to": "a@b.c"}}'
-        for frag in (call[:12], call[12:30], call[30:]):
-            buf.add(_oai_content_chunk(frag))
-        assert "tool_calls" not in buf.as_dict()
-        dr = driver.process_llm_response(buf)
+        dr = _feed(driver, buf, (call[:12], call[12:30], call[30:]))
         assert dr.call_executed is True
         assert dr.tool_call_result is not None
 
@@ -276,11 +355,9 @@ class TestTextEmbeddedToolCall:
         """The call embedded in surrounding text (model narrates, then emits JSON)."""
         driver = EchoDriver()
         buf = LLMStreamBuffer()
-        for frag in ('Sure, sending now. ',
-                     '{"name": "send_mail", ',
-                     '"arguments": {"to": "a@b.c"}}'):
-            buf.add(_oai_content_chunk(frag))
-        dr = driver.process_llm_response(buf)
+        dr = _feed(driver, buf, ('Sure, sending now. ',
+                                 '{"name": "send_mail", ',
+                                 '"arguments": {"to": "a@b.c"}}'))
         assert dr.call_executed is True
 
 
@@ -314,9 +391,7 @@ class TestNativeHistoryFormat:
         driver = EchoDriver()
         buf = LLMStreamBuffer()
         call = '{"name": "send_mail", "arguments": {"to": "a@b.c"}}'
-        for frag in (call[:20], call[20:]):
-            buf.add(_oai_content_chunk(frag))
-        dr = driver.process_llm_response(buf)
+        dr = _feed(driver, buf, (call[:20], call[20:]))
         assert dr.call_executed is True
         assert dr.messages is not None
         _, result = dr.messages

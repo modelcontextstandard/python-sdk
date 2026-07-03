@@ -47,7 +47,7 @@ from mcs.driver.core import (
 
 console = Console()
 
-MAX_TOOL_ROUNDS = 4
+MAX_TOOL_RETRIES = 3   # consecutive *failed* call attempts before giving up (see chat_loop)
 
 
 GITHUB_SPEC = (
@@ -68,6 +68,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--api-key", default=None,
                    help="API key for --api-base (default: 'no-key' when --api-base is set)")
     p.add_argument("--debug", "-d", action="store_true", help="Show DriverResponse details")
+    p.add_argument("--native-tools", action=argparse.BooleanOptionalAction, default=True,
+                   help="Use the model's native tool-calling API "
+                        "(default: on; pass --no-native-tools for text-prompt mode)")
     return p.parse_args()
 
 
@@ -110,7 +113,7 @@ def _print_debug_dr(dr: DriverResponse) -> None:
     console.print(Panel("\n".join(parts), title="DriverResponse", border_style="dim"))
 
 
-def chat_loop(driver: MCSDriver, model: str, debug: bool,
+def chat_loop(driver: MCSDriver, model: str, native_tools_enabled: bool, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
     # This client depends on the SupportsStreaming *capability* for the
     # streaming-aware process_llm_response. The buffer it creates itself: reassembly
@@ -120,7 +123,7 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
         raise SystemExit(f"{driver.meta.name} does not support streaming.")
 
     native_tools: list[dict] | None = None
-    if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)):
+    if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)) and native_tools_enabled:
         ctx = dc.get_native_tool_context(model)
         system_msg = ctx.system_message
         native_tools = ctx.tools
@@ -160,28 +163,32 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
 
         messages.append({"role": "user", "content": user_input})
 
-        for _round in range(MAX_TOOL_ROUNDS):
+        # Agentic loop, LLM-steered: the model keeps calling tools (each result fed
+        # back so the next turn builds on it) until it answers with *no* tool call --
+        # that is its "done" signal. Successful multi-step work is never capped, or the
+        # agent would stop mid-task; only *repeated failures* to formulate a call are
+        # bounded by MAX_TOOL_RETRIES. Continuation keys on MCS's ``call_executed``,
+        # not the wire's finish_reason -- the client stays format-agnostic.
+        retries = 0
+        while True:
             stream = _stream_one_turn(model, messages, api_base, api_key, native_tools)
 
-            # The client is format-agnostic: feed the chunk, let the driver do its
-            # work on the buffer, then read what the buffer lets through. Native and
-            # text-embedded tool calls look identical from here -- the client never
-            # inspects the chunk. Per chunk, exactly one of:
-            #   (a) a content token -> buf.text() returns it -> print live
-            #   (b) a tool call is building up -> buf.text() is empty, call_pending
-            #   (c) the call is complete -> the driver executes it; reset and read on
+            # Format-agnostic: feed the chunk, let the driver work on the buffer, read
+            # what it lets through. Native and text-embedded calls look identical here.
+            # Per chunk: (a) a content token -> buf.text() -> print; (b) a call building
+            # up -> buf.text() empty, call_pending; (c) call complete -> driver executes.
             buf = LLMStreamBuffer()
             console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
 
             content = ""
-            ran_a_tool = False
+            tool_ran = tool_ok = False
             for chunk in stream:  # type: ignore[union-attr]
                 buf.add(chunk)
                 response = streamer.process_llm_response(buf)   # the buffer IS the signal
 
                 if response.messages:                 # tool result -> back to the LLM
                     messages.extend(response.messages)
-                if (text := buf.text()):              # (a) what the driver let through
+                if (text := buf.text()):              # (a) assistant text (before/after a call)
                     content += text
                     print(text, end="", flush=True)
                 elif response.call_pending:           # (b) a tool call is building up
@@ -190,17 +197,26 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
                     if debug:
                         print()
                         _print_debug_dr(response)
-                    ran_a_tool = True                 # (c) the driver already cleared the buffer
+                    tool_ran = True
+                    tool_ok = tool_ok or response.call_executed
+                    content = ""                      # (c) pre-call text is already in
+                    #        response.messages; keep only text that FOLLOWS the call
             print()
 
-            if ran_a_tool:
-                continue                              # tool ran -> next LLM turn
+            # Record assistant text the driver did not put in history itself: a final
+            # answer, or narration *after* a tool call in the same turn.
+            if content.strip():
+                messages.append({"role": "assistant", "content": content})
 
-            # No tool call -> the stream was the final answer.
-            messages.append({"role": "assistant", "content": content})
-            break
-        else:
-            console.print("[yellow]Max tool rounds reached -- stopping.[/yellow]")
+            if not tool_ran:
+                break                                 # no call -> final answer -> done
+            if tool_ok:
+                retries = 0                           # progress -> keep working (agentic)
+            else:
+                retries += 1                          # only failures count toward the cap
+                if retries > MAX_TOOL_RETRIES:
+                    console.print("[yellow]Tool call keeps failing -- giving up.[/yellow]")
+                    break
 
 
 def main() -> None:
@@ -213,7 +229,7 @@ def main() -> None:
     driver = RestDriver(url=args.url, include_tags=tags)
     tools = driver.list_tools()
     console.print(f"[dim]Tools discovered ({len(tools)}): {[t.name for t in tools]}[/dim]")
-    chat_loop(driver, args.model, args.debug, args.api_base, args.api_key)
+    chat_loop(driver, args.model, args.native_tools, args.debug, args.api_base, args.api_key)
 
     console.print("\n[dim]Chat ended.[/dim]")
 

@@ -20,7 +20,6 @@ import logging
 import re
 import tomllib
 from abc import ABC, abstractmethod
-from enum import Enum
 from importlib.resources import files as pkg_files
 from pathlib import Path
 from typing import Any
@@ -30,12 +29,6 @@ from .mcs_tool_driver_interface import Tool
 logger = logging.getLogger(__name__)
 
 
-class UnknownToolBehavior(str, Enum):
-    """What to do when the LLM calls a tool that is not registered."""
-    SILENT = "silent"
-    RETRY_WITH_LIST = "retry"
-
-
 class PromptStrategy(ABC):
     """Abstract codec: encodes prompts, decodes LLM responses.
 
@@ -43,8 +36,6 @@ class PromptStrategy(ABC):
     with matching prompt templates and a parser that understands
     that format.
     """
-
-    unknown_tool_behavior: UnknownToolBehavior = UnknownToolBehavior.SILENT
 
     @property
     @abstractmethod
@@ -64,16 +55,28 @@ class PromptStrategy(ABC):
         """Extract ``(tool_name, arguments)`` from LLM output, or ``None``."""
 
     @abstractmethod
-    def retry_no_tool_field(self) -> str:
-        """Retry prompt when a JSON object was found but has no tool field."""
-
-    @abstractmethod
-    def retry_unknown_tool(self, tool_name: str, available: str) -> str:
-        """Retry prompt when the tool name is not in the known set."""
-
-    @abstractmethod
     def retry_execution_failed(self, tool_name: str, error: str) -> str:
         """Retry prompt when tool execution raised an exception."""
+
+    # -- Streaming (recognise a call taking shape) ----------------------------
+
+    def looks_like_call(self, text: str) -> bool:
+        """Return ``True`` when *text* looks like a call in this codec's format.
+
+        The text ``ExtractionStrategy`` uses this in ``recognizes`` to *claim* a
+        forming (or complete) call mid-stream, so the driver holds display until the
+        stream is done and then parses. It starts conservatively (only on a real
+        marker) and releases fast (a non-tool JSON, a foreign fence language). The
+        default never claims -- codecs that embed calls in text override it.
+        """
+        return False
+
+    def peek_tool_name(self, text: str) -> str | None:
+        """The candidate tool name in a partial call, or ``None`` if not yet known.
+
+        Lets the driver release a forming call early when its name is not one of the
+        driver's tools. The default returns ``None`` (no early release)."""
+        return None
 
     # -- Factory methods ------------------------------------------------------
 
@@ -107,9 +110,6 @@ class JsonPromptStrategy(PromptStrategy):
         self._tool_field_aliases: tuple[str, ...] = tuple(
             parsing.get("tool_field_aliases", ("tool", "name"))
         )
-        self.unknown_tool_behavior = UnknownToolBehavior(
-            parsing.get("unknown_tool_behavior", "silent")
-        )
 
         self._healing_rules: list[tuple[str, str]] = [
             (h["pattern"], h["replacement"])
@@ -117,8 +117,6 @@ class JsonPromptStrategy(PromptStrategy):
         ]
 
         retry = config.get("retry_prompts", {})
-        self._retry_no_tool_field: str = retry.get("no_tool_field", "")
-        self._retry_unknown_tool: str = retry.get("unknown_tool", "")
         self._retry_execution_failed: str = retry.get("execution_failed", "")
 
     # -- Factory helpers ------------------------------------------------------
@@ -178,6 +176,11 @@ class JsonPromptStrategy(PromptStrategy):
         return json.dumps({"tools": schema}, indent=2)
 
     def parse_tool_call(self, raw: str) -> tuple[str, dict[str, Any]] | None:
+        # A markdown fence must be balanced: an opened ``` with no closing ``` is an
+        # incomplete (still-streaming) call. Parsing it now would execute the inner
+        # JSON before the closing fence arrives and orphan it as leaked text.
+        if raw.count("```") % 2 == 1:
+            return None
         cleaned = self._apply_healing(raw)
 
         match = re.search(r"\{.*\}", cleaned, re.S)
@@ -200,13 +203,50 @@ class JsonPromptStrategy(PromptStrategy):
         arguments = obj.get("arguments", {}) or {}
         return tool_name, arguments
 
-    def retry_no_tool_field(self) -> str:
-        return self._retry_no_tool_field
+    def looks_like_call(self, text: str) -> bool:
+        # Detect on the *raw* text: the fence itself is the signal, and healing would
+        # strip it (that is healing's job -- to remove it before the final parse).
+        if not text:
+            return False
 
-    def retry_unknown_tool(self, tool_name: str, available: str) -> str:
-        return self._retry_unknown_tool.format(
-            tool_name=tool_name, available=available
-        )
+        # Outer marker: a fenced block. Its language tag is a fast release signal --
+        # ```python / ```bash is code to *show*, only ``` / ```json can be our call.
+        fence = re.search(r"```[ \t]*([A-Za-z0-9_+-]*)", text)
+        if fence is not None:
+            lang = fence.group(1).lower()
+            if lang and lang != "json":
+                return False
+            after = text[fence.end():].lstrip()
+            if not after:
+                return True                                # fence open, nothing after yet -> forming
+            if not after.startswith("{"):
+                return False                               # ```json but not an object -> data/code block
+            obj = after
+        else:
+            brace = text.find("{")                         # bare call may follow prose
+            if brace < 0:
+                return False
+            obj = text[brace:]
+
+        # Inner marker: the object must open with a string key that is a tool alias.
+        key = re.match(r'\{\s*"([^"]+)"\s*:', obj)
+        if key is None:
+            # First key not fully streamed. Keep claiming only while it *could* still be
+            # a string-keyed object ('{', '{ ', '{"', '{"partialkey'); '{123' / '{foo'
+            # can never be our call -> release immediately.
+            return bool(re.match(r'\{\s*("[^"]*)?$', obj))
+        return key.group(1) in self._tool_field_aliases
+
+    def peek_tool_name(self, text: str) -> str | None:
+        """The tool name in a (partial) call, once it has fully streamed in, else None.
+
+        Lets the driver release a forming call early when the name is not one of its
+        tools (a model *explaining* a call rather than making one) instead of holding
+        the whole object. Regex/config-driven like the rest of the codec.
+        """
+        aliases = "|".join(re.escape(a) for a in self._tool_field_aliases)
+        m = re.search(rf'"(?:{aliases})"\s*:\s*"([^"]+)"', text)
+        return m.group(1) if m else None
 
     def retry_execution_failed(self, tool_name: str, error: str) -> str:
         return self._retry_execution_failed.format(

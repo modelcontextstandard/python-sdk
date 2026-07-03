@@ -334,12 +334,16 @@ class TestBaseDriverIntegration:
         assert dr.call_executed is True
         assert dr.tool_call_result == "result_a"
 
-    def test_process_llm_response_unknown_tool_retries(self):
+    def test_process_llm_response_unknown_tool_ignored(self):
+        """The base orchestrator is itself a composable driver -- it ignores a call
+        for a tool it does not hold (not executed, not failed), just like any driver.
+        An orchestrator that knows it is the sole handler can override ``_no_owned``
+        to nudge the model."""
         orch = BaseOrchestrator()
         orch.add_driver(_driver_ab(), label="alpha")
         dr = orch.process_llm_response('{"tool": "nope", "arguments": {}}')
-        assert dr.call_failed is True
-        assert "nope" in (dr.call_detail or "")
+        assert dr.call_executed is False
+        assert dr.call_failed is False
 
 
 # -- Capability resolution: opaque composition -------------------------------

@@ -175,6 +175,64 @@ class TestOpenAICompletionExtractionStrategy:
         assert self.strategy.extract({"tool": "greet", "arguments": {}}) == []
 
 
+# -- Codec call detection (looks_like_call, drives text recognizes) -----------
+
+class TestLooksLikeCall:
+    """The codec's marker detector used by the text strategy's ``recognizes``: does
+    the (partial or complete) text look like a call in this codec's format?
+
+    It starts conservatively (only a real marker) and releases fast -- a non-tool
+    JSON, a foreign fence language, or plain prose must NOT be claimed.
+    """
+
+    def setup_method(self):
+        self.codec = JsonPromptStrategy.from_defaults()
+
+    def _f(self, text):
+        return self.codec.looks_like_call(text)
+
+    def test_bare_brace_with_tool_name(self):
+        assert self._f('{"tool": "greet"') is True
+
+    def test_name_alias_works(self):
+        assert self._f('{"name": "greet"') is True
+
+    def test_name_not_yet_streamed_still_claims(self):
+        assert self._f('{"tool": "gr') is True
+
+    def test_lone_brace_prefixes_claim(self):
+        assert self._f("{") is True
+        assert self._f('{"') is True
+
+    def test_non_tool_json_is_released(self):
+        assert self._f('{"foo": "bar"') is False
+
+    def test_brace_without_string_key_is_released(self):
+        assert self._f("{123") is False
+        assert self._f("{ nope") is False
+
+    def test_prose_brace_is_released(self):
+        assert self._f("Use {x} in your code") is False
+
+    def test_plain_prose_is_not_a_call(self):
+        assert self._f("Just a normal answer.") is False
+
+    def test_json_fence_claims(self):
+        assert self._f("```json\n") is True
+        assert self._f('```json\n{"tool": "greet"') is True
+
+    def test_bare_fence_claims(self):
+        assert self._f("```\n") is True
+
+    def test_foreign_fence_language_is_released(self):
+        assert self._f("```python\nprint(1)") is False
+        assert self._f("```bash\nls -la") is False
+
+    def test_complete_call_still_claims(self):
+        # A complete call is claimed too (recognizes covers forming *and* complete).
+        assert self._f('{"tool": "greet", "arguments": {"name": "A"}}') is True
+
+
 # -- BaseDriver extraction chain ----------------------------------------------
 
 class TestBaseDriverExtractionChain:
@@ -210,57 +268,6 @@ class TestBaseDriverExtractionChain:
         assert dr.call_executed is False
         assert dr.call_failed is False
 
-    def test_unknown_tool_with_retry_behavior(self):
-        from mcs.driver.core.prompt_strategy import UnknownToolBehavior
-        ps = JsonPromptStrategy.from_defaults()
-        ps.unknown_tool_behavior = UnknownToolBehavior.RETRY_WITH_LIST
-        driver = SimpleBaseDriver(prompt_strategy=ps)
-        dr = driver.process_llm_response('{"tool": "nonexistent", "arguments": {}}')
-        assert dr.call_failed is True
-        assert "nonexistent" in (dr.call_detail or "")
-
-    def test_unknown_tool_silent_returns_empty(self):
-        driver = SimpleBaseDriver()
-        dr = driver.process_llm_response('{"tool": "nonexistent", "arguments": {}}')
-        assert dr.call_executed is False
-        assert dr.call_failed is False
-
-
-# -- Caching ------------------------------------------------------------------
-
-def _native_greet() -> dict:
-    """A native OpenAI tool_calls message -> claimed by OpenAICompletion."""
-    return {"tool_calls": [{"id": "c1", "type": "function",
-            "function": {"name": "greet", "arguments": "{}"}}]}
-
-
-class TestExtractionCaching:
-    def test_preferred_extractor_cached_after_first_hit(self):
-        driver = SimpleBaseDriver()
-        assert driver._chain._preferred is None
-
-        driver.process_llm_response(_native_greet())
-        assert isinstance(driver._chain._preferred, OpenAICompletionExtractionStrategy)
-
-    def test_cached_strategy_tried_first(self):
-        driver = SimpleBaseDriver()
-
-        driver.process_llm_response(_native_greet())
-        assert isinstance(driver._chain._preferred, OpenAICompletionExtractionStrategy)
-
-        driver.process_llm_response(_native_greet())
-        assert isinstance(driver._chain._preferred, OpenAICompletionExtractionStrategy)
-
-    def test_text_fallback_does_not_become_preferred(self):
-        """TextExtraction is a fallback -- it never becomes the chain's preferred."""
-        driver = SimpleBaseDriver()
-
-        driver.process_llm_response(_native_greet())
-        assert isinstance(driver._chain._preferred, OpenAICompletionExtractionStrategy)
-
-        driver.process_llm_response('{"tool": "greet", "arguments": {}}')
-        assert isinstance(driver._chain._preferred, OpenAICompletionExtractionStrategy)
-
 
 # -- Custom ExtractionStrategy injection --------------------------------------
 
@@ -284,7 +291,7 @@ class TestCustomExtractionStrategy:
 # -- Recognise-phase tests ---------------------------------------------------
 
 class TestRecognizePhase:
-    """Verify the two-phase recognise → extract → text-fallback protocol."""
+    """Verify the recognise → extract protocol (native by envelope, text by content)."""
 
     def test_openai_recognizes_dict_with_tool_calls_key(self):
         s = OpenAICompletionExtractionStrategy()
@@ -303,11 +310,15 @@ class TestRecognizePhase:
         s = OpenAICompletionExtractionStrategy()
         assert not s.recognizes('{"tool_calls": []}')
 
-    def test_text_never_recognizes(self):
+    def test_text_recognizes_its_codec_marker(self):
+        """The text strategy claims by content: its codec's marker (a tool-keyed JSON
+        object) is recognised; plain prose is not."""
         codec = JsonPromptStrategy.from_defaults()
         s = TextExtractionStrategy(codec)
-        assert not s.recognizes('{"tool": "greet"}')
-        assert not s.recognizes({"content": '{"tool": "greet"}'})
+        assert s.recognizes('{"tool": "greet"}')
+        assert s.recognizes({"content": '{"tool": "greet"}'})
+        assert not s.recognizes("just some prose")
+        assert not s.recognizes({"content": "just some prose"})
 
     def test_recognizer_blocks_text_fallback_even_when_extract_returns_none(self):
         """The critical false-positive prevention test.

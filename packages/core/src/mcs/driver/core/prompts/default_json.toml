@@ -40,13 +40,10 @@ example = """\
 
 [parsing]
 tool_field_aliases = ["tool", "name"]
-unknown_tool_behavior = "silent"
 
-# ── Retry Prompts (placeholders: {tool_name}, {available}, {error}) ──
+# ── Retry Prompts (placeholders: {tool_name}, {error}) ──
 
 [retry_prompts]
-no_tool_field = "Return a JSON object with a 'tool' field matching one of the available tool names."
-unknown_tool = "No tool '{tool_name}' found. Available tools: {available}."
 execution_failed = "Tool '{tool_name}' execution failed: {error}. Check argument names and value types, then retry."
 
 # ── Healing Rules (regex pairs, applied before the parser) ──

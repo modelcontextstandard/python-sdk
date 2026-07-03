@@ -90,28 +90,44 @@ class ExtractionStrategy(ABC):
     The protocol:
 
     1. **Recognise** -- :meth:`recognizes` inspects a *shape* (an assembled
-       message *or* a raw streaming chunk) and returns ``True`` when it belongs
-       to this format. Default ``False`` = *"I never recognise -- use me as
-       fallback"*.
+       message *or* a raw streaming chunk) and returns ``True`` when a call of this
+       format is present -- *forming or complete*. Native formats claim by envelope
+       (``tool_calls`` key, event type); the text format claims by content (its
+       codec's marker). This is what lets the driver hold display mid-stream and
+       parse at the end. Default ``False``.
     2. **Extract** -- :meth:`extract` parses a *complete* message into the list of
        runnable :class:`ExtractedCall` s it carries (native formats may carry
-       several in parallel).
+       several in parallel); ``[]`` while still forming.
     3. **Result history** -- :meth:`result_messages` shapes the executed calls back
        into this format's conversation history (native answers each ``tool_call_id``;
        the default is the plain assistant/system text pair).
     4. **Accumulate** -- :meth:`accumulate` merges one raw streaming chunk into
        the canonical accumulator; :meth:`is_done` reports the format's stream
-       completion signal; :meth:`is_forming` reports a call still being assembled.
-       Non-streaming strategies inherit the no-op defaults.
+       completion signal. Non-streaming strategies inherit the no-op defaults.
 
-    :class:`~mcs.driver.core.ExtractionChain` iterates strategies: the first that
-    *recognises* owns the shape exclusively. ``TextExtractionStrategy`` never
-    recognises and is the final fallback.
+    :class:`~mcs.driver.core.ExtractionChain` iterates strategies in order and the
+    first that *recognises* owns the shape. Native strategies come before the text
+    strategy, so a native envelope always wins over a content-based text claim.
     """
+
+    #: Does this format deliver calls as a *batch* that grows until the stream's DONE
+    #: signal? Native parallel ``tool_calls`` do (execute early and a still-streaming
+    #: sibling is stranded), so the driver waits for ``is_finished``. A text-embedded
+    #: call is single and self-delimited -- it executes as soon as it parses.
+    batched: bool = False
 
     def recognizes(self, shape: Any) -> bool:
         """Return ``True`` when *shape* (message or chunk) belongs to this format."""
         return False
+
+    def forming_name(self, message: str | dict) -> str | None:
+        """Candidate tool name of a call forming in *message*, or ``None``.
+
+        Only meaningful for a non-:attr:`batched` (single, self-delimited) format: it
+        lets the driver release early when the name is not one of its tools instead
+        of holding the whole object. The default returns ``None`` (no early release).
+        """
+        return None
 
     @abstractmethod
     def extract(self, message: str | dict) -> list[ExtractedCall]:
@@ -139,16 +155,6 @@ class ExtractionStrategy(ABC):
             content = r.error if r.error is not None else _result_text(r.result)
             msgs.append({"role": "system", "content": content})
         return msgs
-
-    def is_forming(self, message: str | dict) -> bool:
-        """Return ``True`` when *message* holds a call still being assembled.
-
-        Read mid-stream to decide ``call_pending``: while a call is forming and the
-        stream is not done, the driver holds off executing. The default is ``False``
-        (a format whose calls never stream in partially); native formats report
-        ``True`` while any tool call is present but the batch is not yet complete.
-        """
-        return False
 
     # -- Streaming seam (no-op for non-streaming strategies) -------------------
 
@@ -200,6 +206,21 @@ class TextExtractionStrategy(ExtractionStrategy):
         name, arguments = parsed
         return [ExtractedCall(name=name, arguments=arguments)]
 
+    def recognizes(self, shape: Any) -> bool:
+        """Claim the shape when the codec sees a call taking shape in its content.
+
+        Unlike the native strategies (which claim by envelope), the text strategy
+        claims by *content*: the codec's :meth:`~PromptStrategy.looks_like_call`
+        decides whether a call is forming or complete. This is what lets the driver
+        hold display mid-stream and parse at the end -- the streaming counterpart of
+        ``recognizes`` for text. Ordered *after* the native strategies, so a native
+        envelope always wins (its call is committed; content is never second-guessed).
+        """
+        return bool(self._codec.looks_like_call(_message_text(shape)))
+
+    def forming_name(self, message: str | dict) -> str | None:
+        return self._codec.peek_tool_name(_message_text(message))
+
 
 class _NativeToolCallStrategy(ExtractionStrategy):
     """Shared base for native tool-call formats.
@@ -209,6 +230,9 @@ class _NativeToolCallStrategy(ExtractionStrategy):
     result. State (the accumulator) lives in the buffer; strategies stay
     stateless. :meth:`_slot` grows/returns a tool-call entry by index.
     """
+
+    #: Native parallel calls arrive as a growing batch -> wait for the DONE signal.
+    batched = True
 
     @staticmethod
     def _slot(acc: dict[str, Any], index: int) -> dict[str, Any]:
@@ -298,12 +322,6 @@ class _NativeToolCallStrategy(ExtractionStrategy):
             "type": "function",
             "function": {"name": r.name, "arguments": json.dumps(r.arguments)},
         }
-
-    def is_forming(self, message: str | dict) -> bool:
-        # Any accumulated tool call means the batch is forming; the driver pairs
-        # this with the stream's DONE signal to know when it is safe to execute.
-        return isinstance(message, dict) and bool(message.get("tool_calls"))
-
 
 class OpenAICompletionExtractionStrategy(_NativeToolCallStrategy):
     """OpenAI **Chat Completions** format.

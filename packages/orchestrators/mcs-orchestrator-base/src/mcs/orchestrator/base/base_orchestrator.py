@@ -6,8 +6,6 @@ to a pluggable ``ResolutionStrategy`` (typically a ``ToolPipeline``
 composed of ``ToolLayer`` decorators).
 
 Inherits prompt generation and LLM response parsing from ``BaseDriver``.
-Uses ``UnknownToolBehavior.RETRY_WITH_LIST`` so the LLM gets feedback
-when it calls a tool that does not exist.
 
 **Thread-safety:** All mutations and reads of the internal driver registry
 are protected by a ``threading.RLock``.
@@ -27,8 +25,6 @@ from mcs.driver.core import (
     DriverMeta,
     DriverBinding,
     PromptStrategy,
-    JsonPromptStrategy,
-    UnknownToolBehavior,
 )
 from mcs.driver.core.mixins.healthcheck import (
     SupportsHealthcheck,
@@ -93,10 +89,7 @@ class BaseOrchestrator(BaseDriver, SupportsHealthcheck):
         resolution_strategy: ResolutionStrategy | None = None,
         prompt_strategy: PromptStrategy | None = None,
     ) -> None:
-        ps = prompt_strategy or JsonPromptStrategy.from_defaults()
-        if isinstance(ps, JsonPromptStrategy):
-            ps.unknown_tool_behavior = UnknownToolBehavior.RETRY_WITH_LIST
-        super().__init__(prompt_strategy=ps)
+        super().__init__(prompt_strategy=prompt_strategy)
         self._resolution = resolution_strategy or ToolPipeline(
             layers=[NamespacingLayer()],
         )

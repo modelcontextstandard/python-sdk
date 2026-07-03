@@ -17,8 +17,6 @@ from mcs.driver.core import (
     ToolParameter,
     MCSToolDriver,
     PromptStrategy,
-    JsonPromptStrategy,
-    UnknownToolBehavior,
 )
 
 
@@ -129,23 +127,6 @@ class TestProcessLlmResponse:
         llm = '```json\n{"tool": "add", "arguments": {"a": 2, "b": 3}}\n```'
         resp = driver.process_llm_response(llm)
         assert resp.call_executed is True
-
-    def test_unknown_tool_silent(self, driver):
-        llm = json.dumps({"tool": "nonexistent", "arguments": {}})
-        resp = driver.process_llm_response(llm)
-        assert resp.call_executed is False
-        assert resp.call_failed is False
-
-    def test_unknown_tool_retry_with_list(self):
-        strategy = JsonPromptStrategy.from_defaults()
-        strategy.unknown_tool_behavior = UnknownToolBehavior.RETRY_WITH_LIST
-        d = ConcreteDriver(tools=TOOLS, prompt_strategy=strategy)
-        llm = json.dumps({"tool": "nonexistent", "arguments": {}})
-        resp = d.process_llm_response(llm)
-        assert resp.call_failed is True
-        assert "nonexistent" in (resp.call_detail or "")
-        assert resp.retry_prompt is not None
-        assert "add" in resp.retry_prompt
 
     def test_execution_error(self, driver):
         driver._execute_error = RuntimeError("kaboom")

@@ -12,7 +12,6 @@ from mcs.driver.core import Tool, ToolParameter
 from mcs.driver.core.prompt_strategy import (
     JsonPromptStrategy,
     PromptStrategy,
-    UnknownToolBehavior,
 )
 
 
@@ -66,8 +65,6 @@ class TestFactory:
             [parsing]
             tool_field_aliases = ["tool"]
             [retry_prompts]
-            no_tool_field = "retry!"
-            unknown_tool = "unknown {tool_name} {available}"
             execution_failed = "failed {tool_name} {error}"
         """)
         toml_file = tmp_path / "test.toml"
@@ -171,30 +168,7 @@ class TestParseToolCall:
 # ---------------------------------------------------------------------------
 
 class TestRetryPrompts:
-    def test_retry_no_tool_field(self, strategy):
-        msg = strategy.retry_no_tool_field()
-        assert len(msg) > 0
-
-    def test_retry_unknown_tool(self, strategy):
-        msg = strategy.retry_unknown_tool("foo", "bar, baz")
-        assert "foo" in msg
-        assert "bar" in msg
-
     def test_retry_execution_failed(self, strategy):
         msg = strategy.retry_execution_failed("myTool", "timeout")
         assert "myTool" in msg
         assert "timeout" in msg
-
-
-# ---------------------------------------------------------------------------
-# UnknownToolBehavior
-# ---------------------------------------------------------------------------
-
-class TestUnknownToolBehavior:
-    def test_default_is_silent(self, strategy):
-        assert strategy.unknown_tool_behavior == UnknownToolBehavior.SILENT
-
-    def test_can_set_retry(self):
-        s = JsonPromptStrategy.from_defaults()
-        s.unknown_tool_behavior = UnknownToolBehavior.RETRY_WITH_LIST
-        assert s.unknown_tool_behavior == UnknownToolBehavior.RETRY_WITH_LIST

@@ -290,10 +290,13 @@ fails — the call just runs the text path.
 control marker that cancels the "call forming" assumption, so a broken JSON never holds
 `pending` forever. Also: firewall reasoning (`<think>`) content from the forming-call scan.
 
-**False-positive guard (design intent, likely a later release).** Text that *resembles* a
-call but names a non-existent tool must **not** execute. Today: `unknown_tool_behavior` /
-`retry_unknown_tool` in `process_llm_response` (RETRY_WITH_LIST or ignore) when the name is
-not in this driver's tools. **Better:** treat it as *not a call* (pass through as text) when
-the name is unknown to **every driver in the chain** — which requires the orchestrator /
-composition to expose the **union** of tool names. Native tool calls never hit this path
-(the envelope already committed to a call); it only guards the text fallback.
+**False-positive guard.** Text that *resembles* a call but names a tool this driver does
+not own must **not** execute — and must not be treated as a *failure* either, since another
+driver in the client's list may own it. So a `BaseDriver` simply **ignores** an unowned call
+(`_no_owned` returns an empty response), and mid-stream **releases** a forming call whose
+name is not one of its tools so it flows as text. No driver may assume an unowned call is
+*nobody's*: an orchestrator is itself a composable `BaseDriver` and there may be several in
+the list. A composition that knows it holds the **full** tool set (the union) and wants to
+nudge the model overrides `_no_owned` — that is the orchestrator developer's concern, not
+baked into `BaseDriver`. Native tool calls never hit this path (the envelope already
+committed to a call); this only concerns the text codec.
