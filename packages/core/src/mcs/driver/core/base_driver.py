@@ -221,6 +221,14 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         #  leaked its call into text -- then eff is the text backup, emsg that plain text.)
         eff, emsg, forming, calls = self._resolve_calls(strategy, message)
 
+        # How far the content is *settled*: past every complete object (a call OR a
+        # non-call the model narrated) and its fence, before any still-forming block. The
+        # driver advances the buffer past this each round -- otherwise a settled non-call
+        # at the front (an example, an unknown format like ``recipient_name``) would stay
+        # there and anchor the scan on itself, hiding the block after it. ``0`` for native
+        # (no text offset -> such a batch resets the whole message).
+        settled = eff.settled_end(emsg)
+
         # ── Outcome 1: a complete call is ready -> run it now ───────────────────────────
         # Enter when there IS at least one complete call AND we are allowed to run it yet.
         # The second half is the "batched gate":
@@ -236,24 +244,25 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
             # and the status flags.
             dr = self._dispatch_tool_calls(eff, emsg, calls)
 
-            # Move the buffer PAST the calls we just handled, so the *next* call in this
-            # same turn is not shadowed by them. We advance past EVERY complete call --
-            # mine (just executed) and foreign alike. Foreign ones are dropped too, but the
-            # buffer defers the actual drop to the next add(), so a driver that DOES own
-            # them still sees them this round first (that is what makes it fan-out-safe).
-            ends = [c.end for c in calls if c.end is not None]
-            if ends:
-                # Text: every call knows the character offset where its text ends. Consume
-                # up to the furthest one -> the calls (and their fences) are dropped, but
-                # the TAIL (a following call, or trailing prose) is kept for the next round.
-                buf.consume_through(max(ends))
+            # Move the buffer PAST everything settled this round, so the *next* block is not
+            # shadowed. ``settled`` covers the calls we just handled (mine, executed) AND any
+            # foreign / non-call object among them -- foreign ones are dropped too, but the
+            # buffer defers the actual drop to the next add(), so a driver that DOES own them
+            # still sees them this round first (that is what makes it fan-out-safe). Text
+            # advances by offset (keeping the tail -- the next call / prose); a native batch
+            # has no text offset (settled == 0) and *is* the whole message, so it resets.
+            if settled:
+                buf.consume_through(settled)
             else:
-                # Native: calls carry no text offset, and the whole message *is* the batch
-                # -> there is no tail to keep, so clear the buffer entirely.
                 buf.reset()
             return dr
 
         # ── No runnable call this round: either something is forming, or it is plain text.
+        # Either way, drop any settled non-call block(s) at the front (an example the model
+        # narrated, an unknown format) so the tail is parsed fresh next round -- deferred and
+        # fan-out-safe, exactly like a handled call.
+        if settled:
+            buf.consume_through(settled)
 
         # ── Outcome 2: nothing is forming -> ordinary text (prose, or the final answer).
         # Return an empty DriverResponse ("no call of mine here") so the buffer's text flows

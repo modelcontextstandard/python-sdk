@@ -196,6 +196,18 @@ class ExtractionStrategy(ABC):
         """
         return _message_text(message)
 
+    def settled_end(self, message: str | dict) -> int:
+        """Offset up to which *message* is *settled* -- past every complete object it
+        carries (a call or not), before any still-forming block.
+
+        Only meaningful for a text format over a string ``content``: the driver advances
+        the buffer past this prefix (``consume_through``) so a settled non-call block
+        (an example the model narrated, an unknown format) does not stay at the front and
+        anchor the scan on itself. The default is ``0`` (native formats never advance by
+        text offset -- they reset the whole message instead).
+        """
+        return 0
+
     def result_messages(
         self, message: str | dict, records: "list[ToolCallRecord]",
     ) -> list[dict[str, Any]]:
@@ -275,6 +287,10 @@ class TextExtractionStrategy(ExtractionStrategy):
         if not self._codec.looks_like_call(text):
             return Forming(False)
         return Forming(True, self._codec.peek_tool_name(text))
+
+    def settled_end(self, message: str | dict) -> int:
+        text = message if isinstance(message, str) else _message_text(message)
+        return self._codec.settled_end(text) if text else 0
 
 
 class _NativeToolCallStrategy(ExtractionStrategy):

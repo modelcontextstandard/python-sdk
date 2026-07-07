@@ -205,6 +205,22 @@ class TestParseToolCalls:
     def test_unbalanced_fence_defers(self, strategy):
         assert strategy.parse_tool_calls('```json\n{"tool": "a"') == []
 
+    def test_settled_end_covers_non_call_objects(self, strategy):
+        # a non-call object, then a call -> settled_end reaches past *both*, so the driver
+        # advances past the non-call instead of anchoring the scan on it.
+        raw = '{"foo": 1} then {"tool": "greet", "arguments": {}}'
+        assert strategy.settled_end(raw) == len(raw)
+
+    def test_settled_end_stops_before_an_open_fence(self, strategy):
+        raw = '```json\n{"tool": "a", "arguments": {}}\n```\n```json\n{"tool": "b"'
+        end = strategy.settled_end(raw)
+        assert raw[:end].rstrip().endswith("```")   # settled up to the first, closed block
+        assert '"b"' not in raw[:end]               # the open-fence block is the tail
+
+    def test_complete_call_extracted_even_with_a_later_open_fence(self, strategy):
+        raw = '```json\n{"tool": "a", "arguments": {}}\n```\n```json\n{"tool": "b"'
+        assert [n for n, _a, _e in strategy.parse_tool_calls(raw)] == ["a"]
+
 
 # ---------------------------------------------------------------------------
 # Retry prompts

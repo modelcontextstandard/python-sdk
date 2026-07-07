@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
+
 from mcs.driver.core import (
     BaseDriver,
     LLMStreamBuffer,
@@ -617,6 +619,103 @@ class TestTextMultiCall:
         dr = driver.process_llm_response(text)
         assert dr.call_executed is True
         assert [r.name for r in dr.executed_calls] == ["send_mail"]
+
+    def test_non_call_blocks_do_not_anchor_a_later_real_call(self):
+        """The live native-leak case: the model narrates example blocks in an *unknown*
+        format (``recipient_name``, not a call), then makes the real owned call. Each
+        settled non-call block is advanced past (``settled_end``), so the scan does not
+        stay anchored on the first block -- the real call is still found and executed."""
+        driver = EchoDriver()                              # owns send_mail
+        buf = LLMStreamBuffer()
+        text = (
+            "Beispiel Katzen:\n```json\n"
+            '{"recipient_name": "functions.getCatsByTags", "parameters": {"tags": ["x"]}}\n```\n'
+            "Beispiel Hunde:\n```json\n"
+            '{"recipient_name": "functions.getDogsByTags", "parameters": {"tags": ["y"]}}\n```\n'
+            "Echt:\n```json\n"
+            '{"tool": "send_mail", "arguments": {"to": "a@b.c"}}\n```'
+        )
+        _shown, records = _stream_text(driver, buf, text)
+        assert [r.name for r in records] == ["send_mail"]
+        assert records[0].arguments == {"to": "a@b.c"}
+
+
+class PetDriver(BaseDriver):
+    """Owns ``findPetsByTags``; ``getCatsByTags`` / ``getDogsByTags`` are foreign."""
+
+    meta: DriverMeta = _Meta()
+
+    def list_tools(self) -> list[Tool]:
+        return [Tool("findPetsByTags", description="Find pets by tags")]
+
+    def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        return {"found": arguments}
+
+
+_OWNED = "findPetsByTags"
+
+
+def _fenced_call(name: str, tag: str) -> str:
+    """One MCS-format tool call as a fenced JSON block."""
+    return f'```json\n{{"tool": "{name}", "arguments": {{"tags": ["{tag}"]}}}}\n```'
+
+
+# owned (findPetsByTags) mixed with foreign (getCats/getDogs) at every position
+_MIX_CASES = [
+    ("all_owned",    [_OWNED, _OWNED]),
+    ("all_foreign",  ["getCatsByTags", "getDogsByTags"]),
+    ("owned_first",  [_OWNED, "getCatsByTags", "getDogsByTags"]),
+    ("owned_last",   ["getCatsByTags", "getDogsByTags", _OWNED]),
+    ("owned_middle", ["getCatsByTags", _OWNED, "getDogsByTags"]),
+    ("interleaved",  ["getCatsByTags", _OWNED, "getDogsByTags", _OWNED]),
+]
+
+
+@pytest.mark.parametrize(
+    "names", [c[1] for c in _MIX_CASES], ids=[c[0] for c in _MIX_CASES]
+)
+class TestMixedOwnership:
+    """Owned and foreign text calls mixed at every position, at-once *and* streaming:
+    only the owned calls run, in order; the foreign ones flow as text and never execute.
+    Each foreign call is advanced past (settled_end) so it never shadows a later owned one."""
+
+    def test_at_once(self, names):
+        driver = PetDriver()
+        text = "\n\n".join(_fenced_call(n, f"t{i}") for i, n in enumerate(names))
+        dr = driver.process_llm_response(text)
+        assert [r.name for r in (dr.executed_calls or [])] == [n for n in names if n == _OWNED]
+
+    def test_streaming(self, names):
+        driver = PetDriver()
+        buf = LLMStreamBuffer()
+        text = "\n\n".join(_fenced_call(n, f"t{i}") for i, n in enumerate(names))
+        _shown, records = _stream_text(driver, buf, text)
+        assert [r.name for r in records] == [n for n in names if n == _OWNED]
+
+
+class TestToolUsesWrapperFormat:
+    """The model's ``tool_uses`` / ``recipient_name`` / ``parameters`` format is NOT the
+    MCS codec -> the whole wrapper is a single non-call object; it flows as text and
+    nothing runs, even with a real tool name inside (MCS's stance: model-specific
+    native-leak formats are the serving layer's job, not the client codec's)."""
+
+    _WRAPPER = (
+        "Parallel:\n```json\n"
+        '{"tool_uses": ['
+        '{"recipient_name": "functions.getCatsByTags", "parameters": {"tags": ["Mops"]}}, '
+        '{"recipient_name": "functions.findPetsByTags", "parameters": {"tags": ["Mops"]}}'
+        "]}\n```"
+    )
+
+    def test_at_once_runs_nothing(self):
+        dr = PetDriver().process_llm_response(self._WRAPPER)
+        assert dr.call_executed is False
+
+    def test_streaming_flows_as_text(self):
+        buf = LLMStreamBuffer()
+        shown, records = _stream_text(PetDriver(), buf, self._WRAPPER)
+        assert records == []
+        assert "Parallel:" in shown
 
 
 class TestForming:

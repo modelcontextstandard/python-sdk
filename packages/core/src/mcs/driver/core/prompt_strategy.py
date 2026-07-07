@@ -67,6 +67,13 @@ class PromptStrategy(ABC):
         call = self.parse_tool_call(raw)
         return [(call[0], call[1], len(raw))] if call is not None else []
 
+    def settled_end(self, raw: str) -> int:
+        """Offset up to which *raw* is settled (complete objects, call or not), so a
+        streaming driver can advance past it and parse the next block fresh. The default
+        is ``0`` (never advance -- safe for a single-call codec); multi-object codecs
+        override this. See :class:`JsonPromptStrategy`."""
+        return 0
+
     @abstractmethod
     def retry_execution_failed(self, tool_name: str, error: str) -> str:
         """Retry prompt when tool execution raised an exception."""
@@ -194,18 +201,38 @@ class JsonPromptStrategy(PromptStrategy):
         return (calls[0][0], calls[0][1]) if calls else None
 
     def parse_tool_calls(self, raw: str) -> list[tuple[str, dict[str, Any], int]]:
-        # A markdown fence must be balanced: an opened ``` with no closing ``` is an
-        # incomplete (still-streaming) call. Parsing now would execute the inner JSON
-        # before the closing fence arrives and orphan it as leaked text.
-        if raw.count("```") % 2 == 1:
-            return []
+        # Only the settled objects that ARE calls (a tool alias). Non-call objects are
+        # dropped here but still counted by settled_end, so the driver advances past them.
+        return [(n, a, e) for (n, a, e) in self._scan(raw) if n is not None]
 
-        calls: list[tuple[str, dict[str, Any], int]] = []
-        for obj_str, _start, obj_end in self._iter_json_objects(raw):
+    def settled_end(self, raw: str) -> int:
+        """Offset up to which *raw* is settled -- past every *complete* top-level object
+        (call or not) and its fence, before any still-forming block.
+
+        The driver drops this prefix (``buf.consume_through``) so each successive ``{…}``
+        is parsed fresh: a settled *non-call* (a model narrating an example, an unknown
+        format like ``recipient_name``) would otherwise stay at the front and anchor the
+        scan on itself, hiding the block after it.
+        """
+        scanned = self._scan(raw)
+        return scanned[-1][2] if scanned else 0
+
+    def _scan(self, raw: str) -> list[tuple[str | None, dict[str, Any], int]]:
+        """Every complete top-level object in *raw*, as ``(name | None, arguments, end)``.
+
+        ``name`` is ``None`` for a JSON object that is not a call. ``end`` is the offset
+        just past the object *and* an immediately-following closing fence. Only the region
+        *before* a still-open fence is scanned -- an object inside an unclosed ``` is not
+        settled yet (parsing it would execute before the fence arrives and orphan it).
+        """
+        # Restrict to the region before any still-open fence.
+        region = raw if raw.count("```") % 2 == 0 else raw[: raw.rfind("```")]
+        out: list[tuple[str | None, dict[str, Any], int]] = []
+        for obj_str, _start, obj_end in self._iter_json_objects(region):
             try:
                 obj = json.loads(self._apply_healing(obj_str))
             except json.JSONDecodeError:
-                continue                                   # incomplete/malformed -> skip
+                continue                                   # malformed -> not a settled object
             if not isinstance(obj, dict):
                 continue
             name: str | None = None
@@ -213,16 +240,12 @@ class JsonPromptStrategy(PromptStrategy):
                 name = obj.get(alias)
                 if name:
                     break
-            if not name:
-                continue                                   # a JSON object, but not a call
-            # Advance past the object *and* an immediately-following closing fence, so a
-            # fenced call's ``` is not left behind as orphaned display text.
-            end = obj_end
+            end = obj_end                                  # include a trailing closing fence
             fence = re.match(r"\s*```", raw[obj_end:])
             if fence is not None:
                 end = obj_end + fence.end()
-            calls.append((name, obj.get("arguments", {}) or {}, end))
-        return calls
+            out.append((name or None, obj.get("arguments", {}) or {}, end))
+        return out
 
     @staticmethod
     def _iter_json_objects(text: str):
