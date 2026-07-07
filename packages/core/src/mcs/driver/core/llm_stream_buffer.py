@@ -97,14 +97,22 @@ class LLMStreamBuffer:
         *shown* is decided by the driver (via :meth:`hold`) and read via :meth:`text`.
         Resets the per-round display veto (default: flow).
         """
+        # 1) A new chunk means a new round has started, i.e. every driver already saw the
+        #    previous round. So NOW it is safe to actually drop a call the driver asked to
+        #    consume last round (see consume_through) -- do it before adding new content.
         if self._pending_consume:
             self._apply_consume()
+        # 2) New round -> clear the display veto (a driver must re-assert hold() to suppress).
         self._held = False
+        # 3) Lock in the wire format from the very first chunk (it never changes mid-stream).
         if self._active is None:
             self._active = self._resolve(chunk)
+        # 4) Let the format expert fold this chunk into the native message. It returns the
+        #    *content delta* (text to display) or None; we append that to the display buffer.
         delta = self._active.accumulate(self._acc, chunk)
         if delta:
             self._text_content += delta
+        # 5) Note when the wire signals the stream is over (used to gate native batches).
         if self._active.is_stream_complete(chunk):
             self._finished = True
 
@@ -169,20 +177,32 @@ class LLMStreamBuffer:
         whole message, so this resets instead.
         """
         if isinstance(self._acc.get("content"), str):
+            # Text wire (content is a plain string): remember the furthest offset to drop,
+            # but DON'T drop yet -- only record the request. The drop happens on the next
+            # add() (see above), i.e. after the whole chain saw this call.
             self._pending_consume = max(self._pending_consume, end)
-            self._shown = max(self._shown, end)          # a handled call is never displayed
+            # Also push the display cursor past the call right away, so a held call's raw
+            # JSON is never shown even in the gap before it is dropped.
+            self._shown = max(self._shown, end)
         else:
+            # Native wire (content is a block/item list, not a string): no character offset
+            # applies, and the batch is the whole message -> just clear everything.
             self.reset()
 
     def _apply_consume(self) -> None:
-        """Drop the deferred-consumed prefix from the text + display state."""
+        """Actually drop the deferred-consumed prefix (called by :meth:`add`).
+
+        Cut the first ``n`` characters -- the handled call(s) and their fences -- off the
+        display text and the native ``content`` string, and pull the display cursor back
+        by the same amount so it still points at the same position in the shortened text.
+        """
         n = self._pending_consume
         self._pending_consume = 0
-        self._text_content = self._text_content[n:]
+        self._text_content = self._text_content[n:]        # drop from the display text
         content = self._acc.get("content")
         if isinstance(content, str):
-            self._acc["content"] = content[n:]
-        self._shown = max(0, self._shown - n)
+            self._acc["content"] = content[n:]             # ...and from the native message
+        self._shown = max(0, self._shown - n)              # keep the cursor aligned
 
     def reset(self) -> None:
         """Clear the accumulator to hunt for the next call; keep the wire format.

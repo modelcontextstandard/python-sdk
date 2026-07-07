@@ -143,18 +143,37 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         result history: a leaked call opened no native id, so the model expects a
         text-style continuation).
         """
+        # First, the normal path: ask the resolved format for its complete calls and
+        # whether one is forming.
         calls = strategy.extract(message)
         forming = strategy.forming(message)
+
+        # We are done in the common cases -- use this strategy's answer as-is when:
+        #   - it found complete calls, OR
+        #   - it sees one forming, OR
+        #   - this format cannot hide a call in its text anyway (leaks_into_text is False,
+        #     e.g. OpenAI Completions: a leak has no tool_calls key, so the chain already
+        #     routed it straight to the text strategy -- no fall-through needed).
         if calls or forming or not strategy.leaks_into_text:
             return strategy, message, forming, calls
+
+        # Otherwise we are in the leak case. The format is an envelope one whose message
+        # ALWAYS carries its structure (Anthropic blocks / Responses items), so it claimed
+        # the shape -- but found nothing. The call may be sitting in a *text* block (the
+        # model wrote it as prose instead of the native slot). Hand that plain text to the
+        # backup text strategy and let it look.
         backup = self.get_native_backup_strategy()
-        if backup is None:
+        if backup is None:                               # backup disabled -> give up, no call
             return strategy, message, forming, calls
-        text = strategy.content_text(message)
+        text = strategy.content_text(message)            # the message's plain text
         b_calls, b_forming = backup.extract(text), backup.forming(text)
         if b_calls or b_forming:
+            # The backup found the leaked call. It becomes the *effective* strategy, and
+            # `text` the effective message -- so extraction AND the result history come
+            # from the text codec (a leaked call opened no native id, so the model expects
+            # a plain text-style answer, not a native tool result).
             return backup, text, b_forming, b_calls
-        return strategy, message, forming, calls
+        return strategy, message, forming, calls         # truly nothing here
 
 
     def set_native_backup_strategy(self, strategy: TextExtractionStrategy | None) -> None:
@@ -195,31 +214,66 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         *explaining* a call), which is released early as text. (3) not forming -> plain
         text (prose, or a final answer) simply flows.
         """
+        # Ask the format expert two questions about the message assembled so far:
+        #   forming -> "is a tool call on its way here?" (+ its name once it has streamed in)
+        #   calls   -> "which *complete*, runnable calls are in here right now?" ([] if none)
+        # (eff/emsg usually equal strategy/message; they differ only when a native format
+        #  leaked its call into text -- then eff is the text backup, emsg that plain text.)
         eff, emsg, forming, calls = self._resolve_calls(strategy, message)
 
+        # ── Outcome 1: a complete call is ready -> run it now ───────────────────────────
+        # Enter when there IS at least one complete call AND we are allowed to run it yet.
+        # The second half is the "batched gate":
+        #   - A text call is self-delimiting (its closing } / fence finishes it), so
+        #     eff.batched is False and the gate is always open -> run immediately.
+        #   - Native parallel calls arrive as a *growing batch* (eff.batched is True). We
+        #     must wait for the stream's DONE signal (buf.is_finished()), else a sibling
+        #     call still streaming would be cut off -> run only once the batch is finished.
+        #   Read `not (batched and not finished)` as: "not a batch that isn't done yet".
         if calls and not (eff.batched and not buf.is_finished()):
+            # Run the calls that are MINE; silently ignore the rest (in a chain of drivers
+            # another one may own them). `dr` carries the results, the history to feed back,
+            # and the status flags.
             dr = self._dispatch_tool_calls(eff, emsg, calls)
-            # Advance past *every* complete call, owned or not -- the owned ones just ran,
-            # the unowned ones were another driver's chance (the buffer defers the drop to
-            # the next chunk, so a driver that owns them still sees them this round). Text
-            # advances by offset (keeping the tail -- the next call / prose); a native
-            # batch is the whole message, so it resets.
+
+            # Move the buffer PAST the calls we just handled, so the *next* call in this
+            # same turn is not shadowed by them. We advance past EVERY complete call --
+            # mine (just executed) and foreign alike. Foreign ones are dropped too, but the
+            # buffer defers the actual drop to the next add(), so a driver that DOES own
+            # them still sees them this round first (that is what makes it fan-out-safe).
             ends = [c.end for c in calls if c.end is not None]
             if ends:
+                # Text: every call knows the character offset where its text ends. Consume
+                # up to the furthest one -> the calls (and their fences) are dropped, but
+                # the TAIL (a following call, or trailing prose) is kept for the next round.
                 buf.consume_through(max(ends))
             else:
+                # Native: calls carry no text offset, and the whole message *is* the batch
+                # -> there is no tail to keep, so clear the buffer entirely.
                 buf.reset()
             return dr
 
-        if not forming:
-            return DriverResponse()                  # plain text -> flows
+        # ── No runnable call this round: either something is forming, or it is plain text.
 
+        # ── Outcome 2: nothing is forming -> ordinary text (prose, or the final answer).
+        # Return an empty DriverResponse ("no call of mine here") so the buffer's text flows
+        # to the display.
+        if not forming:
+            return DriverResponse()
+
+        # ── Outcome 3: a call IS forming, its name has already streamed in, and it is NOT
+        # one of my tools -> the model is *explaining / quoting* a call, not making one.
+        # Release it as text (flow) instead of holding. Only for a single text call: a
+        # native batch is already committed to a real call, so we never second-guess it.
         if not eff.batched and forming.tool_name and (
             forming.tool_name not in {t.name for t in self.list_tools()}
         ):
-            return DriverResponse()                  # names a tool I don't own -> flow as text
+            return DriverResponse()
 
-        buf.hold()                                   # forming / batch not done -> suppress + pending
+        # ── Outcome 4: a call is forming and is (or might still turn out to be) mine ->
+        # HOLD the buffer: suppress display so the half-written JSON/markup never leaks,
+        # and report call_pending so the client can show "…" and keep streaming.
+        buf.hold()
         return DriverResponse(call_pending=True)
 
     # -- Tool execution (one uniform path for every format) -------------------
