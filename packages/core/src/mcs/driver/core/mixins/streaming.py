@@ -31,7 +31,7 @@ and depends on this capability, not on any concrete driver class. Reassembly is 
 concern, identical for every driver, and drivers compose -- so the buffer is a standalone
 object, not a driver method; the driver only offers the factory as convenience. See
 ``docs/adr/0001-streaming-extraction-native-reassembly.md`` and
-``packages/core/docs/streaming-tool-formats.md``.
+``docs/Reference/streaming-tool-formats.md``.
 """
 
 from __future__ import annotations

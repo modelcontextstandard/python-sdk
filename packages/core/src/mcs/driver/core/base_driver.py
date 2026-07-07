@@ -62,7 +62,7 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         _extraction_strategies: list[ExtractionStrategy] | None = None,
         _chain: ExtractionChain | None = None,
     ) -> None:
-        self._strategy = prompt_strategy or PromptStrategy.default()
+        self._prompt_strategy = prompt_strategy or PromptStrategy.default()
         self._custom_tool_description = custom_tool_description
         self._custom_system_message = custom_system_message
         # The one shared chain: every native wire (so the driver can extract a call
@@ -74,10 +74,10 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
             OpenAICompletionExtractionStrategy(),
             OpenAIResponseExtractionStrategy(),
             AnthropicExtractionStrategy(),
-            TextExtractionStrategy(self._strategy),
+            TextExtractionStrategy(self._prompt_strategy),
         ]
         self._chain = _chain or ExtractionChain(self._extractors)       
-        self._native_backup = TextExtractionStrategy(self._strategy)
+        self._native_backup = TextExtractionStrategy(self._prompt_strategy)
 
         # Capability flags are derived from the interfaces this driver implements
         # (MCSDriver -> "standalone", MCSToolDriver -> "orchestratable",
@@ -93,14 +93,14 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
     def get_function_description(self, model_name: str | None = None) -> str:
         if self._custom_tool_description is not None:
             return self._custom_tool_description
-        return self._strategy.format_tools(self.list_tools())
+        return self._prompt_strategy.format_tools(self.list_tools())
 
     def get_driver_system_message(self, model_name: str | None = None) -> str:
         if self._custom_system_message is not None:
             return self._custom_system_message
-        return self._strategy.system_template.format(
+        return self._prompt_strategy.system_template.format(
             tools=self.get_function_description(model_name),
-            call_example=self._strategy.format_call_example(),
+            call_example=self._prompt_strategy.format_call_example(),
         )
 
     def process_llm_response(
@@ -246,7 +246,7 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
             messages=strategy.result_messages(message, records),
             tool_call_result=self._back_compat_result(records),
             retry_prompt=(
-                self._strategy.retry_execution_failed(failed[0].name, failed[0].error or "")
+                self._prompt_strategy.retry_execution_failed(failed[0].name, failed[0].error or "")
                 if failed else None
             ),
             call_detail=failed[0].error if failed else None,
@@ -341,5 +341,5 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
 
     def _tools_as_native_dicts(self) -> list[dict[str, Any]]:
         """Return tools as native API dicts via the active ``PromptStrategy``."""
-        schemas = json.loads(self._strategy.format_tools(self.list_tools()))["tools"]
+        schemas = json.loads(self._prompt_strategy.format_tools(self.list_tools()))["tools"]
         return [{"type": "function", "function": s} for s in schemas]

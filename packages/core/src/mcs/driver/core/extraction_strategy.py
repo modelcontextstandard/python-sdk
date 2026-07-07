@@ -14,7 +14,7 @@ provider's SDK returns for ``stream=false`` (OpenAI keeps ``{content, tool_calls
 Anthropic keeps its ``content:[{type:"tool_use"}]`` block list, Responses keeps its
 ``output:[{type:"function_call"}]`` item list) and the strategy reads *its* shape. See
 ``docs/adr/0001-streaming-extraction-native-reassembly.md`` and
-``packages/core/docs/streaming-tool-formats.md``.
+``docs/Reference/streaming-tool-formats.md``.
 
 Concrete implementations:
 

@@ -34,7 +34,7 @@ native wire formats; ``SupportsStreaming.new_stream_buffer`` pre-seeds it with t
 driver's chain as a convenience.
 
 See ``docs/adr/0001-streaming-extraction-native-reassembly.md`` and
-``packages/core/docs/streaming-tool-formats.md`` for the format matrix.
+``docs/Reference/streaming-tool-formats.md`` for the format matrix.
 """
 
 from __future__ import annotations
