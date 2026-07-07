@@ -123,15 +123,15 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
             return DriverResponse()                  # no format recognised -> (stream: text flows)
         if isinstance(llm_response, LLMStreamBuffer):
             return self._process_stream(llm_response, strategy, message)
-        eff, emsg, _forming, calls = self._resolve_call(strategy, message)
+        eff, emsg, _forming, calls = self._resolve_calls(strategy, message)
         return self._dispatch_tool_calls(eff, emsg, calls)
 
     # -- Extraction (with the native->text leak fall-through) -----------------
 
-    def _resolve_call(
+    def _resolve_calls(
         self, strategy: ExtractionStrategy, message: str | dict,
     ) -> tuple[ExtractionStrategy, str | dict, Forming, list[ExtractedCall]]:
-        """Resolve the call in *message*: its forming state and finished call(s).
+        """Resolve the calls in *message*: their forming state and finished call(s).
 
         Returns ``(effective_strategy, effective_message, forming, calls)``. A model in
         native mode occasionally *leaks* its call as text instead of the native slot. For
@@ -195,12 +195,20 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         *explaining* a call), which is released early as text. (3) not forming -> plain
         text (prose, or a final answer) simply flows.
         """
-        eff, emsg, forming, calls = self._resolve_call(strategy, message)
+        eff, emsg, forming, calls = self._resolve_calls(strategy, message)
 
         if calls and not (eff.batched and not buf.is_finished()):
             dr = self._dispatch_tool_calls(eff, emsg, calls)
-            if dr.call_executed or dr.call_failed:
-                buf.reset()   # call consumed -- clear to hunt for the next
+            # Advance past *every* complete call, owned or not -- the owned ones just ran,
+            # the unowned ones were another driver's chance (the buffer defers the drop to
+            # the next chunk, so a driver that owns them still sees them this round). Text
+            # advances by offset (keeping the tail -- the next call / prose); a native
+            # batch is the whole message, so it resets.
+            ends = [c.end for c in calls if c.end is not None]
+            if ends:
+                buf.consume_through(max(ends))
+            else:
+                buf.reset()
             return dr
 
         if not forming:

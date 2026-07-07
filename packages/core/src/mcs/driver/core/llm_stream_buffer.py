@@ -85,15 +85,20 @@ class LLMStreamBuffer:
         self._finished = False
         self._shown = 0                  # display cursor: chars already shown
         self._held = False               # this round's display veto (reset by add)
+        self._pending_consume = 0        # deferred consume offset (applied on the next add)
 
     def add(self, chunk: Any) -> None:
         """Feed one raw provider chunk; accumulate into the native message.
 
-        Resolves the wire format on the first chunk and delegates reassembly to it. The
-        content delta it returns is appended to the display buffer. Returns nothing --
-        what may be *shown* is decided by the driver (via :meth:`hold`) and read via
-        :meth:`text`. Resets the per-round display veto (default: flow).
+        First applies any deferred :meth:`consume_through` from the previous round -- so a
+        handled text call is dropped only *after* every driver in a chain has seen it --
+        then resolves the wire format (first chunk) and delegates reassembly. The content
+        delta it returns is appended to the display buffer. Returns nothing -- what may be
+        *shown* is decided by the driver (via :meth:`hold`) and read via :meth:`text`.
+        Resets the per-round display veto (default: flow).
         """
+        if self._pending_consume:
+            self._apply_consume()
         self._held = False
         if self._active is None:
             self._active = self._resolve(chunk)
@@ -151,17 +156,47 @@ class LLMStreamBuffer:
 
     # -- lifecycle ------------------------------------------------------------
 
+    def consume_through(self, end: int) -> None:
+        """Advance past a handled text call ending at *end*, keeping the tail.
+
+        Called by the **driver** once it has handled a text-embedded call (executed it, or
+        found it complete but unowned): drop the content up to *end* -- the call and its
+        fence -- but keep everything after it (the next call or trailing prose). The drop
+        is **deferred to the next** :meth:`add`, so every driver in a chain still sees the
+        call this round; only after the whole chain has passed (the next chunk arrives) is
+        it dropped -- which is exactly "no driver owned it". For a **native** wire (a
+        structured, non-string ``content``) there is no text offset and the batch is the
+        whole message, so this resets instead.
+        """
+        if isinstance(self._acc.get("content"), str):
+            self._pending_consume = max(self._pending_consume, end)
+            self._shown = max(self._shown, end)          # a handled call is never displayed
+        else:
+            self.reset()
+
+    def _apply_consume(self) -> None:
+        """Drop the deferred-consumed prefix from the text + display state."""
+        n = self._pending_consume
+        self._pending_consume = 0
+        self._text_content = self._text_content[n:]
+        content = self._acc.get("content")
+        if isinstance(content, str):
+            self._acc["content"] = content[n:]
+        self._shown = max(0, self._shown - n)
+
     def reset(self) -> None:
         """Clear the accumulator to hunt for the next call; keep the wire format.
 
-        Called by the **driver** once it has consumed a call (executed/failed) --
-        buffer lifecycle is the driver's concern, not the client's.
+        Called by the **driver** once it has consumed a native call (executed/failed) --
+        buffer lifecycle is the driver's concern, not the client's. Text calls advance via
+        :meth:`consume_through` instead (which keeps the tail).
         """
         self._acc = {}
         self._text_content = ""
         self._finished = False
         self._shown = 0
         self._held = False
+        self._pending_consume = 0
 
     # -- internals ------------------------------------------------------------
 

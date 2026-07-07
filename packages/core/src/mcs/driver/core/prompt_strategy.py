@@ -52,7 +52,20 @@ class PromptStrategy(ABC):
 
     @abstractmethod
     def parse_tool_call(self, raw: str) -> tuple[str, dict[str, Any]] | None:
-        """Extract ``(tool_name, arguments)`` from LLM output, or ``None``."""
+        """Extract the *first* ``(tool_name, arguments)`` from LLM output, or ``None``."""
+
+    def parse_tool_calls(self, raw: str) -> list[tuple[str, dict[str, Any], int]]:
+        """Every ``(tool_name, arguments, end)`` in *raw*, in order (``[]`` if none).
+
+        A single text message can carry several calls (a model narrating an example call
+        and then the real one, or several real ones). ``end`` is the offset just past a
+        call's text, so a streaming driver can advance the buffer past a handled call and
+        keep the tail. The default wraps :meth:`parse_tool_call` (single call spanning the
+        whole text); codecs that read multiple calls override this -- see
+        :class:`JsonPromptStrategy`.
+        """
+        call = self.parse_tool_call(raw)
+        return [(call[0], call[1], len(raw))] if call is not None else []
 
     @abstractmethod
     def retry_execution_failed(self, tool_name: str, error: str) -> str:
@@ -176,32 +189,74 @@ class JsonPromptStrategy(PromptStrategy):
         return json.dumps({"tools": schema}, indent=2)
 
     def parse_tool_call(self, raw: str) -> tuple[str, dict[str, Any]] | None:
+        """The *first* call in *raw* (or ``None``). Delegates to :meth:`parse_tool_calls`."""
+        calls = self.parse_tool_calls(raw)
+        return (calls[0][0], calls[0][1]) if calls else None
+
+    def parse_tool_calls(self, raw: str) -> list[tuple[str, dict[str, Any], int]]:
         # A markdown fence must be balanced: an opened ``` with no closing ``` is an
-        # incomplete (still-streaming) call. Parsing it now would execute the inner
-        # JSON before the closing fence arrives and orphan it as leaked text.
+        # incomplete (still-streaming) call. Parsing now would execute the inner JSON
+        # before the closing fence arrives and orphan it as leaked text.
         if raw.count("```") % 2 == 1:
-            return None
-        cleaned = self._apply_healing(raw)
+            return []
 
-        match = re.search(r"\{.*\}", cleaned, re.S)
-        if not match:
-            return None
+        calls: list[tuple[str, dict[str, Any], int]] = []
+        for obj_str, _start, obj_end in self._iter_json_objects(raw):
+            try:
+                obj = json.loads(self._apply_healing(obj_str))
+            except json.JSONDecodeError:
+                continue                                   # incomplete/malformed -> skip
+            if not isinstance(obj, dict):
+                continue
+            name: str | None = None
+            for alias in self._tool_field_aliases:
+                name = obj.get(alias)
+                if name:
+                    break
+            if not name:
+                continue                                   # a JSON object, but not a call
+            # Advance past the object *and* an immediately-following closing fence, so a
+            # fenced call's ``` is not left behind as orphaned display text.
+            end = obj_end
+            fence = re.match(r"\s*```", raw[obj_end:])
+            if fence is not None:
+                end = obj_end + fence.end()
+            calls.append((name, obj.get("arguments", {}) or {}, end))
+        return calls
 
-        try:
-            obj = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return None
+    @staticmethod
+    def _iter_json_objects(text: str):
+        """Yield ``(substring, start, end)`` for each **top-level balanced** ``{…}``.
 
-        tool_name: str | None = None
-        for alias in self._tool_field_aliases:
-            tool_name = obj.get(alias)
-            if tool_name:
-                break
-        if not tool_name:
-            return None
-
-        arguments = obj.get("arguments", {}) or {}
-        return tool_name, arguments
+        A brace scanner (string- and escape-aware) over the *raw* text, so the offsets
+        line up with what the buffer holds and several calls in one message are found
+        individually -- unlike a greedy ``\\{.*\\}``, which spans from the first ``{`` to
+        the *last* ``}`` and so fails to parse when two objects are present.
+        """
+        depth = 0
+        start = -1
+        in_str = False
+        esc = False
+        for i, ch in enumerate(text):
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}" and depth > 0:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    yield text[start:i + 1], start, i + 1
+                    start = -1
 
     def looks_like_call(self, text: str) -> bool:
         # Detect on the *raw* text: the fence itself is the signal, and healing would

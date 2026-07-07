@@ -164,6 +164,49 @@ class TestParseToolCall:
 
 
 # ---------------------------------------------------------------------------
+# parse_tool_calls (all calls in one message)
+# ---------------------------------------------------------------------------
+
+class TestParseToolCalls:
+    def test_finds_all_calls_in_one_text(self, strategy):
+        raw = (
+            "First the example:\n```json\n"
+            '{"tool": "findCatsByTags", "arguments": {"tags": ["Mops"]}}\n```\n'
+            "Then the real one:\n```json\n"
+            '{"tool": "greet", "arguments": {"name": "Alice"}}\n```'
+        )
+        calls = strategy.parse_tool_calls(raw)
+        assert [name for name, _args, _end in calls] == ["findCatsByTags", "greet"]
+        assert calls[1][1] == {"name": "Alice"}
+
+    def test_bare_json_pair_both_found(self, strategy):
+        raw = '{"tool": "a", "arguments": {"x": 1}} then {"name": "b", "arguments": {}}'
+        assert [n for n, _a, _e in strategy.parse_tool_calls(raw)] == ["a", "b"]
+
+    def test_braces_inside_strings_do_not_split(self, strategy):
+        raw = '{"tool": "a", "arguments": {"pattern": "a{b}c"}}'
+        calls = strategy.parse_tool_calls(raw)
+        assert [(n, a) for n, a, _e in calls] == [("a", {"pattern": "a{b}c"})]
+
+    def test_non_call_objects_skipped(self, strategy):
+        raw = '{"foo": "bar"} {"tool": "greet", "arguments": {}}'
+        assert [n for n, _a, _e in strategy.parse_tool_calls(raw)] == ["greet"]
+
+    def test_parse_tool_call_returns_first_of_many(self, strategy):
+        raw = '{"tool": "a", "arguments": {}} and {"tool": "b", "arguments": {}}'
+        assert strategy.parse_tool_call(raw)[0] == "a"
+
+    def test_end_offset_covers_object_and_trailing_fence(self, strategy):
+        raw = '```json\n{"tool": "greet", "arguments": {}}\n```'
+        (_name, _args, end), = strategy.parse_tool_calls(raw)
+        assert raw[:end].endswith("```")          # the closing fence is consumed too
+        assert end == len(raw)
+
+    def test_unbalanced_fence_defers(self, strategy):
+        assert strategy.parse_tool_calls('```json\n{"tool": "a"') == []
+
+
+# ---------------------------------------------------------------------------
 # Retry prompts
 # ---------------------------------------------------------------------------
 

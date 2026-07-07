@@ -515,6 +515,110 @@ class TestFormatIsolation:
         assert not OpenAICompletionExtractionStrategy().recognizes(ev)
 
 
+class MailAndLogDriver(BaseDriver):
+    """Owns a *different* tool than EchoDriver -- for a two-driver fan-out chain."""
+
+    meta: DriverMeta = _Meta()
+
+    def list_tools(self) -> list[Tool]:
+        return [Tool("log_event", description="Log an event")]
+
+    def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        return {"logged": arguments}
+
+
+def _stream_text(driver, buf, text: str, size: int = 12):
+    """Feed *text* as OpenAI content chunks of ~*size* chars (real streaming); return
+    ``(shown, executed_records)`` -- what the driver let through + every executed call."""
+    shown: str = ""
+    records: list = []
+    for i in range(0, len(text), size):
+        buf.add(_oai_content_chunk(text[i:i + size]))
+        dr = driver.process_llm_response(buf)
+        shown += buf.text()
+        if dr.executed_calls:
+            records.extend(dr.executed_calls)
+    return shown, records
+
+
+class TestTextMultiCall:
+    """Several text-embedded calls in one turn, streamed chunk by chunk. The driver
+    advances past each handled call (``buf.consume_through``) keeping the tail, so a
+    later call is never shadowed by an earlier one."""
+
+    def test_two_unowned_calls_flow_and_nothing_runs(self):
+        """The user's live case: two hypothetical (unowned) calls + prose. Both flow as
+        text, neither executes, and the second is *not* anchored behind the first."""
+        driver = EchoDriver()                              # owns send_mail only
+        buf = LLMStreamBuffer()
+        text = (
+            "Hypothetisch:\n```json\n"
+            '{"tool": "findCatsByTags", "arguments": {"tags": ["Mops"]}}\n```\n'
+            "Oder:\n```json\n"
+            '{"tool": "findCatsByTags", "arguments": {"tags": ["tag1", "tag2"]}}\n```\n'
+            "Nur hypothetisch."
+        )
+        shown, records = _stream_text(driver, buf, text)
+        assert records == []                               # nothing owned -> nothing ran
+        assert "Hypothetisch" in shown and "Nur hypothetisch." in shown
+
+    def test_unowned_example_then_owned_real_runs_the_real_one(self):
+        """The dangerous case: an unowned example call first, the real owned call after.
+        The real one is found and executed -- exactly what a first-only parse missed."""
+        driver = EchoDriver()                              # owns send_mail
+        buf = LLMStreamBuffer()
+        text = (
+            "Example:\n```json\n"
+            '{"tool": "findCatsByTags", "arguments": {"tags": ["x"]}}\n```\n'
+            "Now for real:\n```json\n"
+            '{"tool": "send_mail", "arguments": {"to": "a@b.c"}}\n```'
+        )
+        _shown, records = _stream_text(driver, buf, text)
+        assert [r.name for r in records] == ["send_mail"]
+        assert records[0].arguments == {"to": "a@b.c"}
+
+    def test_two_owned_calls_both_execute_in_order(self):
+        """Two real owned calls in one turn: both run, in order -- the buffer advances
+        past the first (keeping the tail) so the second streams in and executes too."""
+        driver = EchoDriver()                              # owns send_mail
+        buf = LLMStreamBuffer()
+        text = (
+            "First:\n```json\n{\"tool\": \"send_mail\", \"arguments\": {\"to\": \"a@b.c\"}}\n```\n"
+            "Second:\n```json\n{\"tool\": \"send_mail\", \"arguments\": {\"to\": \"x@y.z\"}}\n```"
+        )
+        _shown, records = _stream_text(driver, buf, text)
+        assert [r.arguments["to"] for r in records] == ["a@b.c", "x@y.z"]
+
+    def test_deferred_consume_is_fan_out_safe(self):
+        """A chain: driver A does not own the call, driver B does. A's advance is
+        *deferred* (applied on the next add), so B still sees the call this round and
+        executes it -- A never steals it."""
+        a = MailAndLogDriver()                             # owns log_event, NOT send_mail
+        b = EchoDriver()                                   # owns send_mail
+        buf = LLMStreamBuffer()
+        text = 'Do it:\n```json\n{"tool": "send_mail", "arguments": {"to": "a@b.c"}}\n```'
+        executed: list = []
+        for i in range(0, len(text), 12):
+            buf.add(_oai_content_chunk(text[i:i + 12]))
+            a.process_llm_response(buf)                    # A: not mine -> deferred consume
+            drb = b.process_llm_response(buf)              # B: mine -> must still see + run it
+            if drb.executed_calls:
+                executed.extend(drb.executed_calls)
+        assert [r.name for r in executed] == ["send_mail"]
+
+    def test_whole_text_non_streaming_finds_both(self):
+        """Non-streaming counterpart: the complete text yields both calls at once; only
+        the owned one runs."""
+        driver = EchoDriver()                              # owns send_mail
+        text = (
+            '```json\n{"tool": "findCatsByTags", "arguments": {}}\n```\n'
+            '```json\n{"tool": "send_mail", "arguments": {"to": "a@b.c"}}\n```'
+        )
+        dr = driver.process_llm_response(text)
+        assert dr.call_executed is True
+        assert [r.name for r in dr.executed_calls] == ["send_mail"]
+
+
 class TestForming:
     """forming() = 'a tool call is coming' (+ name once streamed), distinct from
     recognizes() = format identification."""

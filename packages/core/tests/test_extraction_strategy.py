@@ -268,6 +268,21 @@ class TestBaseDriverExtractionChain:
         assert dr.call_executed is False
         assert dr.call_failed is False
 
+    def test_whole_text_example_then_real_call_runs_the_real_one(self):
+        """A complete message that narrates an (unowned) example call and then makes the
+        real (owned) one: the real call is found and executed -- not shadowed by the
+        first. This is the non-streaming counterpart of the multi-call-in-text case."""
+        driver = SimpleBaseDriver()                       # owns only greet
+        text = (
+            'Example: ```json\n'
+            '{"tool": "findCatsByTags", "arguments": {"tags": ["x"]}}\n```\n'
+            'Real: ```json\n{"tool": "greet", "arguments": {"name": "Bob"}}\n```'
+        )
+        dr = driver.process_llm_response(text)
+        assert dr.call_executed is True
+        assert dr.tool_call_result == "Hello!"
+        assert [r.name for r in dr.executed_calls] == ["greet"]   # only the owned one ran
+
 
 # -- Custom ExtractionStrategy injection --------------------------------------
 

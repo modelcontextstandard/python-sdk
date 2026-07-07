@@ -53,11 +53,18 @@ class ExtractedCall:
     The format-neutral hand-off from :meth:`ExtractionStrategy.extract` to the
     driver: *what* to run (``name`` + parsed ``arguments``) and, for native
     formats, the ``id`` needed to answer the call in the provider's history. A
-    message may yield several (native parallel calls); text yields at most one.
+    message may yield several (native parallel calls); text yields several too.
+
+    ``end`` is the offset just past this call's text (including a trailing fence) for a
+    *text*-wire call, so the driver can advance the stream buffer past it
+    (``buf.consume_through(end)``) and keep the tail -- the next call or trailing prose.
+    ``None`` for native calls (their whole message is the batch -> the buffer resets).
+    Excluded from equality: it is buffer bookkeeping, not the call's identity.
     """
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
     id: str | None = None
+    end: int | None = field(default=None, compare=False)
 
 
 @dataclass
@@ -240,11 +247,14 @@ class TextExtractionStrategy(ExtractionStrategy):
         text = message if isinstance(message, str) else _message_text(message)
         if not text:
             return []
-        parsed = self._codec.parse_tool_call(text)
-        if parsed is None:
-            return []
-        name, arguments = parsed
-        return [ExtractedCall(name=name, arguments=arguments)]
+        # All calls in the text, each with its end offset: a message may narrate an
+        # example call and then the real one, or carry several real ones. The greedy
+        # first-only parse would miss (or, with two objects, fail on) everything after the
+        # first; the offset lets the driver advance the buffer past a handled call.
+        return [
+            ExtractedCall(name=name, arguments=arguments, end=end)
+            for name, arguments, end in self._codec.parse_tool_calls(text)
+        ]
 
     def recognizes(self, shape: Any) -> bool:
         """Claim any **plain-text** shape -- a ``str`` or a dict with string ``content``.
