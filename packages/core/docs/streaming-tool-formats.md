@@ -2,7 +2,10 @@
 
 > Status: **reference / locked-down** (2026-07). Verified against official provider
 > docs via research sweep. Guides the streaming `ExtractionStrategy` subclasses and
-> future format additions.
+> future format additions. The reassembly/extraction *design decision* (native
+> reassembly, not canonical normalisation) is recorded in
+> `docs/adr/0001-streaming-extraction-native-reassembly.md` — this doc is the "how"
+> (the per-format wire matrix); the ADR is the "why".
 
 MCS is **LLM-, provider- and SDK-agnostic**. It knows **tool formats**, nothing else.
 litellm/OpenAI-SDK/Anthropic-SDK are conveniences the *client* chooses; MCS never
@@ -12,26 +15,33 @@ the **two axes** MCS actually cares about.
 ## The two axes — one hierarchy
 
 Both axes live on **`ExtractionStrategy`**; there is no separate "wire codec" type.
-Each native format is a subclass that owns its format end to end:
+Each format is a subclass that owns its format end to end, **in its own native shape**:
 
 ```
-raw chunk/event ─[ strategy.accumulate ]→ canonical message ─[ strategy.extract ]→ Tool-Call
-                  (SDK stream → vocab)      {content, tool_calls[]}   (encoding → call)
-                   buffer delegates                                     driver calls
+raw chunk/event ─[ strategy.accumulate ]→ native message ─[ recognizes/forming/extract ]→ Tool-Call
+                  (SDK stream → its shape)  (stream=false shape)   (which format / coming / call)
+                   buffer delegates                                 driver calls
 ```
 
-1. **Reassembly** (`accumulate` / `is_done`) — how an SDK/endpoint *streams* the
-   pieces. The `LLMStreamBuffer` holds the accumulator and delegates to the format it
-   recognises. SDK-specific, but a *method*, not a parallel type.
-2. **Encoding** (`recognizes` + `extract`) — how a *complete* tool call reads in the
-   assembled message.
+1. **Reassembly** (`accumulate` / `is_stream_complete`) — how an SDK/endpoint *streams*
+   the pieces. The `LLMStreamBuffer` resolves the wire format on the first chunk and
+   delegates accumulation to it; at stream end `as_dict()` equals the provider's
+   `stream=false` message. SDK-specific, but a *method*, not a parallel type.
+2. **Extraction** — three distinct questions on the assembled message:
+   - **`recognizes(shape) -> bool`** — *which format* is this? Identification only, not
+     "is a call here". Native formats claim their envelope; the text format claims any
+     plain-text content.
+   - **`forming(message) -> Forming`** — *is a call coming?* (`forming`, plus `tool_name`
+     once it has streamed). Drives the driver's mid-stream hold and early-release.
+   - **`extract(message) -> list[ExtractedCall]`** — the *finished* call(s).
 
-The three native strategies **normalise their wire onto one canonical message shape**
-(mirroring litellm's per-provider iterator + one generic assembler), so a single
-`extract` serves all. The axes coincide for native formats and diverge only for
-text-embedded tools (native `accumulate` + `TextExtractionStrategy` extract).
+The native strategies do **not** normalise onto one shared shape. Each reassembles into
+**its own** native message and reads it. The axes coincide for a native call (OpenAI
+chunk → OpenAI message → OpenAI extract) and diverge for a text-embedded call (an OpenAI
+*wire* carrying the call as JSON in `content` → the driver resolves `TextExtractionStrategy`
+on the assembled message). See `docs/adr/0001-streaming-extraction-native-reassembly.md`.
 
-### Canonical streaming vocabulary (what a format's `accumulate` must yield)
+### Reassembly primitives (what a format's `accumulate` consumes)
 
 | primitive | meaning |
 |---|---|
@@ -40,16 +50,25 @@ text-embedded tools (native `accumulate` + `TextExtractionStrategy` extract).
 | **NAME** (once) | the tool name |
 | **CALL-ID** (once) | correlation id echoed back in the result |
 | **ARGS-fragment** | a partial JSON-string piece of the arguments |
-| **DONE** | this call is complete (per-call where available, else turn-end) |
+| **DONE** | the call/turn is complete (per-call where available, else turn-end) → `is_stream_complete` |
 
-### Canonical intermediate (deliberate choice)
+### Native intermediate (the reassembly target)
 
-The assembled message the buffer produces = **OpenAI *message* shape**:
-`{role, content, tool_calls:[{id, type:"function", function:{name, arguments}}]}`
-with **`arguments` as a JSON *string***. Rationale: it is the de-facto normalized form
-(what litellm emits), the `ExtractionStrategy` chain already reads it, and every
-object-args provider serializes losslessly into it (`json.dumps`). This is a choice of
-*vocabulary*, not knowledge of any SDK.
+The message the buffer produces = **the provider's own `stream=false` shape**, not a
+normalised one:
+
+| format | assembled message | args (final) |
+|---|---|---|
+| OpenAI Completions | `{role, content, tool_calls:[{id, type:"function", function:{name, arguments}}]}` | JSON **string** |
+| OpenAI Responses | `{output:[{type:"function_call", call_id, name, arguments}, …]}` | JSON **string** |
+| Anthropic Messages | `{role, content:[{type:"tool_use", id, name, input}, …]}` | **object** (streamed as an `input_json` string, parsed by `extract`) |
+
+`extract` turns whichever native form into the parsed `arguments` dict of an
+`ExtractedCall`. This replaces the earlier *canonical-intermediate* design (every wire
+normalised onto the OpenAI message shape); see ADR-0001 for why native reassembly won —
+the buffer stays a buffer (no translation), each strategy stays a whole-format expert,
+and the format is resolved once. A model that **leaks** a call into text is handled by
+the driver's native→text fall-through (`leaks_into_text`), not by normalisation.
 
 ---
 

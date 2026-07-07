@@ -22,8 +22,12 @@ from .prompt_strategy import PromptStrategy
 from .extraction_strategy import (
     ExtractionStrategy,
     ExtractedCall,
+    Forming,
     TextExtractionStrategy,
     OpenAICompletionExtractionStrategy,
+    OpenAIResponseExtractionStrategy,
+    AnthropicExtractionStrategy,
+    _result_text,
 )
 from .extraction_chain import ExtractionChain
 from .llm_stream_buffer import LLMStreamBuffer
@@ -56,17 +60,24 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         custom_tool_description: str | None = None,
         custom_system_message: str | None = None,
         _extraction_strategies: list[ExtractionStrategy] | None = None,
+        _chain: ExtractionChain | None = None,
     ) -> None:
         self._strategy = prompt_strategy or PromptStrategy.default()
         self._custom_tool_description = custom_tool_description
         self._custom_system_message = custom_system_message
+        # The one shared chain: every native wire (so the driver can extract a call
+        # from any provider's native message the buffer reassembled) followed by one
+        # text codec (JSON, the ~99.9% case). A developer adds Hermes/XML/Ollama as one
+        # more entry. The buffer resolves *reassembly* over these; the driver resolves
+        # *extraction* over the same list -- two axes, one list.
         self._extractors: list[ExtractionStrategy] = _extraction_strategies or [
             OpenAICompletionExtractionStrategy(),
+            OpenAIResponseExtractionStrategy(),
+            AnthropicExtractionStrategy(),
             TextExtractionStrategy(self._strategy),
         ]
-        # Shape-resolution + preferred-strategy cache live in the chain, so the
-        # driver (extract) and the stream buffer (accumulate) share one instance.
-        self._chain = ExtractionChain(self._extractors)
+        self._chain = _chain or ExtractionChain(self._extractors)       
+        self._native_backup = TextExtractionStrategy(self._strategy)
 
         # Capability flags are derived from the interfaces this driver implements
         # (MCSDriver -> "standalone", MCSToolDriver -> "orchestratable",
@@ -97,9 +108,11 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
     ) -> DriverResponse:
         # The *type* is the streaming signal: an LLMStreamBuffer means mid-stream
         # (only a stream-aware driver ever sees one); str | dict is the base path. The
-        # owning strategy is resolved *once* here for both paths -- both converge on
-        # _dispatch_tool_calls; the driver only ever asks "is there a call here that is
-        # mine to run?", the ExtractionStrategy owns the format.
+        # driver resolves the *extraction* axis on the assembled message here (the buffer
+        # already resolved the *reassembly* axis on the raw chunks) -- two different
+        # questions on the one shared chain. Both paths converge on _dispatch_tool_calls;
+        # the driver only ever asks "is there a call here that is mine to run?", the
+        # ExtractionStrategy owns the format.
         message = (
             llm_response.as_dict()
             if isinstance(llm_response, LLMStreamBuffer)
@@ -107,45 +120,99 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         )
         strategy = self._chain.resolve(message)
         if strategy is None:
-            return DriverResponse()                  # no call recognised -> (stream: text flows)
+            return DriverResponse()                  # no format recognised -> (stream: text flows)
         if isinstance(llm_response, LLMStreamBuffer):
             return self._process_stream(llm_response, strategy, message)
-        return self._dispatch_tool_calls(strategy, message, strategy.extract(message))
+        eff, emsg, _forming, calls = self._resolve_call(strategy, message)
+        return self._dispatch_tool_calls(eff, emsg, calls)
+
+    # -- Extraction (with the native->text leak fall-through) -----------------
+
+    def _resolve_call(
+        self, strategy: ExtractionStrategy, message: str | dict,
+    ) -> tuple[ExtractionStrategy, str | dict, Forming, list[ExtractedCall]]:
+        """Resolve the call in *message*: its forming state and finished call(s).
+
+        Returns ``(effective_strategy, effective_message, forming, calls)``. A model in
+        native mode occasionally *leaks* its call as text instead of the native slot. For
+        an envelope format whose message always carries its structure (``leaks_into_text``)
+        the native strategy claims the shape but is neither forming nor extracting a call
+        -- so the driver hands the message's plain text
+        (:meth:`~ExtractionStrategy.content_text`) to the text backup. If the backup sees a
+        call (forming or complete), *it* becomes the effective strategy (and shapes the
+        result history: a leaked call opened no native id, so the model expects a
+        text-style continuation).
+        """
+        calls = strategy.extract(message)
+        forming = strategy.forming(message)
+        if calls or forming or not strategy.leaks_into_text:
+            return strategy, message, forming, calls
+        backup = self.get_native_backup_strategy()
+        if backup is None:
+            return strategy, message, forming, calls
+        text = strategy.content_text(message)
+        b_calls, b_forming = backup.extract(text), backup.forming(text)
+        if b_calls or b_forming:
+            return backup, text, b_forming, b_calls
+        return strategy, message, forming, calls
+
+
+    def set_native_backup_strategy(self, strategy: TextExtractionStrategy | None) -> None:
+        """Set (or clear with ``None``) the leak backup. ``None`` disables the
+        native→text fall-through -- a leaked call then flows as text, uncaught."""
+        self._native_backup = strategy
+
+    def get_native_backup_strategy(self) -> TextExtractionStrategy | None:
+        """The text strategy used when a native format claims but extracts no call.
+
+        Fulfils the ``SupportsNativeTools`` leak-backup concern. Defaults to the text
+        strategy in this driver's chain; a driver may override to supply a different one.
+        Must be a text strategy (it is handed a plain string). 
+        """             
+        return self._native_backup
+
+    def extraction_strategies(self) -> list[ExtractionStrategy]:
+        """This driver's extraction chain (``SupportsStreaming``).
+
+        Handed to a stream buffer so it reassembles over the same strategies the driver
+        extracts with -- one shared list, two axes. See :meth:`new_stream_buffer`.
+        """
+        return list(self._extractors)
 
     # -- Streaming --------------------------------------------------------------
 
     def _process_stream(
         self, buf: LLMStreamBuffer, strategy: ExtractionStrategy, message: str | dict,
     ) -> DriverResponse:
-        """Hold while a call forms; decide as soon as it is complete.
+        """Hold while a call *forms*; decide as soon as it is complete; else flow.
 
-        Once a strategy *recognises* a call (forming or complete), the driver holds
-        the buffer -- reporting ``call_pending`` so the raw JSON/markup does not leak
-        -- until :meth:`~ExtractionStrategy.extract` yields a runnable call. A native
-        parallel batch grows until the stream's DONE signal (``buf.is_finished()``),
-        so a ``batched`` strategy stays pending until then -- executing early would
-        strand a still-streaming sibling. A text-embedded call is single and
-        self-delimited (its closing fence completes it), so it resolves the moment it
-        parses -- no waiting for the turn's end, so display isn't held longer than
-        the call itself. Plain text (nothing recognised) simply flows.
+        Three outcomes, in order: (1) a runnable call is ready -> execute it and clear the
+        buffer; a ``batched`` native strategy waits for the stream's DONE signal
+        (``buf.is_finished()``) first, so a still-streaming parallel sibling is never
+        stranded. (2) no call yet but one is :meth:`~ExtractionStrategy.forming` -> hold
+        the buffer (``call_pending``) so the raw JSON/markup does not leak into display --
+        unless the forming call already names a tool this driver does not own (a model
+        *explaining* a call), which is released early as text. (3) not forming -> plain
+        text (prose, or a final answer) simply flows.
         """
-        calls = strategy.extract(message)
-        if not calls or (strategy.batched and not buf.is_finished()):
-            # A call forming for a tool I do not own -- a model *explaining* a call
-            # rather than making one -- should flow as text, not be held. For a single
-            # (non-batched) format, once its name has streamed in and is not one of my
-            # tools, release now instead of holding the whole object.
-            if not strategy.batched:
-                name = strategy.forming_name(message)
-                if name is not None and name not in {t.name for t in self.list_tools()}:
-                    return DriverResponse()          # not mine -> flow as text
-            buf.hold()                               # forming / batch not done -> suppress + pending
-            return DriverResponse(call_pending=True)
+        eff, emsg, forming, calls = self._resolve_call(strategy, message)
 
-        dr = self._dispatch_tool_calls(strategy, message, calls)
-        if dr.call_executed or dr.call_failed:
-            buf.reset()   # call consumed -- clear to hunt for the next
-        return dr
+        if calls and not (eff.batched and not buf.is_finished()):
+            dr = self._dispatch_tool_calls(eff, emsg, calls)
+            if dr.call_executed or dr.call_failed:
+                buf.reset()   # call consumed -- clear to hunt for the next
+            return dr
+
+        if not forming:
+            return DriverResponse()                  # plain text -> flows
+
+        if not eff.batched and forming.tool_name and (
+            forming.tool_name not in {t.name for t in self.list_tools()}
+        ):
+            return DriverResponse()                  # names a tool I don't own -> flow as text
+
+        buf.hold()                                   # forming / batch not done -> suppress + pending
+        return DriverResponse(call_pending=True)
 
     # -- Tool execution (one uniform path for every format) -------------------
 
@@ -156,11 +223,11 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         """Run the *calls* that are this driver's own; ignore the rest.
 
         The driver knows only itself: it keeps the calls it can run and executes
-        those. Calls it does not own are left untouched -- silently (or via
-        ``_no_owned``), because another driver in the client's list may own them
-        (fan-out). The :class:`ExtractionStrategy` owns *how* the calls were found and
-        *how* the result history is shaped, so this method never branches on native
-        vs. text.
+        those. Calls it does not own are left untouched -- silently, because another
+        driver in the client's list may own them (fan-out). The :class:`ExtractionStrategy`
+        owns *how* the calls were found and *how* the result history is shaped, so this
+        method never branches on native vs. text. *calls* are already extracted (with any
+        leak fall-through applied by :meth:`_extract`).
         """
         if not calls:
             return DriverResponse()
@@ -217,12 +284,8 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         if not successes:
             return None
         if len(successes) == 1:
-            return BaseDriver._result_text(successes[0].result)
+            return _result_text(successes[0].result)
         return [r.result for r in successes]
-
-    @staticmethod
-    def _result_text(result: Any) -> str:
-        return result if isinstance(result, str) else json.dumps(result)
 
     # -- SupportsNativeTools implementation ------------------------------------
 

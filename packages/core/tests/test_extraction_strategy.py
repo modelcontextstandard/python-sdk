@@ -310,15 +310,28 @@ class TestRecognizePhase:
         s = OpenAICompletionExtractionStrategy()
         assert not s.recognizes('{"tool_calls": []}')
 
-    def test_text_recognizes_its_codec_marker(self):
-        """The text strategy claims by content: its codec's marker (a tool-keyed JSON
-        object) is recognised; plain prose is not."""
+    def test_text_recognizes_any_plain_text(self):
+        """recognize = format ID: the text strategy owns any plain-text shape (a ``str``
+        or ``{content: <str>}``) whether or not a call is embedded. A block/item list or
+        an envelope is *not* text format. Whether a call is coming is ``forming``."""
         codec = JsonPromptStrategy.from_defaults()
         s = TextExtractionStrategy(codec)
         assert s.recognizes('{"tool": "greet"}')
         assert s.recognizes({"content": '{"tool": "greet"}'})
-        assert not s.recognizes("just some prose")
-        assert not s.recognizes({"content": "just some prose"})
+        assert s.recognizes("just some prose")                    # plain text is text format
+        assert s.recognizes({"content": "just some prose"})
+        assert not s.recognizes({"content": [{"type": "text"}]})  # Anthropic block list
+        assert not s.recognizes({"tool_calls": []})               # OpenAI envelope
+
+    def test_text_forming_detects_the_codec_marker(self):
+        """forming = 'a call is coming': the codec's marker forms; plain prose does not."""
+        codec = JsonPromptStrategy.from_defaults()
+        s = TextExtractionStrategy(codec)
+        assert s.forming('{"tool": "greet"}')
+        assert s.forming({"content": '{"tool": "greet"}'})
+        assert s.forming('{"tool": "greet"}').tool_name == "greet"
+        assert not s.forming("just some prose")
+        assert not s.forming({"content": "just some prose"})
 
     def test_recognizer_blocks_text_fallback_even_when_extract_returns_none(self):
         """The critical false-positive prevention test.

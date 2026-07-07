@@ -9,6 +9,7 @@ from .prompt_strategy import PromptStrategy, JsonPromptStrategy
 from .extraction_strategy import (
     ExtractionStrategy,
     ExtractedCall,
+    Forming,
     TextExtractionStrategy,
     OpenAICompletionExtractionStrategy,
     OpenAIResponseExtractionStrategy,
@@ -27,7 +28,7 @@ __all__ = [
     "Tool", "ToolParameter", "MCSToolDriver",
     "BaseDriver", "BaseDecorator", "LLMStreamBuffer",
     "PromptStrategy", "JsonPromptStrategy",
-    "ExtractionStrategy", "ExtractedCall", "TextExtractionStrategy",
+    "ExtractionStrategy", "ExtractedCall", "Forming", "TextExtractionStrategy",
     "OpenAICompletionExtractionStrategy", "OpenAIResponseExtractionStrategy",
     "AnthropicExtractionStrategy", "ExtractionChain",
     "SupportsHealthcheck", "HealthCheckResult", "HealthStatus",

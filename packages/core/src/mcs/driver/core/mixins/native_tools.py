@@ -21,7 +21,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..extraction_strategy import TextExtractionStrategy
 
 
 @dataclass
@@ -51,3 +54,24 @@ class SupportsNativeTools(ABC):
     def get_native_tool_context(
         self, model_name: str | None = None,
     ) -> NativeToolContext: ...
+
+    @abstractmethod
+    def set_native_backup_strategy(self, strategy: "TextExtractionStrategy | None") -> None:
+        """Set (or clear with ``None``) the text strategy used when a native format leaks
+        a call into its text; read back via :meth:`get_native_backup_strategy`. ``None``
+        disables the leak fall-through, so a leaked call flows as text, uncaught."""
+
+    @abstractmethod
+    def get_native_backup_strategy(self) -> "TextExtractionStrategy | None":
+        """The text strategy used when a native format leaks a call into its text.
+
+        A model in native mode occasionally writes its call as text in the content
+        channel instead of the native slot. For an envelope format whose message always
+        carries its structure (Anthropic blocks, Responses items), the native strategy
+        claims the shape but extracts no call; the driver then hands the message's plain
+        text to this backup. Must be a text strategy (it is handed a plain string).
+
+        The default is ``None`` (no leak backup); ``BaseDriver`` supplies the text
+        strategy from its extraction chain.
+        """
+        return None

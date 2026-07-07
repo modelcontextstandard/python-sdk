@@ -1,11 +1,12 @@
 """Optional contract for drivers that process streaming tool-call responses.
 
 When an LLM streams its response chunk by chunk, the client reassembles it with an
-:class:`~mcs.driver.core.LLMStreamBuffer` -- created **directly**, because the
-buffer is MCS (SDK-agnostic) and not bound to any driver -- and hands the **buffer
-itself** to this driver's ``process_llm_response``:
+:class:`~mcs.driver.core.LLMStreamBuffer` and hands the **buffer itself** to this
+driver's ``process_llm_response``. The buffer is MCS (SDK-agnostic) and not bound to any
+driver; :meth:`~SupportsStreaming.new_stream_buffer` is a convenience that pre-seeds it
+with the driver's chain (equivalently ``LLMStreamBuffer(streamer.extraction_strategies())``):
 
-    buf = LLMStreamBuffer()
+    buf = streamer.new_stream_buffer()                 # or LLMStreamBuffer(strategies)
     for chunk in stream:
         buf.add(chunk)
         dr = streamer.process_llm_response(buf)        # a buffer argument == streaming
@@ -26,9 +27,11 @@ keeping the two concerns separate. The client stays format-agnostic (identical l
 native and text-embedded calls) and never inspects the chunk.
 
 The client detects support via ``driver.meta.has_capability`` / ``DriverMeta.resolve_capability``
-and depends on this capability, not on any concrete driver class. The buffer is
-deliberately not a driver method (reassembly is an LLM/SDK concern, identical for every
-driver, and drivers compose). See ``packages/core/docs/streaming-tool-formats.md``.
+and depends on this capability, not on any concrete driver class. Reassembly is an LLM/SDK
+concern, identical for every driver, and drivers compose -- so the buffer is a standalone
+object, not a driver method; the driver only offers the factory as convenience. See
+``docs/adr/0001-streaming-extraction-native-reassembly.md`` and
+``packages/core/docs/streaming-tool-formats.md``.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..mcs_driver_interface import DriverResponse
     from ..llm_stream_buffer import LLMStreamBuffer
+    from ..extraction_strategy import ExtractionStrategy
 
 
 class SupportsStreaming(ABC):
@@ -62,3 +66,26 @@ class SupportsStreaming(ABC):
         once the call is complete. A plain ``str | dict`` is handled as the base does.
         """
         ...
+
+    @abstractmethod
+    def extraction_strategies(self) -> "list[ExtractionStrategy]":
+        """The driver's extraction chain -- the strategies a buffer must share.
+
+        The buffer resolves the *reassembly* axis over these (on raw chunks); the driver
+        resolves the *extraction* axis over the same list (on the assembled message).
+        Exposed so a client can seed a buffer with the driver's chain (custom formats
+        reach the buffer). See :meth:`new_stream_buffer`.
+        """
+        ...
+
+    def new_stream_buffer(self, model_name: str | None = None) -> "LLMStreamBuffer":
+        """A stream buffer pre-seeded with this driver's chain (convenience).
+
+        The buffer is standalone and not bound to the driver -- this factory only
+        *constructs* it with :meth:`extraction_strategies` so the client does not have to
+        pass the chain by hand. Equivalent to
+        ``LLMStreamBuffer(streamer.extraction_strategies())``. Fan-out stays intact: the
+        client may build one buffer and feed it through a list of drivers.
+        """
+        from ..llm_stream_buffer import LLMStreamBuffer
+        return LLMStreamBuffer(self.extraction_strategies(), model_name=model_name)

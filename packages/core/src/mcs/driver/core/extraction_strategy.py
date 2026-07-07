@@ -1,33 +1,34 @@
 """ExtractionStrategy -- locate *and* reassemble tool calls in LLM responses.
 
-An ``ExtractionStrategy`` owns the knowledge of **one tool format**. It answers
-two questions for that format:
+An ``ExtractionStrategy`` owns the knowledge of **one tool format**, end to end, in
+**its own native shape**: it *recognises* that format in a shape (:meth:`recognizes`),
+*reassembles* the streaming fragments into its native message (:meth:`accumulate` /
+:meth:`is_stream_complete`), *extracts* the complete call(s) from that message (:meth:`extract`),
+exposes the message's plain text for the leak fall-through (:meth:`content_text`), and
+shapes the executed calls back into the format's conversation *history*
+(:meth:`result_messages`). See the class docstring for the full protocol.
 
-- *"Where is the tool call in this (complete) response?"* -> :meth:`extract`
-- *"How do the streaming fragments of this format stitch together?"* ->
-  :meth:`accumulate` / :meth:`is_done`
-
-It is deliberately separate from the ``PromptStrategy`` (codec), which answers
-*"what text format is a tool call written in?"* -- the codec parametrises the
-*text* strategy; a streaming *wire* format is its own strategy subclass.
+Unlike an earlier design, the native strategies do **not** normalise their wire onto a
+canonical OpenAI shape. The buffer reassembles each format into the exact message the
+provider's SDK returns for ``stream=false`` (OpenAI keeps ``{content, tool_calls}``,
+Anthropic keeps its ``content:[{type:"tool_use"}]`` block list, Responses keeps its
+``output:[{type:"function_call"}]`` item list) and the strategy reads *its* shape. See
+``docs/adr/0001-streaming-extraction-native-reassembly.md`` and
+``packages/core/docs/streaming-tool-formats.md``.
 
 Concrete implementations:
 
-- ``TextExtractionStrategy`` -- delegates to a ``PromptStrategy`` codec to find a
-  tool call embedded in free text (bridge pattern). Non-streaming.
+- ``TextExtractionStrategy`` -- delegates to a ``PromptStrategy`` codec to find a tool
+  call embedded in free text (bridge pattern); claims mid-stream via the codec's marker
+  so the driver holds display until the call parses. It does not reassemble a wire
+  (text content is accumulated by whichever *wire* strategy carries it).
 - ``OpenAICompletionExtractionStrategy`` -- OpenAI Chat Completions: assembled
-  ``tool_calls[0].function`` and the ``choices[0].delta.tool_calls[]`` stream.
-- ``OpenAIResponseExtractionStrategy`` -- OpenAI Responses API: ``function_call``
-  items and the ``response.function_call_arguments.delta`` event stream.
-- ``AnthropicExtractionStrategy`` -- Anthropic Messages: ``tool_use`` blocks and
-  the ``content_block_start`` / ``input_json_delta`` event stream.
-
-The three native strategies **normalise their wire onto the canonical OpenAI
-*message* shape** (``{tool_calls:[{function:{name, arguments}}]}``, ``arguments``
-a JSON string) and share one :meth:`extract`. This mirrors litellm's proven
-architecture -- a per-provider iterator that translates events into OpenAI-shaped
-chunks, feeding one generic assembler. See
-``packages/core/docs/streaming-tool-formats.md``.
+  ``{content, tool_calls:[{function:{name, arguments}}]}`` and the
+  ``choices[0].delta.tool_calls[]`` stream.
+- ``OpenAIResponseExtractionStrategy`` -- OpenAI Responses API: an ``output`` item list
+  with ``function_call`` items and the ``response.*`` event stream.
+- ``AnthropicExtractionStrategy`` -- Anthropic Messages: a ``content`` block list with
+  ``tool_use`` blocks and the ``content_block_start`` / ``input_json_delta`` event stream.
 """
 
 from __future__ import annotations
@@ -59,6 +60,23 @@ class ExtractedCall:
     id: str | None = None
 
 
+@dataclass
+class Forming:
+    """Whether a tool call is *taking shape* in a message, and its name once known.
+
+    The streaming counterpart of :meth:`ExtractionStrategy.extract`: ``recognizes``
+    says *which format* a shape is, ``forming`` says *a call is on its way here* (so the
+    driver holds display), and ``extract`` yields it once complete. ``tool_name`` is
+    ``None`` until the name has streamed in -- it lets the driver release early when the
+    forming call names a tool it does not own. Truthy iff a call is forming.
+    """
+    forming: bool = False
+    tool_name: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.forming
+
+
 def _get(obj: Any, key: str, default: Any = None) -> Any:
     """Read *key* from a dict or as an attribute.
 
@@ -76,38 +94,47 @@ def _result_text(result: Any) -> str:
 
 
 def _message_text(message: Any) -> str:
-    """The assistant-visible text of a message (``str`` or ``{"content": ...}``)."""
+    """The assistant-visible text of a message (``str`` or ``{"content": <str>}``).
+
+    Returns ``""`` when ``content`` is not a plain string (e.g. an Anthropic block
+    list) -- a native message's text is read by that format's :meth:`content_text`,
+    never here. This keeps the text strategy from ever claiming a native shape.
+    """
     if isinstance(message, str):
         return message
     if isinstance(message, dict):
-        return message.get("content") or ""
+        content = message.get("content")
+        return content if isinstance(content, str) else ""
     return ""
 
 
 class ExtractionStrategy(ABC):
     """Own one tool format: recognise it, reassemble its stream, extract its call.
 
-    The protocol:
+    The protocol -- three distinct questions on a message:
 
-    1. **Recognise** -- :meth:`recognizes` inspects a *shape* (an assembled
-       message *or* a raw streaming chunk) and returns ``True`` when a call of this
-       format is present -- *forming or complete*. Native formats claim by envelope
-       (``tool_calls`` key, event type); the text format claims by content (its
-       codec's marker). This is what lets the driver hold display mid-stream and
-       parse at the end. Default ``False``.
-    2. **Extract** -- :meth:`extract` parses a *complete* message into the list of
-       runnable :class:`ExtractedCall` s it carries (native formats may carry
-       several in parallel); ``[]`` while still forming.
-    3. **Result history** -- :meth:`result_messages` shapes the executed calls back
-       into this format's conversation history (native answers each ``tool_call_id``;
-       the default is the plain assistant/system text pair).
-    4. **Accumulate** -- :meth:`accumulate` merges one raw streaming chunk into
-       the canonical accumulator; :meth:`is_done` reports the format's stream
-       completion signal. Non-streaming strategies inherit the no-op defaults.
+    1. **Recognise (which format?)** -- :meth:`recognizes` inspects a *shape* (an
+       assembled message *or* a raw streaming chunk) and returns ``True`` when it is
+       *this format*, independent of whether a call is present: native formats claim
+       their envelope (``tool_calls`` key, event type, block/item list), the text format
+       claims plain-text content. Format identification only -- "a call is coming" is
+       :meth:`forming`'s job. Default ``False``.
+    2. **Forming (is a call coming?)** -- :meth:`forming` returns a :class:`Forming`:
+       is a tool call taking shape in this message, and its ``tool_name`` once streamed?
+       This is what lets the driver hold display mid-stream (and release early when the
+       forming name is a tool it does not own). Default: not forming.
+    3. **Extract (the finished call)** -- :meth:`extract` parses a *complete* message
+       into the runnable :class:`ExtractedCall` s it carries (native formats may carry
+       several in parallel); ``[]`` while still forming *or* when the message is text-only.
+
+    Plus: :meth:`content_text` (the message's plain text, for the leak fall-through),
+    :meth:`result_messages` (shape the executed calls back into this format's history),
+    and the streaming seam :meth:`accumulate` / :meth:`is_stream_complete` (reassemble the wire;
+    non-wire strategies inherit the no-op defaults).
 
     :class:`~mcs.driver.core.ExtractionChain` iterates strategies in order and the
     first that *recognises* owns the shape. Native strategies come before the text
-    strategy, so a native envelope always wins over a content-based text claim.
+    strategy, so a native envelope always wins over a plain-text claim.
     """
 
     #: Does this format deliver calls as a *batch* that grows until the stream's DONE
@@ -116,27 +143,51 @@ class ExtractionStrategy(ABC):
     #: call is single and self-delimited -- it executes as soon as it parses.
     batched: bool = False
 
+    #: May a message this strategy *claims* hide a tool call in its plain text (a
+    #: model that "leaked" the call into the content channel instead of the native
+    #: slot)? ``True`` only for envelope formats whose assembled message always carries
+    #: their structure even for pure text (Anthropic blocks, Responses items): there a
+    #: claimed-but-empty ``extract`` may still hide a leak, so the driver falls through
+    #: to the text backup. ``False`` for OpenAI Completions (a leak has no ``tool_calls``
+    #: key, so the chain routes it straight to text; a present key is authoritative).
+    leaks_into_text: bool = False
+
     def recognizes(self, shape: Any) -> bool:
-        """Return ``True`` when *shape* (message or chunk) belongs to this format."""
+        """Return ``True`` when *shape* (message or chunk) is this format.
+
+        Format identification only -- not "a call is present". A native format claims
+        its envelope even for a call-free message; the text format claims any plain-text
+        content. Whether a call is coming is :meth:`forming`.
+        """
         return False
 
-    def forming_name(self, message: str | dict) -> str | None:
-        """Candidate tool name of a call forming in *message*, or ``None``.
+    def forming(self, message: str | dict) -> Forming:
+        """Is a tool call taking shape in *message*? Return a :class:`Forming`.
 
-        Only meaningful for a non-:attr:`batched` (single, self-delimited) format: it
-        lets the driver release early when the name is not one of its tools instead
-        of holding the whole object. The default returns ``None`` (no early release).
+        Truthy while a call for this format is building up (so the driver holds display);
+        its ``tool_name`` is filled once the name has streamed in, letting the driver
+        release early when the call names a tool it does not own. The default is *not
+        forming* (a strategy that carries no streaming call, e.g. a custom one).
         """
-        return None
+        return Forming(False)
 
     @abstractmethod
     def extract(self, message: str | dict) -> list[ExtractedCall]:
         """Return every runnable tool call in a *complete* message (``[]`` if none).
 
-        A format may carry several calls at once (native parallel ``tool_calls``);
-        each becomes one :class:`ExtractedCall`. Incomplete or unparseable calls are
-        omitted -- only calls the driver can actually run are returned.
+        A format may carry several calls at once (native parallel calls); each becomes
+        one :class:`ExtractedCall`. Incomplete or unparseable calls are omitted -- only
+        calls the driver can actually run are returned.
         """
+
+    def content_text(self, message: str | dict) -> str:
+        """The plain assistant text of *message* in this format's shape.
+
+        The default reads a string ``content``. Envelope formats whose text lives in a
+        structure (Anthropic text blocks, Responses ``output_text`` items) override this.
+        Used by the driver's native→text fall-through to hand a leaked call to the backup.
+        """
+        return _message_text(message)
 
     def result_messages(
         self, message: str | dict, records: "list[ToolCallRecord]",
@@ -144,9 +195,8 @@ class ExtractionStrategy(ABC):
         """Shape executed *records* into this format's conversation history.
 
         The default is the plain-text shape -- an ``assistant`` echo followed by one
-        ``system`` message per result -- which fits text-embedded calls and any
-        custom strategy. Native formats override this to answer each call by its
-        ``tool_call_id`` (see :class:`_NativeToolCallStrategy`).
+        ``system`` message per result -- which fits text-embedded calls and any custom
+        strategy. Native formats override this to answer each call by its id.
         """
         msgs: list[dict[str, Any]] = [
             {"role": "assistant", "content": _message_text(message)}
@@ -156,19 +206,18 @@ class ExtractionStrategy(ABC):
             msgs.append({"role": "system", "content": content})
         return msgs
 
-    # -- Streaming seam (no-op for non-streaming strategies) -------------------
+    # -- Streaming seam (no-op for non-wire strategies) -----------------------
 
     def accumulate(self, acc: dict[str, Any], chunk: Any) -> str | None:
-        """Merge one raw streaming *chunk* into the canonical accumulator *acc*.
+        """Merge one raw streaming *chunk* into this format's native accumulator *acc*.
 
-        *acc* is a message dict (``{"role", "content", "tool_calls"}``) mutated
-        in place. Returns the **content delta** of this chunk for live display,
-        or ``None``. The default does nothing -- only native wire formats
-        reassemble structured tool calls.
+        *acc* is a message dict mutated in place, in **this format's** native shape.
+        Returns the **content delta** of this chunk for live display, or ``None``. The
+        default does nothing -- only wire formats reassemble a stream.
         """
         return None
 
-    def is_done(self, chunk: Any) -> bool:
+    def is_stream_complete(self, chunk: Any) -> bool:
         """Return ``True`` when *chunk* carries this format's stream-done signal."""
         return False
 
@@ -176,28 +225,19 @@ class ExtractionStrategy(ABC):
 class TextExtractionStrategy(ExtractionStrategy):
     """Bridge to the ``PromptStrategy`` codec for text-based responses.
 
-    The strategy itself does not know what format to look for -- it
-    delegates entirely to ``codec.parse_tool_call()``, which applies
-    healing rules and format-specific parsing (JSON regex, XML, ...).
-
-    Accepts both ``str`` and ``dict`` input.  When a dict is received,
-    the ``"content"`` field is extracted and parsed as text.  This
-    allows clients to pass a full LLM message dict (e.g.
-    ``choices[0].message``) without the strategy needing to know
-    about the message envelope.
+    The strategy itself does not know what format to look for -- it delegates entirely
+    to ``codec.parse_tool_call()``, which applies healing rules and format-specific
+    parsing (JSON regex, XML, ...). It reads a call embedded in the message's ``content``
+    string; it does **not** reassemble a wire (the content it reads was accumulated by
+    whichever *wire* strategy carried the stream). It is also the driver's leak backup:
+    the fall-through hands it the plain text of a native message.
     """
 
     def __init__(self, codec: PromptStrategy) -> None:
         self._codec = codec
 
     def extract(self, message: str | dict) -> list[ExtractedCall]:
-        text: str | None = None
-        if isinstance(message, str):
-            text = message
-        elif isinstance(message, dict):
-            content = message.get("content")
-            if isinstance(content, str):
-                text = content
+        text = message if isinstance(message, str) else _message_text(message)
         if not text:
             return []
         parsed = self._codec.parse_tool_call(text)
@@ -207,133 +247,73 @@ class TextExtractionStrategy(ExtractionStrategy):
         return [ExtractedCall(name=name, arguments=arguments)]
 
     def recognizes(self, shape: Any) -> bool:
-        """Claim the shape when the codec sees a call taking shape in its content.
+        """Claim any **plain-text** shape -- a ``str`` or a dict with string ``content``.
 
-        Unlike the native strategies (which claim by envelope), the text strategy
-        claims by *content*: the codec's :meth:`~PromptStrategy.looks_like_call`
-        decides whether a call is forming or complete. This is what lets the driver
-        hold display mid-stream and parse at the end -- the streaming counterpart of
-        ``recognizes`` for text. Ordered *after* the native strategies, so a native
-        envelope always wins (its call is committed; content is never second-guessed).
+        Format identification, not call detection: the text strategy owns text responses
+        whether or not a call is embedded (a bare completion, prose, *or* a leaked call).
+        Whether a call is coming is :meth:`forming`. Ordered *after* the native
+        strategies, so a native envelope (structured ``content``) always wins; because it
+        reads only a *string* ``content`` it can never claim a native block/item list.
         """
-        return bool(self._codec.looks_like_call(_message_text(shape)))
+        if isinstance(shape, str):
+            return True
+        return isinstance(shape, dict) and isinstance(shape.get("content"), str)
 
-    def forming_name(self, message: str | dict) -> str | None:
-        return self._codec.peek_tool_name(_message_text(message))
+    def forming(self, message: str | dict) -> Forming:
+        """A call is forming iff the codec's marker is present; peek its name if streamed."""
+        text = _message_text(message)
+        if not self._codec.looks_like_call(text):
+            return Forming(False)
+        return Forming(True, self._codec.peek_tool_name(text))
 
 
 class _NativeToolCallStrategy(ExtractionStrategy):
     """Shared base for native tool-call formats.
 
-    Subclasses translate their provider's stream into the **canonical OpenAI
-    message shape** via :meth:`accumulate`, so a single :meth:`extract` reads the
-    result. State (the accumulator) lives in the buffer; strategies stay
-    stateless. :meth:`_slot` grows/returns a tool-call entry by index.
+    Native parallel calls arrive as a growing batch, so :attr:`batched` is ``True`` --
+    the driver waits for the DONE signal before executing. Each subclass reassembles and
+    reads **its own** native shape; the base only shares argument parsing. State (the
+    accumulator) lives in the buffer; strategies stay stateless.
     """
 
-    #: Native parallel calls arrive as a growing batch -> wait for the DONE signal.
     batched = True
 
     @staticmethod
-    def _slot(acc: dict[str, Any], index: int) -> dict[str, Any]:
-        """Return the tool-call entry at *index*, growing the list as needed."""
-        calls: list[dict[str, Any]] = acc.setdefault("tool_calls", [])
-        while len(calls) <= index:
-            calls.append({"type": "function", "function": {"name": "", "arguments": ""}})
-        return calls[index]
+    def _parse_args(raw: Any) -> dict[str, Any] | None:
+        """Parse streamed arguments; ``None`` when not yet runnable.
 
-    def extract(self, message: str | dict) -> list[ExtractedCall]:
-        if not isinstance(message, dict):
-            return []
-        tool_calls = message.get("tool_calls")
-        if not tool_calls or not isinstance(tool_calls, list):
-            return []
-        calls: list[ExtractedCall] = []
-        for tc in tool_calls:
-            call = self._parse_call(tc)
-            if call is not None:
-                calls.append(call)
-        return calls
-
-    @staticmethod
-    def _parse_call(tc: Any) -> ExtractedCall | None:
-        """Normalise one canonical ``tool_calls[]`` entry, or ``None`` if not runnable."""
-        if not isinstance(tc, dict):
-            return None
-        fn = tc.get("function")
-        if not fn or not isinstance(fn, dict):
-            return None
-        name = fn.get("name")
-        if not name or not isinstance(name, str):
-            return None
-
-        raw_args = fn.get("arguments", "{}")
-        if isinstance(raw_args, str):
-            stripped = raw_args.strip()
+        A dict passes through. A JSON string is parsed; an **empty** string means the
+        arguments have not streamed yet (the name arrives first) -- not runnable. A
+        non-empty but unparseable string is still forming or malformed -- also not
+        runnable. A genuine no-argument call sends ``"{}"`` and parses to ``{}``.
+        """
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str):
+            stripped = raw.strip()
             if not stripped:
-                # Empty string: arguments not streamed yet (the first fragment
-                # carries the name; arguments arrive after). A genuine no-arg call
-                # sends "{}". Not runnable -> omit (streaming keeps buffering).
                 return None
             try:
-                arguments = json.loads(stripped)
+                return json.loads(stripped)
             except json.JSONDecodeError:
-                # Non-empty but unparseable: still streaming or malformed.
                 return None
-        elif isinstance(raw_args, dict):
-            arguments = raw_args
-        else:
-            arguments = {}
+        return {}
 
-        return ExtractedCall(name=name, arguments=arguments, id=tc.get("id"))
-
-    def result_messages(
-        self, message: str | dict, records: "list[ToolCallRecord]",
-    ) -> list[dict[str, Any]]:
-        """Native history: the assistant echo + one ``role="tool"`` per call.
-
-        OpenAI (and the other native formats) require a tool result for **every**
-        ``tool_call`` echoed in the assistant message, keyed by ``tool_call_id`` --
-        a ``system`` message does not close a native call. The echo carries only the
-        calls this driver ran, so no id is left dangling (foreign/ignored calls are
-        another driver's to answer).
-        """
-        content = message.get("content") if isinstance(message, dict) else None
-        assistant: dict[str, Any] = {
-            "role": "assistant",
-            "content": content,
-            "tool_calls": [self._as_tool_call(r) for r in records],
-        }
-        tool_msgs = [
-            {
-                "role": "tool",
-                "tool_call_id": r.tool_call_id,
-                "content": r.error if r.error is not None else _result_text(r.result),
-            }
-            for r in records
-        ]
-        return [assistant, *tool_msgs]
-
-    @staticmethod
-    def _as_tool_call(r: "ToolCallRecord") -> dict[str, Any]:
-        """Rebuild the canonical ``tool_calls[]`` entry from an executed record."""
-        return {
-            "id": r.tool_call_id,
-            "type": "function",
-            "function": {"name": r.name, "arguments": json.dumps(r.arguments)},
-        }
 
 class OpenAICompletionExtractionStrategy(_NativeToolCallStrategy):
-    """OpenAI **Chat Completions** format.
+    """OpenAI **Chat Completions** format (also litellm's normalised chunk shape).
 
-    Assembled: ``{"tool_calls": [{"function": {"name", "arguments"}}]}`` with
-    ``arguments`` a JSON string. Stream: ``choices[0].delta.tool_calls[]``
-    fragments keyed by integer ``index`` (name/id once, ``arguments`` string
-    fragments concatenated), completion at ``choices[0].finish_reason``.
+    Native message: ``{role, content, tool_calls:[{id, type, function:{name,
+    arguments}}]}`` with ``arguments`` a JSON string. Stream:
+    ``choices[0].delta.tool_calls[]`` fragments keyed by integer ``index`` (name/id
+    once, ``arguments`` string fragments concatenated), completion at
+    ``choices[0].finish_reason``.
 
-    Recognises both the assembled message (``"tool_calls"`` key) and a raw
-    Completion chunk (``choices``) -- so it serves the driver's extract path and
-    the buffer's accumulate path.
+    Recognises both the assembled message (``tool_calls`` key) and a raw Completion
+    chunk (``choices``) -- serving the driver's extract path and the buffer's accumulate
+    path. A pure-text or *leaked* response has **no** ``tool_calls`` key, so this strategy
+    does not claim it and the chain routes it to text (hence ``leaks_into_text`` stays
+    ``False``); a present ``tool_calls`` key -- even ``null`` -- is authoritative "no call".
     """
 
     def recognizes(self, shape: Any) -> bool:
@@ -341,7 +321,24 @@ class OpenAICompletionExtractionStrategy(_NativeToolCallStrategy):
             return "tool_calls" in shape or "choices" in shape
         return _get(shape, "choices") is not None
 
+    def forming(self, message: str | dict) -> Forming:
+        """Forming once a ``tool_calls`` entry exists; ``tool_name`` from its function name.
+
+        A present-but-``null`` ``tool_calls`` (the false-positive shape) has no entry, so
+        it is *not* forming -- the content is an authoritative non-call.
+        """
+        if not isinstance(message, dict):
+            return Forming(False)
+        tool_calls = message.get("tool_calls")
+        if not tool_calls or not isinstance(tool_calls, list):
+            return Forming(False)
+        first = tool_calls[0]
+        fn = first.get("function") if isinstance(first, dict) else None
+        name = fn.get("name") if isinstance(fn, dict) else None
+        return Forming(True, name or None)
+
     def accumulate(self, acc: dict[str, Any], chunk: Any) -> str | None:
+        acc.setdefault("role", "assistant")
         choices = _get(chunk, "choices")
         delta = _get(choices[0], "delta") if choices else chunk
         if delta is None:
@@ -368,110 +365,367 @@ class OpenAICompletionExtractionStrategy(_NativeToolCallStrategy):
 
         return content or None
 
-    def is_done(self, chunk: Any) -> bool:
+    @staticmethod
+    def _slot(acc: dict[str, Any], index: int) -> dict[str, Any]:
+        """Return the tool-call entry at *index*, growing the list as needed."""
+        calls: list[dict[str, Any]] = acc.setdefault("tool_calls", [])
+        while len(calls) <= index:
+            calls.append({"type": "function", "function": {"name": "", "arguments": ""}})
+        return calls[index]
+
+    def extract(self, message: str | dict) -> list[ExtractedCall]:
+        if not isinstance(message, dict):
+            return []
+        tool_calls = message.get("tool_calls")
+        if not tool_calls or not isinstance(tool_calls, list):
+            return []
+        calls: list[ExtractedCall] = []
+        for tc in tool_calls:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function")
+            if not isinstance(fn, dict):
+                continue
+            name = fn.get("name")
+            if not name or not isinstance(name, str):
+                continue
+            args = self._parse_args(fn.get("arguments", "{}"))
+            if args is None:
+                continue
+            calls.append(ExtractedCall(name=name, arguments=args, id=tc.get("id")))
+        return calls
+
+    def is_stream_complete(self, chunk: Any) -> bool:
         choices = _get(chunk, "choices")
         return bool(choices) and _get(choices[0], "finish_reason") is not None
+
+    def result_messages(
+        self, message: str | dict, records: "list[ToolCallRecord]",
+    ) -> list[dict[str, Any]]:
+        """Native history: the assistant echo + one ``role="tool"`` per call.
+
+        OpenAI requires a tool result for **every** ``tool_call`` echoed in the assistant
+        message, keyed by ``tool_call_id`` -- a ``system`` message does not close a native
+        call. The echo carries only the calls this driver ran, so no id is left dangling
+        (foreign/ignored calls are another driver's to answer).
+        """
+        content = message.get("content") if isinstance(message, dict) else None
+        assistant: dict[str, Any] = {
+            "role": "assistant",
+            "content": content,
+            "tool_calls": [
+                {
+                    "id": r.tool_call_id,
+                    "type": "function",
+                    "function": {"name": r.name, "arguments": json.dumps(r.arguments)},
+                }
+                for r in records
+            ],
+        }
+        tool_msgs = [
+            {
+                "role": "tool",
+                "tool_call_id": r.tool_call_id,
+                "content": r.error if r.error is not None else _result_text(r.result),
+            }
+            for r in records
+        ]
+        return [assistant, *tool_msgs]
 
 
 class OpenAIResponseExtractionStrategy(_NativeToolCallStrategy):
     """OpenAI **Responses API** format.
 
-    Stream of semantically-typed events: ``response.output_item.added`` (a
-    ``function_call`` item, carrying ``call_id`` + ``name`` up front),
-    ``response.function_call_arguments.delta`` (argument string fragments),
-    ``response.output_text.delta`` (content). SLOT = ``output_index``. Completion
-    at ``response.completed`` (or per-call ``…arguments.done``). Normalised onto
-    the canonical shape and extracted via the shared base.
+    Native message: ``{output:[{type:"message", content:"..."},
+    {type:"function_call", call_id, name, arguments}]}`` -- a flat item list. Stream of
+    semantically-typed events: ``response.output_item.added`` (a ``function_call`` item,
+    carrying ``call_id`` + ``name`` up front), ``response.function_call_arguments.delta``
+    (argument string fragments), ``response.output_text.delta`` (content). SLOT =
+    ``output_index``. Completion at ``response.completed`` (or per-call
+    ``…arguments.done``). Its text lives in ``message`` items, so ``leaks_into_text``.
     """
+
+    leaks_into_text = True
 
     def recognizes(self, shape: Any) -> bool:
         etype = _get(shape, "type")
-        return isinstance(etype, str) and etype.startswith("response.")
+        if isinstance(etype, str) and etype.startswith("response."):
+            return True
+        return isinstance(_get(shape, "output"), list)
+
+    def forming(self, message: str | dict) -> Forming:
+        """Forming once a ``function_call`` output item exists; ``tool_name`` from it."""
+        if not isinstance(message, dict):
+            return Forming(False)
+        output = message.get("output")
+        if not isinstance(output, list):
+            return Forming(False)
+        for item in output:
+            if isinstance(item, dict) and item.get("type") == "function_call":
+                return Forming(True, item.get("name") or None)
+        return Forming(False)
 
     def accumulate(self, acc: dict[str, Any], chunk: Any) -> str | None:
+        output: list[Any] = acc.setdefault("output", [])
         etype = _get(chunk, "type")
 
         if etype == "response.output_text.delta":
             delta = _get(chunk, "delta")
-            if delta:
-                acc["content"] = (acc.get("content") or "") + delta
+            item = self._item(output, _get(chunk, "output_index", 0) or 0,
+                              {"type": "message", "role": "assistant", "content": ""})
+            if delta and item.get("type") == "message":
+                item["content"] = (item.get("content") or "") + delta
             return delta or None
 
         if etype == "response.output_item.added":
-            item = _get(chunk, "item")
-            if item is not None and _get(item, "type") == "function_call":
-                entry = self._slot(acc, _get(chunk, "output_index", 0) or 0)
-                call_id = _get(item, "call_id")
+            it = _get(chunk, "item")
+            if _get(it, "type") == "function_call":
+                item = self._item(output, _get(chunk, "output_index", 0) or 0,
+                                  {"type": "function_call", "arguments": ""})
+                call_id = _get(it, "call_id")
                 if call_id:
-                    entry["id"] = call_id
-                name = _get(item, "name")
+                    item["call_id"] = call_id
+                name = _get(it, "name")
                 if name:
-                    entry["function"]["name"] = name
+                    item["name"] = name
             return None
 
         if etype == "response.function_call_arguments.delta":
-            entry = self._slot(acc, _get(chunk, "output_index", 0) or 0)
+            item = self._item(output, _get(chunk, "output_index", 0) or 0,
+                              {"type": "function_call", "arguments": ""})
             delta = _get(chunk, "delta")
             if delta:
-                entry["function"]["arguments"] += delta
+                item["arguments"] = item.get("arguments", "") + delta
             return None
 
         return None
 
-    def is_done(self, chunk: Any) -> bool:
+    @staticmethod
+    def _item(output: list[Any], index: int, default: dict[str, Any]) -> dict[str, Any]:
+        """Return the output item at *index*, growing the list as needed."""
+        while len(output) <= index:
+            output.append(None)
+        if output[index] is None:
+            output[index] = dict(default)
+        return output[index]
+
+    def extract(self, message: str | dict) -> list[ExtractedCall]:
+        if not isinstance(message, dict):
+            return []
+        output = message.get("output")
+        if not isinstance(output, list):
+            return []
+        calls: list[ExtractedCall] = []
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "function_call":
+                continue
+            name = item.get("name")
+            if not name or not isinstance(name, str):
+                continue
+            args = self._parse_args(item.get("arguments", "{}"))
+            if args is None:
+                continue
+            calls.append(ExtractedCall(name=name, arguments=args, id=item.get("call_id")))
+        return calls
+
+    def is_stream_complete(self, chunk: Any) -> bool:
         return _get(chunk, "type") in (
             "response.completed",
             "response.function_call_arguments.done",
         )
 
+    def content_text(self, message: str | dict) -> str:
+        if isinstance(message, dict):
+            output = message.get("output")
+            if isinstance(output, list):
+                parts: list[str] = []
+                for item in output:
+                    if isinstance(item, dict) and item.get("type") == "message":
+                        content = item.get("content")
+                        if isinstance(content, str):
+                            parts.append(content)
+                        elif isinstance(content, list):
+                            parts.extend(
+                                b.get("text", "") for b in content if isinstance(b, dict)
+                            )
+                return "".join(parts)
+        return _message_text(message)
+
+    def result_messages(
+        self, message: str | dict, records: "list[ToolCallRecord]",
+    ) -> list[dict[str, Any]]:
+        """Native Responses history: the ``function_call`` echo + ``function_call_output``.
+
+        The Responses API takes a flat list of input items: each call is echoed as a
+        ``function_call`` item and answered by a ``function_call_output`` keyed by the
+        same ``call_id``.
+        """
+        items: list[dict[str, Any]] = []
+        for r in records:
+            items.append({
+                "type": "function_call",
+                "call_id": r.tool_call_id,
+                "name": r.name,
+                "arguments": json.dumps(r.arguments),
+            })
+            items.append({
+                "type": "function_call_output",
+                "call_id": r.tool_call_id,
+                "output": r.error if r.error is not None else _result_text(r.result),
+            })
+        return items
+
 
 class AnthropicExtractionStrategy(_NativeToolCallStrategy):
     """Anthropic **Messages** format.
 
-    Stream of SSE events: ``content_block_start`` for a ``tool_use`` block
-    (carrying ``id`` + ``name`` once), ``content_block_delta`` with
-    ``input_json_delta`` (``partial_json`` argument fragments) or ``text_delta``
-    (content). SLOT = ``index``. Completion at ``message_stop``. Normalised onto
-    the canonical shape and extracted via the shared base.
+    Native message: ``{role:"assistant", content:[{type:"text", text},
+    {type:"tool_use", id, name, input}]}`` -- a block list. Stream of SSE events:
+    ``content_block_start`` for a ``tool_use`` block (carrying ``id`` + ``name`` once),
+    ``content_block_delta`` with ``input_json_delta`` (``partial_json`` argument
+    fragments) or ``text_delta`` (content). SLOT = ``index``. Completion at
+    ``message_stop``. During streaming a ``tool_use`` block accumulates its arguments as
+    an ``input_json`` string, parsed to ``input`` by :meth:`extract`. Its text lives in
+    ``text`` blocks, so ``leaks_into_text``.
     """
 
+    leaks_into_text = True
+
     def recognizes(self, shape: Any) -> bool:
-        return _get(shape, "type") in {
+        if _get(shape, "type") in {
             "message_start", "content_block_start", "content_block_delta",
             "content_block_stop", "message_delta", "message_stop", "ping",
-        }
+        }:
+            return True
+        return isinstance(_get(shape, "content"), list)
+
+    def forming(self, message: str | dict) -> Forming:
+        """Forming once a ``tool_use`` block exists; ``tool_name`` from it.
+
+        A leak (a call written into a ``text`` block) is *not* forming here -- there is no
+        ``tool_use`` block -- so the driver falls through to the text backup on the blocks'
+        text.
+        """
+        if not isinstance(message, dict):
+            return Forming(False)
+        content = message.get("content")
+        if not isinstance(content, list):
+            return Forming(False)
+        for block in content:
+            if isinstance(block, dict) and block.get("type") in (
+                "tool_use", "server_tool_use"
+            ):
+                return Forming(True, block.get("name") or None)
+        return Forming(False)
 
     def accumulate(self, acc: dict[str, Any], chunk: Any) -> str | None:
+        acc.setdefault("role", "assistant")
+        blocks: list[Any] = acc.setdefault("content", [])
         etype = _get(chunk, "type")
 
         if etype == "content_block_start":
+            index = _get(chunk, "index", 0) or 0
             block = _get(chunk, "content_block")
-            if block is not None and _get(block, "type") in ("tool_use", "server_tool_use"):
-                entry = self._slot(acc, _get(chunk, "index", 0) or 0)
-                block_id = _get(block, "id")
-                if block_id:
-                    entry["id"] = block_id
-                name = _get(block, "name")
-                if name:
-                    entry["function"]["name"] = name
+            btype = _get(block, "type")
+            if btype in ("tool_use", "server_tool_use"):
+                self._block(blocks, index, {
+                    "type": "tool_use", "id": _get(block, "id"),
+                    "name": _get(block, "name"), "input_json": "",
+                })
+            elif btype == "text":
+                self._block(blocks, index, {"type": "text", "text": ""})
             return None
 
         if etype == "content_block_delta":
+            index = _get(chunk, "index", 0) or 0
             delta = _get(chunk, "delta")
             dtype = _get(delta, "type")
             if dtype == "text_delta":
                 text = _get(delta, "text")
+                block = self._block(blocks, index, {"type": "text", "text": ""})
                 if text:
-                    acc["content"] = (acc.get("content") or "") + text
+                    block["text"] = (block.get("text") or "") + text
                 return text or None
             if dtype == "input_json_delta":
-                entry = self._slot(acc, _get(chunk, "index", 0) or 0)
                 partial = _get(delta, "partial_json")
+                block = self._block(blocks, index, {"type": "tool_use", "input_json": ""})
                 if partial:
-                    entry["function"]["arguments"] += partial
+                    block["input_json"] = block.get("input_json", "") + partial
             return None
 
         return None
 
-    def is_done(self, chunk: Any) -> bool:
+    @staticmethod
+    def _block(blocks: list[Any], index: int, default: dict[str, Any]) -> dict[str, Any]:
+        """Return the content block at *index*, creating it from *default* if absent."""
+        while len(blocks) <= index:
+            blocks.append(None)
+        if blocks[index] is None:
+            blocks[index] = dict(default)
+        return blocks[index]
+
+    def extract(self, message: str | dict) -> list[ExtractedCall]:
+        if not isinstance(message, dict):
+            return []
+        content = message.get("content")
+        if not isinstance(content, list):
+            return []
+        calls: list[ExtractedCall] = []
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") not in (
+                "tool_use", "server_tool_use"
+            ):
+                continue
+            name = block.get("name")
+            if not name or not isinstance(name, str):
+                continue
+            raw = block["input"] if "input" in block else block.get("input_json", "")
+            args = self._parse_args(raw)
+            if args is None:
+                continue
+            calls.append(ExtractedCall(name=name, arguments=args, id=block.get("id")))
+        return calls
+
+    def is_stream_complete(self, chunk: Any) -> bool:
         return _get(chunk, "type") == "message_stop"
+
+    def content_text(self, message: str | dict) -> str:
+        if isinstance(message, dict):
+            content = message.get("content")
+            if isinstance(content, list):
+                return "".join(
+                    b.get("text", "") for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+        return _message_text(message)
+
+    def result_messages(
+        self, message: str | dict, records: "list[ToolCallRecord]",
+    ) -> list[dict[str, Any]]:
+        """Native Anthropic history: an assistant ``tool_use`` echo + a user ``tool_result``.
+
+        Anthropic answers a call with a ``tool_result`` block (keyed by ``tool_use_id``)
+        carried in a **user** message -- not a ``role="tool"`` message. An errored call
+        rides back with ``is_error`` so the model can self-heal.
+        """
+        assistant: dict[str, Any] = {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": r.tool_call_id, "name": r.name,
+                 "input": r.arguments}
+                for r in records
+            ],
+        }
+        results: dict[str, Any] = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": r.tool_call_id,
+                    "content": r.error if r.error is not None else _result_text(r.result),
+                    **({"is_error": True} if r.error is not None else {}),
+                }
+                for r in records
+            ],
+        }
+        return [assistant, results]

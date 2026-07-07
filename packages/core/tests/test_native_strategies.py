@@ -5,9 +5,10 @@ Completions path is exercised live elsewhere. Responses and Anthropic are only s
 by clients on the *raw* SDKs -- here they are proven with synthetic fixtures built
 from the exact event shapes in ``docs/streaming-tool-formats.md``.
 
-The proof for each format: feed its raw events into an ``LLMStreamBuffer``; the
-buffer must produce the **canonical** message (``tool_calls[]``), and the shared
-canonical ``extract`` must yield ``(name, arguments)``.
+The proof for each format: feed its raw events into an ``LLMStreamBuffer``; the buffer
+must reassemble the provider's **native** ``stream=false`` message (Completions keeps
+``tool_calls[]``, Responses an ``output[]`` item list, Anthropic a ``content[]`` block
+list), and **that format's own** ``extract`` must yield ``(name, arguments)``.
 """
 
 from __future__ import annotations
@@ -62,9 +63,6 @@ class FailingDriver(BaseDriver):
         raise RuntimeError("smtp down")
 
 
-_CANONICAL = OpenAICompletionExtractionStrategy()  # the shared extractor
-
-
 # -- OpenAI Responses fixtures ------------------------------------------------
 
 def _resp_item_added(name: str, call_id: str, output_index: int = 0) -> dict:
@@ -94,21 +92,22 @@ class TestOpenAIResponses:
         buf.add(_resp_item_added("send_mail", "call_1"))
         assert isinstance(buf._active, OpenAIResponseExtractionStrategy)
 
-    def test_tool_call_reassembled_to_canonical(self):
+    def test_tool_call_reassembled_to_native(self):
         buf = LLMStreamBuffer()
         buf.add(_resp_item_added("send_mail", "call_1"))
         buf.add(_resp_args_delta('{"to":'))
         buf.add(_resp_args_delta(' "a@b.c"}'))
-        tc = buf.as_dict()["tool_calls"][0]
-        assert tc["id"] == "call_1"
-        assert tc["function"]["name"] == "send_mail"
-        assert tc["function"]["arguments"] == '{"to": "a@b.c"}'
+        item = buf.as_dict()["output"][0]          # native Responses item, not tool_calls[]
+        assert item["type"] == "function_call"
+        assert item["call_id"] == "call_1"
+        assert item["name"] == "send_mail"
+        assert item["arguments"] == '{"to": "a@b.c"}'
 
-    def test_canonical_extract_yields_name_and_args(self):
+    def test_native_extract_yields_name_and_args(self):
         buf = LLMStreamBuffer()
         buf.add(_resp_item_added("send_mail", "call_1"))
         buf.add(_resp_args_delta('{"to": "a@b.c"}'))
-        assert _CANONICAL.extract(buf.as_dict()) == [
+        assert OpenAIResponseExtractionStrategy().extract(buf.as_dict()) == [
             ExtractedCall("send_mail", {"to": "a@b.c"}, id="call_1")
         ]
 
@@ -168,22 +167,23 @@ class TestAnthropic:
         buf.add({"type": "message_start"})
         assert isinstance(buf._active, AnthropicExtractionStrategy)
 
-    def test_tool_call_reassembled_to_canonical(self):
+    def test_tool_call_reassembled_to_native(self):
         buf = LLMStreamBuffer()
         buf.add({"type": "message_start"})
         buf.add(_anthropic_block_start("send_mail", "toolu_1", index=0))
         buf.add(_anthropic_json_delta('{"to":', index=0))
         buf.add(_anthropic_json_delta(' "a@b.c"}', index=0))
-        tc = buf.as_dict()["tool_calls"][0]
-        assert tc["id"] == "toolu_1"
-        assert tc["function"]["name"] == "send_mail"
-        assert tc["function"]["arguments"] == '{"to": "a@b.c"}'
+        block = buf.as_dict()["content"][0]        # native Anthropic block, not tool_calls[]
+        assert block["type"] == "tool_use"
+        assert block["id"] == "toolu_1"
+        assert block["name"] == "send_mail"
+        assert block["input_json"] == '{"to": "a@b.c"}'
 
-    def test_canonical_extract_yields_name_and_args(self):
+    def test_native_extract_yields_name_and_args(self):
         buf = LLMStreamBuffer()
         buf.add(_anthropic_block_start("send_mail", "toolu_1"))
         buf.add(_anthropic_json_delta('{"to": "a@b.c"}'))
-        assert _CANONICAL.extract(buf.as_dict()) == [
+        assert AnthropicExtractionStrategy().extract(buf.as_dict()) == [
             ExtractedCall("send_mail", {"to": "a@b.c"}, id="toolu_1")
         ]
 
@@ -210,15 +210,17 @@ class TestAnthropic:
         assert buf.get_content() == "I'll check. "
 
     def test_text_then_tool_interleaved(self):
-        """Claude streams a text preamble, then a tool_use block."""
+        """Claude streams a text preamble, then a tool_use block -- native block list."""
         buf = LLMStreamBuffer()
         buf.add({"type": "message_start"})
         buf.add(_anthropic_text_delta("Let me send that. ", index=0))
         buf.add(_anthropic_block_start("send_mail", "toolu_1", index=1))
         buf.add(_anthropic_json_delta("{}", index=1))
         msg = buf.as_dict()
-        assert msg["content"] == "Let me send that. "
-        assert msg["tool_calls"][1]["function"]["name"] == "send_mail"
+        assert msg["content"][0] == {"type": "text", "text": "Let me send that. "}
+        assert msg["content"][1]["type"] == "tool_use"
+        assert msg["content"][1]["name"] == "send_mail"
+        assert buf.get_content() == "Let me send that. "   # display text = the text block
 
 
 def _oai_content_chunk(text: str) -> dict:
@@ -511,3 +513,66 @@ class TestFormatIsolation:
         assert AnthropicExtractionStrategy().recognizes(ev)
         assert not OpenAIResponseExtractionStrategy().recognizes(ev)
         assert not OpenAICompletionExtractionStrategy().recognizes(ev)
+
+
+class TestForming:
+    """forming() = 'a tool call is coming' (+ name once streamed), distinct from
+    recognizes() = format identification."""
+
+    def test_openai_forming_reports_name(self):
+        s = OpenAICompletionExtractionStrategy()
+        f = s.forming({"tool_calls": [{"function": {"name": "send_mail", "arguments": ""}}]})
+        assert f and f.tool_name == "send_mail"          # forming even before args stream
+
+    def test_openai_tool_calls_null_is_not_forming(self):
+        """The false-positive shape: envelope present but no entry -> not forming."""
+        s = OpenAICompletionExtractionStrategy()
+        assert not s.forming({"content": "hi", "tool_calls": None})
+
+    def test_anthropic_forming_on_tool_use_only(self):
+        s = AnthropicExtractionStrategy()
+        assert s.forming({"content": [{"type": "tool_use", "name": "send_mail"}]}).tool_name == "send_mail"
+        assert not s.forming({"content": [{"type": "text", "text": "hi"}]})   # a leak is not forming here
+
+
+class TestNativeLeakFallthrough:
+    """An envelope format whose message always carries its structure (``leaks_into_text``)
+    claims even a text-only message; when its ``extract`` finds no native call, the driver
+    hands the plain text to the text backup -- catching a call the model *leaked* into a
+    text block. Settable/clearable via set_native_backup_strategy."""
+
+    _LEAK = '{"tool": "send_mail", "arguments": {"to": "a@b.c"}}'
+
+    def test_anthropic_text_leak_executes_via_backup(self):
+        driver = EchoDriver()                              # owns send_mail
+        buf = LLMStreamBuffer()
+        buf.add({"type": "message_start"})
+        buf.add(_anthropic_text_delta(self._LEAK, index=0))  # call written as text, no tool_use
+        dr = driver.process_llm_response(buf)              # eager: the leak is a complete call
+        assert dr.call_executed is True
+        _, result = dr.messages
+        assert result["role"] == "system"                  # text path: no native tool_call_id
+
+    def test_leak_uncaught_when_backup_disabled(self):
+        driver = EchoDriver()
+        driver.set_native_backup_strategy(None)            # disable the fall-through
+        assert driver.get_native_backup_strategy() is None
+        buf = LLMStreamBuffer()
+        buf.add({"type": "message_start"})
+        buf.add(_anthropic_text_delta(self._LEAK, index=0))
+        buf.add({"type": "message_stop"})
+        dr = driver.process_llm_response(buf)
+        assert dr.call_executed is False                   # no backup -> leak flows as text
+
+    def test_native_call_still_wins_over_backup(self):
+        """A real tool_use block extracts natively -- the backup never runs, and the
+        history is native Anthropic (user tool_result), not the text pair."""
+        driver = EchoDriver()
+        buf = LLMStreamBuffer()
+        buf.add(_anthropic_block_start("send_mail", "toolu_1"))
+        buf.add(_anthropic_json_delta("{}"))
+        buf.add({"type": "message_stop"})
+        dr = driver.process_llm_response(buf)
+        assert dr.call_executed is True
+        _, result = dr.messages
+        assert result["role"] == "user"                    # native Anthropic tool_result

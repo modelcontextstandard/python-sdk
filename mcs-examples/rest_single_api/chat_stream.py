@@ -1,11 +1,12 @@
 """Streaming MCS chat client using the REST driver.
 
 Streams LLM output chunk-by-chunk. The client feeds each raw chunk to an
-``LLMStreamBuffer`` it creates itself; the buffer reassembles content *and* native
-tool calls and returns the content delta for live display. Each accumulated message
-goes to ``process_llm_response`` -- the client never touches ``tool_calls`` itself.
-When the driver detects a complete call it executes it, the client ``reset()``s the
-buffer to hunt for the next call, feeds the result back, and the LLM continues.
+``LLMStreamBuffer`` (obtained via ``streamer.new_stream_buffer()`` -- a standalone
+object, seeded with the driver's chain); the buffer reassembles the provider's native
+message and returns the content delta for live display. Each accumulated message goes
+to ``process_llm_response`` -- the client never touches ``tool_calls`` itself. When the
+driver detects a complete call it executes it, ``reset()``s the buffer to hunt for the
+next call, feeds the result back, and the LLM continues.
 
 The client has no knowledge of tool calls whatsoever -- the ``LLMStreamBuffer`` does
 the reassembly (once, in the SDK, per tool format, instead of in every client); the
@@ -41,7 +42,7 @@ from rich.panel import Panel
 
 from mcs.driver.rest import RestDriver
 from mcs.driver.core import (
-    DriverMeta, DriverResponse, LLMStreamBuffer, MCSDriver,
+    DriverMeta, DriverResponse, MCSDriver,
     SupportsNativeTools, SupportsStreaming,
 )
 
@@ -116,8 +117,9 @@ def _print_debug_dr(dr: DriverResponse) -> None:
 def chat_loop(driver: MCSDriver, model: str, native_tools_enabled: bool, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
     # This client depends on the SupportsStreaming *capability* for the
-    # streaming-aware process_llm_response. The buffer it creates itself: reassembly
-    # is an LLM/SDK concern, identical for every driver and not driver-bound.
+    # streaming-aware process_llm_response. The buffer is a standalone object (not
+    # driver-bound, so it works in fan-out); new_stream_buffer() is a convenience that
+    # seeds it with the driver's extraction chain.
     streamer = DriverMeta.resolve_capability(driver, SupportsStreaming)
     if streamer is None:
         raise SystemExit(f"{driver.meta.name} does not support streaming.")
@@ -177,7 +179,7 @@ def chat_loop(driver: MCSDriver, model: str, native_tools_enabled: bool, debug: 
             # what it lets through. Native and text-embedded calls look identical here.
             # Per chunk: (a) a content token -> buf.text() -> print; (b) a call building
             # up -> buf.text() empty, call_pending; (c) call complete -> driver executes.
-            buf = LLMStreamBuffer()
+            buf = streamer.new_stream_buffer()      # seeded with the driver's chain
             console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
 
             content = ""
