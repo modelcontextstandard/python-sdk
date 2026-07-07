@@ -3,7 +3,7 @@
 litellm normalises every provider onto the OpenAI *Completions* chunk shape, so the
 Completions path is exercised live elsewhere. Responses and Anthropic are only seen
 by clients on the *raw* SDKs -- here they are proven with synthetic fixtures built
-from the exact event shapes in ``docs/streaming-tool-formats.md``.
+from the exact event shapes in ``docs/Reference/streaming-tool-formats.md``.
 
 The proof for each format: feed its raw events into an ``LLMStreamBuffer``; the buffer
 must reassemble the provider's **native** ``stream=false`` message (Completions keeps
