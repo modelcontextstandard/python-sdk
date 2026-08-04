@@ -93,13 +93,15 @@ def _print_debug_response(llm_out: dict, response: DriverResponse) -> None:
     console.print(Panel(json.dumps(llm_out, indent=2, ensure_ascii=False),
                         title="Raw LLM output", border_style="dim"))
     parts = [f"call_executed={response.call_executed}  call_failed={response.call_failed}"]
-    if response.call_detail:
-        parts.append(f"detail: {response.call_detail}")
-    if response.tool_call_result is not None:
-        result_str = str(response.tool_call_result)
-        if len(result_str) > 200:
-            result_str = result_str[:197] + "..."
-        parts.append(f"tool_call_result: {result_str}")
+    # executed_calls is the per-call report -- one line each, so a parallel batch
+    # is readable (name, args, result/error) instead of one raw blob.
+    for rec in response.executed_calls or []:
+        if rec.error:
+            outcome = f"[red]error:[/red] {rec.error}"
+        else:
+            _r = str(rec.result)
+            outcome = "-> " + (_r[:157] + "..." if len(_r) > 160 else _r)
+        parts.append(f"  • {rec.name}({rec.arguments}) {outcome}")
     if response.retry_prompt:
         parts.append(f"retry_prompt: {response.retry_prompt}")
     console.print(Panel("\n".join(parts), title="DriverResponse", border_style="dim"))
@@ -167,7 +169,9 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
 
             if response.call_failed:
                 if debug:
-                    console.print(f"[yellow]Tool call failed: {response.call_detail}[/yellow]")
+                    console.print(
+                        "[yellow]Tool call failed: "
+                        f"{'; '.join(r.error or '' for r in response.executed_calls or [])}[/yellow]")
                 continue
 
             content = llm_out.get("content", "") or ""

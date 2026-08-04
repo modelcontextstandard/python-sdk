@@ -331,7 +331,7 @@ class TestBaseDriverIntegration:
         orch.add_driver(_driver_ab(), label="alpha")
         dr = orch.process_llm_response('{"tool": "tool_a", "arguments": {}}')
         assert dr.call_executed is True
-        assert dr.tool_call_result == "result_a"
+        assert dr.executed_calls[0].result == "result_a"
 
     def test_process_llm_response_unknown_tool_ignored(self):
         """The base orchestrator is itself a composable driver -- it ignores a call

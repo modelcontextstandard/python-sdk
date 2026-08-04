@@ -353,7 +353,7 @@ class TestTextEmbeddedToolCall:
         call = '{"name": "send_mail", "arguments": {"to": "a@b.c"}}'
         dr = _feed(driver, buf, (call[:12], call[12:30], call[30:]))
         assert dr.call_executed is True
-        assert dr.tool_call_result is not None
+        assert dr.executed_calls
 
     def test_leak_wrapped_in_prose_executes(self):
         """The call embedded in surrounding text (model narrates, then emits JSON)."""

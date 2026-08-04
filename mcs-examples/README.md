@@ -76,11 +76,3 @@ the driver extracts it from there.
 - `csv_analysis/explore_responses.py` -- sends one prompt through several API
   modes and records the raw request/response pairs, to compare how providers
   represent tool calls
-
-## Known gap
-
-`rest_single_api/chat_stream_tcs.py` and `csv_analysis/chat_stream_tcs.py` do
-not run: they import `ToolCallSignaling`, which was removed from
-`mcs-driver-core`. The streaming interface solves the problem TCS was built for
-without asking the driver anything -- the buffer holds a forming call back, so
-inline JSON never reaches the screen. Use `chat_stream.py` instead.

@@ -170,7 +170,7 @@ class TestProcessLlmResponse:
         llm_output = json.dumps({"tool": "addNumbers", "arguments": {"a": 3, "b": 5}})
         resp = driver.process_llm_response(llm_output)
         assert resp.call_executed is True
-        assert resp.tool_call_result == '{"result": 8}'
+        assert resp.executed_calls[0].result == '{"result": 8}'
         assert resp.messages is not None
 
     def test_tool_call_in_markdown_fence(self):
@@ -178,7 +178,7 @@ class TestProcessLlmResponse:
         llm_output = '```json\n{"tool": "greet", "arguments": {"name": "Alice"}}\n```'
         resp = driver.process_llm_response(llm_output)
         assert resp.call_executed is True
-        assert "Hello" in resp.tool_call_result
+        assert "Hello" in resp.executed_calls[0].result
 
     def test_unknown_tool_passthrough(self):
         driver = RestDriver(_tooldriver=FakeToolDriver())
@@ -216,7 +216,7 @@ class TestProcessLlmResponse:
         llm_output = json.dumps({"tool": "addNumbers", "arguments": {"a": 1, "b": 2}})
         resp = driver.process_llm_response(llm_output)
         assert resp.call_failed is True
-        assert "DB connection lost" in resp.call_detail
+        assert "DB connection lost" in (resp.executed_calls[0].error or "")
 
     def test_dict_llm_response_handled(self):
         driver = RestDriver(_tooldriver=FakeToolDriver())

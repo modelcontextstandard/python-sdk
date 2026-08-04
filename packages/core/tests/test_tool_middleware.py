@@ -53,7 +53,7 @@ class TestMiddlewareChain:
         driver = GreetDriver()
         dr = driver.process_llm_response(_GREET)
         assert dr.call_executed is True
-        assert dr.tool_call_result == "hello world"
+        assert dr.executed_calls[0].result == "hello world"
         assert driver.executed == ["greet"]
 
     def test_middleware_observes_around_execution(self):
@@ -68,7 +68,7 @@ class TestMiddlewareChain:
 
         driver = GreetDriver(middleware=[Recorder()])
         dr = driver.process_llm_response(_GREET)
-        assert dr.tool_call_result == "hello world"
+        assert dr.executed_calls[0].result == "hello world"
         assert seen == [("pre", "greet", {"who": "world"}), ("post", "hello world")]
 
     def test_order_is_outermost_first(self):
@@ -93,7 +93,7 @@ class TestMiddlewareChain:
 
         driver = GreetDriver(middleware=[Deny()])
         dr = driver.process_llm_response(_GREET)
-        assert dr.tool_call_result == "DENIED"
+        assert dr.executed_calls[0].result == "DENIED"
         assert driver.executed == []                 # execute_tool never ran
 
     def test_middleware_can_rewrite_arguments(self):
@@ -102,7 +102,7 @@ class TestMiddlewareChain:
                 return call_next(name, {**args, "who": "Alice"})
 
         dr = GreetDriver(middleware=[Rewrite()]).process_llm_response(_GREET)
-        assert dr.tool_call_result == "hello Alice"
+        assert dr.executed_calls[0].result == "hello Alice"
 
 
 class _Boom(Exception):
@@ -133,7 +133,7 @@ class TestDomainErrorHandling:
 
         dr = BoomDriver(middleware=[Catch()]).process_llm_response(_GREET)
         assert dr.call_executed is True and dr.call_failed is False
-        assert dr.tool_call_result == "caught: challenge"
+        assert dr.executed_calls[0].result == "caught: challenge"
 
     def test_uncaught_error_is_call_failed(self):
         dr = BoomDriver().process_llm_response(_GREET)

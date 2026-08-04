@@ -27,7 +27,6 @@ from .extraction_strategy import (
     OpenAICompletionExtractionStrategy,
     OpenAIResponseExtractionStrategy,
     AnthropicExtractionStrategy,
-    _result_text,
 )
 from .extraction_chain import ExtractionChain
 from .llm_stream_buffer import LLMStreamBuffer
@@ -325,13 +324,11 @@ class BaseDriver(
             call_failed=bool(failed),
             executed_calls=records,
             messages=strategy.result_messages(message, records),
-            tool_call_result=self._back_compat_result(records),
             retry_prompt=(
                 self._prompt_strategy.retry_execution_failed(failed[0].name, failed[0].error or "")
                 if failed else None
             ),
-            call_detail=failed[0].error if failed else None,
-        )    
+        )
 
     def _invoke_tool(self, call: ExtractedCall) -> ToolCallRecord:
         """Execute one owned call through the middleware chain; capture the outcome.
@@ -377,22 +374,6 @@ class BaseDriver(
     def add_middleware(self, middleware: ToolMiddleware) -> None:
         """Append *middleware* to the chain (innermost, closest to execution)."""
         self._middleware.append(middleware)
-
-    # -- Back-compat / helpers ------------------------------------------------
-
-    @staticmethod
-    def _back_compat_result(records: list[ToolCallRecord]) -> Any:
-        """Legacy ``tool_call_result`` (superseded by ``executed_calls``).
-
-        One successful call -> its result as text; several -> the raw list; ``None``
-        when nothing ran successfully. Kept because existing examples still read it.
-        """
-        successes = [r for r in records if r.error is None]
-        if not successes:
-            return None
-        if len(successes) == 1:
-            return _result_text(successes[0].result)
-        return [r.result for r in successes]
 
     # -- SupportsNativeTools implementation ------------------------------------
 

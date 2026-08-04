@@ -240,7 +240,7 @@ class TestBaseDriverExtractionChain:
         driver = SimpleBaseDriver()
         dr = driver.process_llm_response('{"tool": "greet", "arguments": {"name": "X"}}')
         assert dr.call_executed is True
-        assert dr.tool_call_result == "Hello!"
+        assert dr.executed_calls[0].result == "Hello!"
 
     def test_openai_dict_input(self):
         driver = SimpleBaseDriver()
@@ -254,7 +254,7 @@ class TestBaseDriverExtractionChain:
         }
         dr = driver.process_llm_response(payload)
         assert dr.call_executed is True
-        assert dr.tool_call_result == "Hello!"
+        assert dr.executed_calls[0].result == "Hello!"
 
     def test_no_tool_call_in_text(self):
         driver = SimpleBaseDriver()
@@ -280,7 +280,7 @@ class TestBaseDriverExtractionChain:
         )
         dr = driver.process_llm_response(text)
         assert dr.call_executed is True
-        assert dr.tool_call_result == "Hello!"
+        assert dr.executed_calls[0].result == "Hello!"
         assert [r.name for r in dr.executed_calls] == ["greet"]   # only the owned one ran
 
 
@@ -300,7 +300,7 @@ class TestCustomExtractionStrategy:
         )
         dr = driver.process_llm_response("anything at all")
         assert dr.call_executed is True
-        assert dr.tool_call_result == "Hello!"
+        assert dr.executed_calls[0].result == "Hello!"
 
 
 # -- Recognise-phase tests ---------------------------------------------------

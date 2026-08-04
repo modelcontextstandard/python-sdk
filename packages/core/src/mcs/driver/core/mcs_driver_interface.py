@@ -208,11 +208,6 @@ class DriverResponse:
     call_pending :
         ``True`` while a call is still forming in the stream (the batch is not yet
         complete). The client keeps feeding chunks; nothing was executed.
-    tool_call_result :
-        *Superseded by* ``executed_calls`` (kept for back-compat). Raw output of the
-        first/only executed call.
-    call_detail :
-        *Superseded by* ``ToolCallRecord.error`` (kept for back-compat).
     retry_prompt :
         Driver-authored prompt hint that the client can append to the
         conversation so the LLM can correct its output and retry.
@@ -229,11 +224,9 @@ class DriverResponse:
     driver only manipulates the buffer (holds a forming call) and reports status
     here; display stays with the buffer, keeping the two concerns separate.
     """
-    tool_call_result: Any = None
     call_executed: bool = False
     call_failed: bool = False
     call_pending: bool = False
-    call_detail: str | None = None
     retry_prompt: str | None = None
     messages: list[dict[str, Any]] | None = field(default=None)
     executed_calls: list[ToolCallRecord] | None = field(default=None)
@@ -314,17 +307,17 @@ class MCSDriver(ABC):
         The returned :class:`DriverResponse` tells the client what happened:
 
         * ``response.call_executed`` -- a tool call was found and
-          successfully executed.  ``response.tool_call_result`` contains
-          the raw tool output.  ``response.messages`` contains
-          pre-formatted conversation entries the client can append
-          directly to its message history.
+          executed.  ``response.executed_calls`` reports each call
+          (name, arguments, result or error) for the client to display.
+          ``response.messages`` contains pre-formatted conversation
+          entries the client can append directly to its message history.
         * ``response.call_failed`` -- a tool-call signature was found
-          but could not be parsed or executed.
+          but could not be parsed or executed.  The reason is on the
+          matching :class:`ToolCallRecord`'s ``error``.
           ``response.retry_prompt`` contains a driver-authored hint
-          the client can append to the conversation for a retry.
-          ``response.call_detail`` may carry debugging information.
-          ``response.messages`` contains the entries needed for a
-          retry round (assistant message + retry hint).
+          the client can append to the conversation for a retry, and
+          ``response.messages`` the entries needed for that round
+          (assistant message + retry hint).
         * Neither flag set -- no tool call was detected.
           The LLM output is a final answer for the user.
           ``response.messages`` is ``None``; the client handles the
@@ -342,15 +335,16 @@ class MCSDriver(ABC):
             that emit tool calls as structured data rather than text.
 
         For chunk-by-chunk streaming, use the ``SupportsStreaming``
-        capability -- it extends this method with a ``streaming`` flag
-        (reporting ``call_pending`` for an incomplete call) plus a
-        ``stream_buffer`` factory. The base contract itself stays
-        streaming-agnostic.
+        capability: it *widens* this input to also accept an
+        ``LLMStreamBuffer`` (plus a ``new_stream_buffer`` factory), and the
+        type is the signal -- given a buffer the driver reports
+        ``call_pending`` while a call is still forming.  The base contract
+        itself stays streaming-agnostic.
 
         Returns
         -------
         DriverResponse
-            Self-contained result object with ``tool_call_result``,
-            ``call_executed``, ``call_failed``, ``call_detail``,
+            Self-contained result object with ``call_executed``,
+            ``call_failed``, ``call_pending``, ``executed_calls``,
             ``retry_prompt``, and ``messages``.
         """

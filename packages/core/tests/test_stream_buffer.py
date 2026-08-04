@@ -136,7 +136,7 @@ class TestStreamingProcessLlmResponse:
         dr = driver.process_llm_response(buf)
         assert dr.call_executed is True
         assert dr.call_pending is False
-        assert dr.tool_call_result is not None
+        assert dr.executed_calls
 
     def test_no_arg_call_executes(self):
         """A genuine no-argument call sends "{}" and executes (empty "" is pending)."""

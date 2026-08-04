@@ -29,9 +29,6 @@ the driver setup in `main()` differ.
 | `chat_non_stream.py` | Single request -- the whole answer goes into `process_llm_response` at once |
 | `chat_stream.py` | Token-by-token: the client feeds chunks into an `LLMStreamBuffer` and hands the buffer to the driver, which holds a forming tool call back so its JSON is never displayed |
 
-> `chat_stream_tcs.py` does not run -- it imports `ToolCallSignaling`, which was
-> removed from `mcs-driver-core`. Streaming now solves that problem without it.
-
 ## Prerequisites
 
 ```bash

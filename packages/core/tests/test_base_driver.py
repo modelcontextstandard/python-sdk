@@ -120,7 +120,7 @@ class TestProcessLlmResponse:
         llm = json.dumps({"tool": "add", "arguments": {"a": 1, "b": 2}})
         resp = driver.process_llm_response(llm)
         assert resp.call_executed is True
-        assert resp.tool_call_result is not None
+        assert resp.executed_calls
 
     def test_markdown_fence_call(self, driver):
         driver._execute_result = "5"
@@ -133,7 +133,7 @@ class TestProcessLlmResponse:
         llm = json.dumps({"tool": "add", "arguments": {"a": 1, "b": 2}})
         resp = driver.process_llm_response(llm)
         assert resp.call_failed is True
-        assert "kaboom" in (resp.call_detail or "")
+        assert "kaboom" in (resp.executed_calls[0].error or "")
         assert resp.retry_prompt is not None
 
     def test_dict_input_handled(self, driver):

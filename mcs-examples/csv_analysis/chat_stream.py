@@ -121,13 +121,15 @@ def _stream_one_turn(
 
 def _print_debug_dr(dr: DriverResponse) -> None:
     parts = [f"call_executed={dr.call_executed}  call_failed={dr.call_failed}"]
-    if dr.call_detail:
-        parts.append(f"detail: {dr.call_detail}")
-    if dr.tool_call_result is not None:
-        r = str(dr.tool_call_result)
-        if len(r) > 200:
-            r = r[:197] + "..."
-        parts.append(f"tool_call_result: {r}")
+    # executed_calls is the per-call report -- one line each, so a parallel batch
+    # is readable (name, args, result/error) instead of one raw blob.
+    for rec in dr.executed_calls or []:
+        if rec.error:
+            outcome = f"[red]error:[/red] {rec.error}"
+        else:
+            _r = str(rec.result)
+            outcome = "-> " + (_r[:157] + "..." if len(_r) > 160 else _r)
+        parts.append(f"  • {rec.name}({rec.arguments}) {outcome}")
     if dr.retry_prompt:
         parts.append(f"retry_prompt: {dr.retry_prompt}")
     console.print(Panel("\n".join(parts), title="DriverResponse", border_style="dim"))
@@ -193,7 +195,9 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
 
             if response.call_failed:
                 if debug:
-                    console.print(f"[yellow]Tool call failed: {response.call_detail}[/yellow]")
+                    console.print(
+                        "[yellow]Tool call failed: "
+                        f"{'; '.join(r.error or '' for r in response.executed_calls or [])}[/yellow]")
                 continue
 
             content = llm_out.get("content", "") or ""
