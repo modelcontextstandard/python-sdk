@@ -26,9 +26,10 @@ system_prompt = orchestrator.get_driver_system_message()
 
 ## Capabilities
 
-The orchestrator is **opaque**: it advertises and resolves only the capabilities
-it provides *itself*, not those of the drivers it holds (`resolve_capability`
-matches the orchestrator, never reaches inward). It ships with an aggregate
+The orchestrator is **opaque**: it advertises only the capabilities it provides
+*itself*, not those of the drivers it holds -- so `isinstance(orch, SupportsX)`
+matches the orchestrator's own contracts and never reaches inward. It ships with an
+aggregate
 `healthcheck` that combines its first-level drivers — worst status wins, healthy
 when none report. Override it for stack-specific semantics.
 

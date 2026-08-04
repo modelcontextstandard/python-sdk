@@ -1,7 +1,7 @@
 """Streaming MCS chat client using the REST driver.
 
 Streams LLM output chunk-by-chunk. The client feeds each raw chunk to an
-``LLMStreamBuffer`` (obtained via ``streamer.new_stream_buffer()`` -- a standalone
+``LLMStreamBuffer`` (obtained via ``driver.new_stream_buffer()`` -- a standalone
 object, seeded with the driver's chain); the buffer reassembles the provider's native
 message and returns the content delta for live display. Each accumulated message goes
 to ``process_llm_response`` -- the client never touches ``tool_calls`` itself. When the
@@ -37,13 +37,11 @@ import argparse
 from dotenv import load_dotenv
 from litellm import completion
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
 
 from mcs.driver.rest import RestDriver
 from mcs.driver.core import (
-    DriverMeta, DriverResponse, MCSDriver,
-    SupportsNativeTools, SupportsStreaming,
+    DriverResponse, MCSDriver, SupportsNativeTools, SupportsStreaming,
 )
 
 console = Console()
@@ -118,17 +116,17 @@ def _print_debug_dr(dr: DriverResponse) -> None:
 
 def chat_loop(driver: MCSDriver, model: str, native_tools_enabled: bool, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
-    # This client depends on the SupportsStreaming *capability* for the
-    # streaming-aware process_llm_response. The buffer is a standalone object (not
-    # driver-bound, so it works in fan-out); new_stream_buffer() is a convenience that
-    # seeds it with the driver's extraction chain.
-    streamer = DriverMeta.resolve_capability(driver, SupportsStreaming)
-    if streamer is None:
+    # This client depends on the SupportsStreaming *contract* for the streaming-aware
+    # process_llm_response -- so it asks the driver itself. Nothing wraps a driver
+    # (ADR-0002), so isinstance is the direct and honest answer, and everything is
+    # called on the driver. The buffer is a standalone object (not driver-bound, so it
+    # works in fan-out); new_stream_buffer() seeds it with the driver's chain.
+    if not isinstance(driver, SupportsStreaming):
         raise SystemExit(f"{driver.meta.name} does not support streaming.")
 
     native_tools: list[dict] | None = None
-    if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)) and native_tools_enabled:
-        ctx = dc.get_native_tool_context(model)
+    if native_tools_enabled and isinstance(driver, SupportsNativeTools):
+        ctx = driver.get_native_tool_context(model)
         system_msg = ctx.system_message
         native_tools = ctx.tools
     else:
@@ -185,13 +183,17 @@ def chat_loop(driver: MCSDriver, model: str, native_tools_enabled: bool, debug: 
             # what it lets through. Native and text-embedded calls look identical here.
             # Per chunk: (a) a content token -> buf.text() -> print; (b) a call building
             # up -> buf.text() empty, call_pending; (c) call complete -> driver executes.
-            buf = streamer.new_stream_buffer()      # seeded with the driver's chain
+            buf = driver.new_stream_buffer()        # seeded with the driver's chain
 
             content = ""
             tool_ran = tool_ok = False
             for chunk in stream:  # type: ignore[union-attr]
                 buf.add(chunk)
-                response = streamer.process_llm_response(buf)   # the buffer IS the signal
+                # The buffer IS the signal. (A checker narrowing `driver` to an
+                # MCSDriver+SupportsStreaming intersection resolves the method by MRO and
+                # may show the base's narrower `str | dict` signature instead of the one
+                # SupportsStreaming widens to accept a buffer -- runtime is correct.)
+                response = driver.process_llm_response(buf)     # type: ignore[arg-type]
 
                 if response.messages:                 # tool result -> back to the LLM
                     messages.extend(response.messages)

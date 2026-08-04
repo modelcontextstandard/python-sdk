@@ -21,12 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from abc import ABC, abstractmethod
-from typing import Any, TypeVar, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .mcs_tool_driver_interface import MCSToolDriver
-
-T = TypeVar("T")
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -36,7 +31,11 @@ class DriverBinding:
     Attributes
     ----------
     capability :
-        What the driver provides, e.g. "csv", "rest", "filesystem", "pdf".
+        The driver's **subject matter** -- what it provides, e.g. "csv", "rest",
+        "filesystem", "pdf". This is the primary selector: *"give me a driver for
+        `mail` over `imap`."* Despite the similar name it is unrelated to
+        :attr:`DriverMeta.capabilities`, which lists the optional *contracts* a
+        driver satisfies.
     adapter :
         Which backend implementation is used, e.g. "localfs", "http", "smb", "s3".
         Use ``"*"`` when the driver works with any adapter.
@@ -56,10 +55,16 @@ class DriverBinding:
 
 @dataclass(frozen=True)
 class DriverMeta:
-    """Static metadata that describes what a driver does and what it supports.
+    """The **data sheet** of a driver -- what it does and what it supports.
 
-    Inspected by orchestrators or clients to determine compatibility,
-    supported models, and available optional features.
+    A plain, serializable record that can be read *before or without* holding
+    the driver object: from a registry entry, a package index, a JSON file. That
+    is what it is for -- **finding** the right driver among many.
+
+    Asking a driver you already hold what it can *do* is a different question
+    with a different answer: ``isinstance(driver, SupportsX)``, straight from
+    the object. Since ADR-0002 nothing wraps a driver any more, so that answer is
+    always available and always current -- see :attr:`capabilities`.
 
     Attributes
     ----------
@@ -70,13 +75,27 @@ class DriverMeta:
     version :
         Semantic version string (e.g. "1.0.0").
     bindings :
-        One or more capability + adapter combinations the driver supports.
+        One or more subject-matter + adapter combinations the driver supports.
+        Selection by *what a driver is for* starts here (see
+        :class:`DriverBinding`).
     supported_llms :
         Tuple of supported model identifiers. Use ``"*"`` to match all
         models. ``None`` if the driver is a pure MCS ToolDriver.
     capabilities :
-        Optional runtime features / mixins, e.g. ``"tcs"``,
-        ``"healthcheck"``, ``"autostart"``, ``"streaming"``.
+        The optional contracts the driver **class** satisfies, as their
+        ``CAPABILITY`` flags: the roles it can play (``"standalone"``,
+        ``"orchestratable"``) and the optional features it implements
+        (``"healthcheck"``, ``"streaming"``, ``"native_tools"``).
+
+        This is a **projection** of those contracts, produced by
+        :meth:`derive_capabilities` -- not a second source of truth kept in sync
+        by hand. It exists for the consumer who holds *metadata but no driver*;
+        a consumer holding the driver asks the object with ``isinstance``.
+
+        Strictly static, and deliberately so: it describes the class, not an
+        instance. What a particular instance was configured with at runtime --
+        which middleware the client hung into it -- is not a property of the
+        driver and stays out of here.
 
     Example
     -------
@@ -98,67 +117,51 @@ class DriverMeta:
     supported_llms: tuple[str, ...] | None
     capabilities: tuple[str, ...]
 
-    def has_capability(self, contract: type) -> bool:
-        """Return ``True`` if *contract*'s ``CAPABILITY`` flag is advertised.
+    # Two operations on the data sheet: one writes it (the projection), one reads
+    # it (the catalog lookup). Neither is the runtime check -- for that, ask the
+    # object: ``isinstance(driver, Contract)``.
 
-        Detection only -- a pure read over :attr:`capabilities`. Reflects the
-        whole stack, because wrappers aggregate the inner driver's flags.
+    def has_capability(self, contract: type) -> bool:
+        """Return ``True`` if *contract*'s ``CAPABILITY`` flag is on the data sheet.
+
+        The **catalog** read, for a consumer that has metadata but no driver
+        object -- a registry, a package index, a config file. It keeps the flag
+        together with its contract instead of forcing string literals on the
+        caller.
+
+        This is deliberately *not* the runtime check. When you hold the driver,
+        ``isinstance(driver, Contract)`` is the direct answer, cannot go stale,
+        and is the route a client should take.
         """
         return getattr(contract, "CAPABILITY", None) in self.capabilities
 
-    def with_capability(self, contract: type) -> "DriverMeta":
-        """Return a copy with *contract*'s ``CAPABILITY`` flag added (idempotent).
+    def derive_capabilities(self, cls: type) -> "DriverMeta":
+        """Return a copy with every capability flag *cls* carries added (idempotent).
 
-        Explicit, port-neutral metadata helper -- replaces the implicit
-        ``__init_subclass__`` auto-registration that used to live inside the
-        capability mixins.
-        """
-        flag = getattr(contract, "CAPABILITY", None)
-        if flag is None or flag in self.capabilities:
-            return self
-        return replace(self, capabilities=(*self.capabilities, flag))
-
-    @staticmethod
-    def resolve_capability(driver: MCSDriver | MCSToolDriver, contract: type[T]) -> T | None:
-        """Return the layer in *driver*'s stack typed as *contract*, or ``None``.
-
-        Invocation across composition. A wrapper (orchestrator, decorator)
-        implements :class:`SupportsCapabilityResolution` to search inward; a plain
-        driver is matched directly on itself. Works uniformly whether *driver*
-        is a plain driver, an orchestrator, or a decorator -- the caller never
-        needs to know which.
-
-        This is a ``@staticmethod`` on purpose: the metadata cannot reach the
-        driver instance (it is typically a shared class attribute), so the
-        driver is passed in explicitly rather than held as a back-reference.
-        """
-        from .mixins.capability_resolution import SupportsCapabilityResolution
-
-        if isinstance(driver, SupportsCapabilityResolution):
-            return driver.resolve_capability(contract)
-        return driver if isinstance(driver, contract) else None
-
-    @staticmethod
-    def derive_capabilities(meta: "DriverMeta", cls: type) -> "DriverMeta":
-        """Return a copy of *meta* with capability flags derived from *cls*.
-
-        Scans *cls*'s MRO for ``CAPABILITY`` attributes -- the flag each contract
-        carries (``"standalone"`` on :class:`MCSDriver`, ``"orchestratable"`` on
+        The **projection** that keeps the data sheet honest. Scans *cls*'s MRO
+        for ``CAPABILITY`` attributes -- the flag each contract declares
+        (``"standalone"`` on :class:`MCSDriver`, ``"orchestratable"`` on
         :class:`MCSToolDriver`, ``"native_tools"`` on ``SupportsNativeTools``, …)
-        -- and **unions** them with whatever *meta* already declares.
+        -- and **unions** them with whatever this metadata already declares. Pass
+        a single contract to add exactly that flag, or the driver class to fold
+        in everything it implements.
 
-        So a driver may list its capabilities explicitly (readable, inspectable
-        by human and machine), let them be derived from the interfaces it
-        implements, or both -- the result is the same complete tuple either way.
-        Flag-less contracts (e.g. ``SupportsCapabilityResolution``, which is pure
-        mechanism) are skipped.
+        Because the flags are *derived from* the contracts rather than typed out
+        beside them, the metadata cannot drift away from the object: it is a
+        serializable shadow of the truth, not a second copy of it. A driver may
+        still list flags explicitly (readable, inspectable by human and machine)
+        -- the union is the same complete tuple either way. Bases without a flag
+        are skipped.
+
+        Feed it *classes*, never instance state: the result must stay
+        reproducible from the class alone, or the data sheet stops being static.
         """
-        flags = list(meta.capabilities)
+        flags = list(self.capabilities)
         for base in cls.__mro__:
             flag = base.__dict__.get("CAPABILITY")
             if isinstance(flag, str) and flag not in flags:
                 flags.append(flag)
-        return replace(meta, capabilities=tuple(flags))
+        return replace(self, capabilities=tuple(flags))
 
 
 @dataclass

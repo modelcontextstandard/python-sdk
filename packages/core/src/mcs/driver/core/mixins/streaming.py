@@ -26,8 +26,9 @@ call) and reports only *status* here -- display stays with the buffer (``buf.tex
 keeping the two concerns separate. The client stays format-agnostic (identical loop for
 native and text-embedded calls) and never inspects the chunk.
 
-The client detects support via ``driver.meta.has_capability`` / ``DriverMeta.resolve_capability``
-and depends on this capability, not on any concrete driver class. Reassembly is an LLM/SDK
+The client detects support via ``isinstance(driver, SupportsStreaming)`` (or the
+``driver.meta.has_capability`` flag) and depends on this capability, not on any concrete
+driver class. Reassembly is an LLM/SDK
 concern, identical for every driver, and drivers compose -- so the buffer is a standalone
 object, not a driver method; the driver only offers the factory as convenience. See
 ``docs/adr/0001-streaming-extraction-native-reassembly.md`` and

@@ -172,10 +172,9 @@ class BaseOrchestrator(BaseDriver, SupportsHealthcheck):
             inners = list(self._labeled.values())
         worst = HealthStatus.OK
         for inner in inners:
-            provider = DriverMeta.resolve_capability(inner, SupportsHealthcheck)
-            if provider is None:
-                continue
-            status = _as_health_status(provider.healthcheck().get("status"))
+            if not isinstance(inner, SupportsHealthcheck):
+                continue                                   # driver has no healthcheck -> skip
+            status = _as_health_status(inner.healthcheck().get("status"))
             if _HEALTH_SEVERITY[status] > _HEALTH_SEVERITY[worst]:
                 worst = status
         return {"status": worst}

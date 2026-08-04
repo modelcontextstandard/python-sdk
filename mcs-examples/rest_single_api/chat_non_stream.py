@@ -38,7 +38,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 
 from mcs.driver.rest import RestDriver
-from mcs.driver.core import DriverMeta, DriverResponse, MCSDriver, SupportsNativeTools
+from mcs.driver.core import DriverResponse, MCSDriver, SupportsNativeTools
 
 console = Console()
 
@@ -109,8 +109,8 @@ def chat_loop(driver: MCSDriver, model: str, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
     # Use get_native_tool_context if available, fall back to get_driver_system_message
     native_tools: list[dict] | None = None
-    if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)):
-        ctx = dc.get_native_tool_context(model)
+    if isinstance(driver, SupportsNativeTools):
+        ctx = driver.get_native_tool_context(model)
         system_msg = ctx.system_message
         native_tools = ctx.tools
     else:

@@ -298,8 +298,8 @@ def _print_debug_dr(dr: DriverResponse) -> None:
 def chat_loop(driver: MCSDriver, model: str, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
     native_tools: list[dict] | None = None
-    if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)):
-        ctx = dc.get_native_tool_context(model)
+    if isinstance(driver, SupportsNativeTools):
+        ctx = driver.get_native_tool_context(model)
         system_msg = ctx.system_message
         native_tools = ctx.tools
     else:

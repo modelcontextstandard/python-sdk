@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from .mcs_driver_interface import MCSDriver, DriverMeta, DriverResponse, ToolCallRecord
 from .mcs_tool_driver_interface import MCSToolDriver, Tool
@@ -33,11 +33,14 @@ from .extraction_chain import ExtractionChain
 from .llm_stream_buffer import LLMStreamBuffer
 from .mixins.native_tools import SupportsNativeTools, NativeToolContext
 from .mixins.streaming import SupportsStreaming
+from .mixins.tool_middleware import ToolMiddleware, SupportsToolMiddleware
 
 logger = logging.getLogger(__name__)
 
 
-class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreaming):
+class BaseDriver(
+    MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreaming, SupportsToolMiddleware,
+):
     """Concrete base that wires ``MCSDriver`` methods to a ``PromptStrategy``.
 
     Subclasses must provide:
@@ -59,6 +62,7 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         prompt_strategy: PromptStrategy | None = None,
         custom_tool_description: str | None = None,
         custom_system_message: str | None = None,
+        middleware: list[ToolMiddleware] | None = None,
         _extraction_strategies: list[ExtractionStrategy] | None = None,
         _chain: ExtractionChain | None = None,
     ) -> None:
@@ -76,17 +80,23 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
             AnthropicExtractionStrategy(),
             TextExtractionStrategy(self._prompt_strategy),
         ]
-        self._chain = _chain or ExtractionChain(self._extractors)       
+        self._chain = _chain or ExtractionChain(self._extractors)
         self._native_backup = TextExtractionStrategy(self._prompt_strategy)
+
+        # Cross-cutting concerns (hooks, permission, auth) as an ordered middleware chain
+        # around execute_tool (SupportsToolMiddleware) -- outermost first. Middleware lives
+        # *inside* the driver, so the driver keeps its identity and clients use isinstance.
+        self._middleware: list[ToolMiddleware] = list(middleware or [])
 
         # Capability flags are derived from the interfaces this driver implements
         # (MCSDriver -> "standalone", MCSToolDriver -> "orchestratable",
-        # SupportsNativeTools -> "native_tools", …) and unioned with whatever the
-        # driver's ``meta`` already declares -- so a driver may list them
-        # explicitly for readability, leave them to be derived, or both.
+        # SupportsNativeTools -> "native_tools", …) unioned with whatever the driver's
+        # ``meta`` already declares. Purely static: the data sheet describes the driver
+        # *class*, so which middleware an instance happens to run stays out of it --
+        # that is runtime configuration the client made, not a property of the driver.
         meta = getattr(type(self), "meta", None)
         if isinstance(meta, DriverMeta):
-            self.meta = DriverMeta.derive_capabilities(meta, type(self))
+            self.meta = meta.derive_capabilities(type(self))
 
     # -- MCSDriver contract ---------------------------------------------------
 
@@ -324,14 +334,17 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
         )    
 
     def _invoke_tool(self, call: ExtractedCall) -> ToolCallRecord:
-        """Execute one owned call; capture the outcome as a :class:`ToolCallRecord`.
+        """Execute one owned call through the middleware chain; capture the outcome.
 
-        A raised exception becomes ``record.error`` (it never propagates) -- the
-        model reads the error back through ``result_messages`` and self-heals.
+        A raised exception becomes ``record.error`` (it never propagates) -- the model
+        reads the error back through ``result_messages`` and self-heals. The chain runs
+        *inside* this try/except, so a concern that does not catch a domain error (e.g. an
+        auth challenge with no ``AuthMiddleware`` present) still degrades to ``call_failed``
+        rather than crashing -- the exact fallback the old decorator stack had.
         """
         logger.info("Executing tool: %s", call.name)
         try:
-            result = self.execute_tool(call.name, call.arguments)
+            result = self._run_tool_chain(call.name, call.arguments)
             return ToolCallRecord(
                 name=call.name, arguments=call.arguments,
                 result=result, tool_call_id=call.id,
@@ -341,6 +354,29 @@ class BaseDriver(MCSDriver, MCSToolDriver, SupportsNativeTools, SupportsStreamin
                 name=call.name, arguments=call.arguments,
                 error=f"Tool '{call.name}' failed: {e}", tool_call_id=call.id,
             )
+
+    def _run_tool_chain(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        """Run *tool_name* through the middleware chain, ending at :meth:`execute_tool`.
+
+        The chain is built outermost-first: ``self._middleware[0]`` wraps everything, so
+        it sees the call first and the result last. With no middleware this is just
+        ``execute_tool`` -- zero overhead.
+        """
+        call_next: "Callable[[str, dict[str, Any]], Any]" = self.execute_tool
+        for mw in reversed(self._middleware):
+            call_next = self._wrap_middleware(mw, call_next)
+        return call_next(tool_name, arguments)
+
+    @staticmethod
+    def _wrap_middleware(mw: ToolMiddleware, call_next):
+        """One link of the chain (a named helper so the loop closure binds correctly)."""
+        return lambda name, args: mw.on_execute_tool(name, args, call_next)
+
+    # -- SupportsToolMiddleware implementation ---------------------------------
+
+    def add_middleware(self, middleware: ToolMiddleware) -> None:
+        """Append *middleware* to the chain (innermost, closest to execution)."""
+        self._middleware.append(middleware)
 
     # -- Back-compat / helpers ------------------------------------------------
 

@@ -6,21 +6,21 @@ Demonstrates the MCS auth stack with pluggable credential providers:
 - Direct OAuth 2.0 Authorization Code Flow
 - Static tokens for quick testing
 
-The client has no knowledge of authentication or approval -- the ToolDriver is
-wrapped in two stacked decorators, injected via the MailDriver's ``_tooldriver``
-hook:
+The client has no knowledge of authentication or approval -- three concerns run as
+a middleware chain *inside* the driver (``add_middleware``), so the driver keeps its
+full identity and the client just talks to it:
 
-- ``AuthDecorator`` intercepts credential challenges so the LLM can present the
+- ``AuthMiddleware`` intercepts credential challenges so the LLM can present the
   login URL to the user.
-- ``PermissionDecorator`` gates every tool call through a user-consent prompt
+- ``PermissionMiddleware`` gates every tool call through a user-consent prompt
   before it runs; the client only supplies the consent handler.
-- ``HooksDecorator`` fires a pre-tool-use hook so the client can show progress
+- ``HooksMiddleware`` fires a pre-tool-use hook so the client can show progress
   ("a tool is running") WITHOUT ever inspecting the LLM output. This is the
   point: the client knows nothing about LLM tool-calling formats -- it hands the
   raw message to ``process_llm_response`` as a black box and learns of tool
   activity only through the hook.
 
-Stack:  ``MailDriver(_tooldriver=Hooks(Permission(Auth(MailToolDriver))))``.
+Chain (outermost first):  ``Hooks -> Permission -> Auth -> the real tool``.
 
 Usage:
     # Auth0 with pre-existing refresh token (from .env):
@@ -53,10 +53,10 @@ from litellm import completion
 from rich.console import Console
 from rich.panel import Panel
 
-from mcs.auth.decorator import AuthDecorator
-from mcs.permission.decorator import PermissionDecorator
-from mcs.hooks.decorator import HooksDecorator
-from mcs.driver.core import DriverMeta, DriverResponse, MCSDriver, SupportsNativeTools
+from mcs.auth.middleware import AuthMiddleware
+from mcs.permission.middleware import PermissionMiddleware
+from mcs.hooks.middleware import HooksMiddleware
+from mcs.driver.core import DriverResponse, MCSDriver, SupportsNativeTools
 from mcs.driver.mail import MailDriver
 from mcs.driver.mail.tooldriver import MailToolDriver
 
@@ -186,7 +186,7 @@ def _build_credential(args: argparse.Namespace):
 
 
 def _ask_consent(tool_name: str, arguments: dict) -> bool:
-    """Consent handler for the PermissionDecorator.
+    """Consent handler for the PermissionMiddleware.
 
     Called from inside ``execute_tool`` -- after the LLM has chosen a tool but
     *before* it runs. Blocks on user input; returns True to allow, False to deny
@@ -235,20 +235,18 @@ def _build_driver(args: argparse.Namespace) -> MailDriver:
         read_kwargs=gmail_kwargs,
         send_kwargs=gmail_kwargs,
     )
-    # Stack three cross-cutting concerns as decorators and inject them via the
-    # MailDriver's ``_tooldriver`` DI hook. The MailDriver stays the client-
-    # facing driver (process_llm_response, native tools, bindings); its
-    # execute_tool now routes through  Hooks( Permission( Auth( MailToolDriver ) ) ):
-    # Hooks notifies the client a tool is running, Permission asks the user to
-    # approve it, Auth catches credential challenges. The client sees none of it.
-    guarded = HooksDecorator(
-        PermissionDecorator(
-            AuthDecorator(tool_driver),
-            consent_handler=_ask_consent,
-        ),
-        pre=[_on_tool_start],
-    )
-    return MailDriver(_tooldriver=guarded)
+    # Three cross-cutting concerns as a middleware chain *inside* the driver -- the
+    # driver keeps its full identity (process_llm_response, native tools, bindings) and
+    # each execute_tool routes through Hooks -> Permission -> Auth -> the real tool:
+    # Hooks notifies the client a tool is running, Permission asks the user to approve
+    # it, Auth catches credential challenges. Added outermost-first, so Hooks sees the
+    # call first and Auth (innermost) sits closest to execution. The client sees none
+    # of it, and one middleware instance could be shared across many drivers.
+    driver = MailDriver(_tooldriver=tool_driver)
+    driver.add_middleware(HooksMiddleware(pre=[_on_tool_start]))
+    driver.add_middleware(PermissionMiddleware(consent_handler=_ask_consent))
+    driver.add_middleware(AuthMiddleware())
+    return driver
 
 
 def _stream_one_turn(
@@ -333,8 +331,8 @@ def _print_debug_dr(dr: DriverResponse) -> None:
 def chat_loop(driver: MCSDriver, model: str, debug: bool,
               api_base: str | None = None, api_key: str | None = None) -> None:
     native_tools: list[dict] | None = None
-    if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)):
-        ctx = dc.get_native_tool_context(model)
+    if isinstance(driver, SupportsNativeTools):
+        ctx = driver.get_native_tool_context(model)
         system_msg = ctx.system_message
         native_tools = ctx.tools
     else:

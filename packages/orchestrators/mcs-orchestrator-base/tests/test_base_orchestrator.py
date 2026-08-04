@@ -15,7 +15,6 @@ from mcs.driver.core import (
     DriverBinding,
     SupportsHealthcheck,
     SupportsNativeTools,
-    BaseDecorator,
 )
 from mcs.driver.core.mixins.healthcheck import HealthStatus
 from mcs.orchestrator.base import (
@@ -389,28 +388,28 @@ class TestCapabilityResolution:
     def test_resolves_own_capability_to_self(self):
         """A capability the orchestrator provides itself resolves to itself."""
         orch = _orch_with(_driver_ab())
-        assert DriverMeta.resolve_capability(orch, SupportsNativeTools) is orch
+        assert isinstance(orch, SupportsNativeTools)
 
     def test_healthcheck_resolves_to_self(self):
         """Healthcheck is implemented by the orchestrator itself -> resolves to
         self, not to an inner healthcheck-capable driver."""
         orch = _orch_with(_HealthDriver([TOOL_C]))
-        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is orch
+        assert isinstance(orch, SupportsHealthcheck)
 
     def test_inner_capability_not_passed_through(self):
         """Opaque: a contract held only by an inner driver is NOT surfaced."""
         orch = _orch_with(_FooDriver([TOOL_C]))
-        assert DriverMeta.resolve_capability(orch, _SupportsFoo) is None
+        assert not isinstance(orch, _SupportsFoo)
 
     def test_detect_and_resolve_agree(self):
         """detect <-> resolve are consistent for owned and non-owned contracts."""
         orch = _orch_with(_FooDriver([TOOL_C]))
         # owned: healthcheck
         assert orch.meta.has_capability(SupportsHealthcheck)
-        assert DriverMeta.resolve_capability(orch, SupportsHealthcheck) is orch
+        assert isinstance(orch, SupportsHealthcheck)
         # not owned: foo (held by an inner driver only)
         assert not orch.meta.has_capability(_SupportsFoo)
-        assert DriverMeta.resolve_capability(orch, _SupportsFoo) is None
+        assert not isinstance(orch, _SupportsFoo)
 
 
 class TestHealthcheck:
@@ -475,33 +474,3 @@ class TestNestedHealthcheck:
     def test_depth_three_cascades(self):
         deep = _orch_with(_orch_with(_orch_with(_HealthDriver([TOOL_C], "WARNING"))))
         assert deep.healthcheck()["status"] is HealthStatus.WARNING
-
-
-class _Wrapped(BaseDecorator, SupportsHealthcheck):
-    """A decorator that adds the healthcheck capability to whatever it wraps."""
-
-    CONTRACT = SupportsHealthcheck
-
-    def healthcheck(self):
-        return {"status": "WARNING"}
-
-
-class TestDecoratorInOrchestrator:
-    """A BaseDecorator registered as a ToolDriver inside the orchestrator."""
-
-    def test_healthcheck_reaches_through_bare_decorator(self):
-        """A healthcheck-capable driver behind a bare decorator is still found
-        (the decorator transparently resolves inward)."""
-        dec = BaseDecorator(_HealthDriver([TOOL_C], "ERROR"))
-        orch = _orch_with(dec)
-        assert orch.healthcheck()["status"] is HealthStatus.ERROR
-
-    def test_decorator_that_adds_healthcheck_contributes(self):
-        """A decorator whose CONTRACT is SupportsHealthcheck contributes its status."""
-        orch = _orch_with(_Wrapped(_driver_ab()))
-        assert orch.healthcheck()["status"] is HealthStatus.WARNING
-
-    def test_decorator_delegates_execution_in_orchestrator(self):
-        dec = _Wrapped(_driver_ab())           # bare execute_tool -> delegates
-        orch = _orch_with(dec)
-        assert orch.execute_tool("tool_a", {}) == "result_a"

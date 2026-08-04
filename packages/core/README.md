@@ -4,8 +4,9 @@ Core driver contract for the **Model Context Standard (MCS)**.
 
 This package defines the language-agnostic `MCSDriver` and `MCSToolDriver`
 interfaces, metadata classes (`DriverMeta`, `DriverBinding`, `DriverResponse`),
-extraction strategies, prompt strategies, and optional mixins
-(`ToolCallSignaling`, `SupportsNativeTools`).
+extraction strategies, prompt strategies, and the optional contracts
+(`SupportsHealthcheck`, `SupportsStreaming`, `SupportsNativeTools`,
+`SupportsToolMiddleware`).
 
 It has **zero runtime dependencies** and weighs only a few kilobytes.
 
@@ -26,35 +27,38 @@ class MyDriver(MCSDriver):
 
 ## Capability detection
 
-Optional features (health checks, native tool-calling via
-`get_native_tool_context`, streaming tool-call signaling, …) are advertised as
-flags in `DriverMeta.capabilities`. Each optional contract carries its flag
-as a `CAPABILITY` constant. There are two operations — **detection** ("is the
-feature there?") and **invocation** ("give me the object that provides it") —
-and both avoid `isinstance`:
+Two questions, two moments. **"Can this object do X?"** — you hold the driver,
+so ask it. **"Which driver should I pick?"** — you do not hold one yet, so read
+the data sheet (`DriverMeta`).
 
 ```python
-from mcs.driver.core import DriverMeta, SupportsNativeTools
+from mcs.driver.core import SupportsNativeTools
 
-# detection: a pure read over the (aggregated) capability flags
-if driver.meta.has_capability(SupportsNativeTools):
-    ...
+# runtime: detect and call in one step -- the driver satisfies the contract itself
+if isinstance(driver, SupportsNativeTools):
+    ctx = driver.get_native_tool_context(model)
 
-# invocation: get the layer that satisfies the contract -- typed, no cast,
-# works whether `driver` is a plain driver, an orchestrator, or a decorator
-if (dc := DriverMeta.resolve_capability(driver, SupportsNativeTools)):
-    ctx = dc.get_native_tool_context(model)
+# data sheet: for a consumer that has metadata but no driver object
+candidates = [m for m in registry if m.has_capability(SupportsNativeTools)]
 ```
 
-**Do not rely on `isinstance` for feature detection.** Drivers are
-composable: a *decorator* (auth, permission, hooks, …) wraps another driver,
-satisfies the same `MCSDriver` / `MCSToolDriver` interfaces, and is injected
-via dependency injection — so from the outside it just looks like a driver,
-and the client cannot know what the stack contains. `isinstance` only sees
-the **outermost** layer and misses capabilities provided deeper in the
-stack. Each decorator aggregates the inner driver's `capabilities` and adds
-its own, so `meta.capabilities` reflects the **whole** stack; `isinstance`
-does not.
+Optional features (health checks, native tool-calling, streaming, …) are
+declared by the `Supports…` contract a driver implements; each contract carries
+its flag as a `CAPABILITY` constant, and `DriverMeta.derive_capabilities` folds
+those flags into `meta.capabilities`. That makes the metadata a **projection**
+of the contracts rather than a second list to maintain — it cannot drift away
+from the object.
+
+Cross-cutting concerns (auth, permission, hooks) are **middleware *inside* the
+driver** (`SupportsToolMiddleware`), not wrappers around it — so the driver
+keeps its full identity and `isinstance(driver, SupportsX)` sees its contracts
+directly (ADR-0002). Which middleware an instance runs is **not** reflected in
+its `meta`: that is runtime configuration the client made, not a property of the
+driver — and the client that built a middleware holds its own reference to it.
+
+Note that `DriverBinding.capability` (`"rest"`, `"csv"`, `"mailread"`) is the
+driver's *subject matter* and the primary selector — unrelated to
+`meta.capabilities`, which lists optional contracts, despite the similar name.
 
 ## What lives in core — and what doesn't
 
@@ -63,14 +67,12 @@ does not.
 mechanism** — and nothing more:
 
 - **`BaseDriver`** — the *leaf*. A ready-made implementation of the mandatory
-  driver methods (prompt generation, response parsing). It carries no resolution
-  logic of its own: a leaf has no inner layers, so the resolution entry point's
-  `isinstance` fallback matches it directly.
-- **`BaseDecorator`** — the *transparent wrapping node*. It delegates every
-  interface call to a single inner driver and resolves capabilities by searching
-  inward, so an inner capability stays reachable through the decorator. Being
-  nothing but delegation plus stack-navigation, it belongs here alongside
-  `BaseDriver`.
+  driver methods (prompt generation, response parsing). It also implements
+  `SupportsToolMiddleware`, threading each tool call through its middleware chain.
+- **`ToolMiddleware` / `SupportsToolMiddleware`** — the interceptor around
+  `execute_tool`: an ordered, in-driver chain for cross-cutting concerns.
+  Composition mechanism only; the concrete concerns ship in their own packages
+  (`mcs-hooks`, `mcs-permission`, `mcs-auth`).
 
 Both are zero-dependency and carry no concept of their own; they are the
 minimal machinery the contract already implies.

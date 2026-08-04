@@ -1,11 +1,11 @@
 from .healthcheck import SupportsHealthcheck, HealthCheckResult, HealthStatus
 from .streaming import SupportsStreaming
 from .native_tools import SupportsNativeTools, NativeToolContext
-from .capability_resolution import SupportsCapabilityResolution
+from .tool_middleware import ToolMiddleware, SupportsToolMiddleware, CallNext
 
 __all__ = [
     "SupportsHealthcheck", "HealthCheckResult", "HealthStatus",
     "SupportsStreaming",
     "SupportsNativeTools", "NativeToolContext",
-    "SupportsCapabilityResolution",
+    "ToolMiddleware", "SupportsToolMiddleware", "CallNext",
 ]

@@ -10,7 +10,7 @@ import json
 import inspect
 from typing import Any
 
-from mcs.auth.decorator import AuthDecorator
+from mcs.auth.middleware import AuthMiddleware
 from mcs.auth.auth0 import Auth0Provider
 from mcs.auth.linkauth import LinkAuthConnector
 from mcs.driver.mail import MailDriver
@@ -92,10 +92,11 @@ class Tools:
             read_kwargs={"_credential": credential},
             send_kwargs={"_credential": credential},
         )
-        # Wrap the ToolDriver with auth handling and inject it via the
-        # MailDriver's ``_tooldriver`` DI hook. OpenWebUI calls execute_tool
-        # directly, which now routes through AuthDecorator.
-        self.driver = MailDriver(_tooldriver=AuthDecorator(tool_driver))
+        # Auth handling as middleware *inside* the driver: OpenWebUI calls execute_tool
+        # directly, which now routes through the AuthMiddleware chain -- a credential
+        # challenge becomes an in-band result instead of an exception.
+        self.driver = MailDriver(_tooldriver=tool_driver)
+        self.driver.add_middleware(AuthMiddleware())
 
     def _dynamically_generate_tools(self):
         """Build the driver and inject its tools -- same pattern as the REST tool."""

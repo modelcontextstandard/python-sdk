@@ -13,8 +13,9 @@ When it does not, ``tools`` is ``None`` and the tools stay embedded in
 ``get_driver_system_message``, not a replacement.
 
 This is a **pure contract** -- the example implementation lives in
-``BaseDriver``. Clients detect support via ``driver.meta.has_capability`` and
-resolve it via ``DriverMeta.resolve_capability(driver, SupportsNativeTools)``.
+``BaseDriver``. Clients detect support via ``isinstance(driver, SupportsNativeTools)``
+(or the ``driver.meta.has_capability`` flag) and then call the method on the driver
+directly -- the driver is never hidden behind a wrapper (ADR-0002).
 """
 
 from __future__ import annotations
