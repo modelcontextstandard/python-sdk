@@ -275,6 +275,9 @@ class TestCrossServer:
         driver._tools = None
         driver._tool_map = {}
         driver._base_url = spec["servers"][0]["url"]
+        # __init__ is bypassed here, so mirror the filter attributes it would set.
+        driver._include_tags = None
+        driver._include_paths = None
         driver._parse_spec(spec)
         return driver
 

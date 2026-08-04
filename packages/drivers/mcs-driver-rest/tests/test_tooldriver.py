@@ -11,6 +11,7 @@ import pytest
 
 from mcs.adapter.http import HttpAdapter
 from mcs.driver.rest import RestToolDriver
+from mcs.types.http import HttpResponse
 
 
 # ------------------------------------------------------------------ #
@@ -28,12 +29,21 @@ def _make_driver(
     driver._tools = None
     driver._tool_map = {}
     driver._base_url = base_url
+    # __init__ is bypassed here, so the filter attributes it would set must be
+    # mirrored: _parse_spec consults them for every operation.
+    driver._include_tags = None
+    driver._include_paths = None
 
     if spec_dict.get("swagger", "").startswith("2"):
         spec_dict = driver._convert_swagger2(spec_dict)
 
     driver._parse_spec(spec_dict)
     return driver
+
+
+def _resp(body: str, status: int = 200) -> HttpResponse:
+    """What an HTTP adapter returns -- ``execute_tool`` calls ``raise_for_status``."""
+    return HttpResponse(status_code=status, text=body)
 
 
 def _load_file(path: pathlib.Path) -> Dict[str, Any]:
@@ -184,7 +194,7 @@ class TestRefResolution:
         assert resolved == obj
 
     def test_petstore3_refs_resolve(self, load_spec):
-        from conftest import OPENAPI3_DIR
+        OPENAPI3_DIR = pathlib.Path(__file__).parent / "fixtures" / "openapi3"
         path = OPENAPI3_DIR / "petstore3-live.json"
         if not path.exists():
             pytest.skip("petstore3-live.json not available")
@@ -295,7 +305,9 @@ class TestOperationIdFallback:
 class TestYamlParsing:
 
     def test_yaml_fixtures_parse(self, load_spec):
-        from conftest import ALL_FIXTURES
+        ALL_FIXTURES = sorted(
+            (pathlib.Path(__file__).parent / "fixtures").rglob("*.yaml")
+        ) + sorted((pathlib.Path(__file__).parent / "fixtures").rglob("*.yml"))
         yaml_files = [f for f in ALL_FIXTURES if f.suffix in (".yaml", ".yml")]
         assert len(yaml_files) > 0, "Need at least one YAML fixture"
         for path in yaml_files:
@@ -386,7 +398,7 @@ class TestExecuteTool:
         return _make_driver(spec)
 
     def test_get_path_and_query_params(self, petstore_driver: RestToolDriver):
-        with patch.object(petstore_driver._http, "request", return_value='{"id":1}') as mock:
+        with patch.object(petstore_driver._http, "request", return_value=_resp('{"id":1}')) as mock:
             petstore_driver.execute_tool("getPet", {"petId": 42, "fields": "name,tag"})
             mock.assert_called_once()
             _, url = mock.call_args.args
@@ -394,14 +406,14 @@ class TestExecuteTool:
             assert mock.call_args.kwargs["params"] == {"fields": "name,tag"}
 
     def test_get_header_params_passed(self, petstore_driver: RestToolDriver):
-        with patch.object(petstore_driver._http, "request", return_value='{}') as mock:
+        with patch.object(petstore_driver._http, "request", return_value=_resp('{}')) as mock:
             petstore_driver.execute_tool("getPet", {"petId": 1, "X-Request-Id": "abc-123"})
             headers = mock.call_args.kwargs.get("headers")
             assert headers is not None
             assert headers["X-Request-Id"] == "abc-123"
 
     def test_get_cookie_params_as_header(self, petstore_driver: RestToolDriver):
-        with patch.object(petstore_driver._http, "request", return_value='{}') as mock:
+        with patch.object(petstore_driver._http, "request", return_value=_resp('{}')) as mock:
             petstore_driver.execute_tool("getPet", {"petId": 1, "session": "tok_abc"})
             headers = mock.call_args.kwargs.get("headers")
             assert headers is not None
@@ -409,14 +421,14 @@ class TestExecuteTool:
             assert "session=tok_abc" in headers["Cookie"]
 
     def test_post_body_and_query_separated(self, petstore_driver: RestToolDriver):
-        with patch.object(petstore_driver._http, "request", return_value='{"id":1}') as mock:
+        with patch.object(petstore_driver._http, "request", return_value=_resp('{"id":1}')) as mock:
             petstore_driver.execute_tool("createPet", {"name": "Fido", "tag": "dog", "dryRun": True})
             mock.assert_called_once()
             assert mock.call_args.kwargs["params"] == {"dryRun": True}
             assert mock.call_args.kwargs["json_body"] == {"name": "Fido", "tag": "dog"}
 
     def test_post_empty_query_not_sent(self, petstore_driver: RestToolDriver):
-        with patch.object(petstore_driver._http, "request", return_value='{}') as mock:
+        with patch.object(petstore_driver._http, "request", return_value=_resp('{}')) as mock:
             petstore_driver.execute_tool("createPet", {"name": "Fido"})
             assert mock.call_args.kwargs["params"] == {}
 

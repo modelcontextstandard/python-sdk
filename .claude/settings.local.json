@@ -16,7 +16,19 @@
       "Bash(python -c \"from mcs.driver.core.mixins import ToolCallSignaling\")",
       "Bash(grep -o -i \"init_subclass[^\\\\\"]\\\\{0,200\\\\}\" 97cde2eb-84d3-4f49-af24-c9299368e82d.jsonl)",
       "Bash(python -c \"import ast,sys; ast.parse\\(open\\('chat_stream.py',encoding='utf-8'\\).read\\(\\)\\)\")",
-      "Bash(python -)"
+      "Bash(python -)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git stash *)",
+      "Bash(git push *)",
+      "Bash(git commit -q -m '@ *)",
+      "Bash(python -c \"import litellm, rich; print\\(' OK'\\)\")",
+      "Bash(pip uninstall *)",
+      "Bash(python -m pytest packages/ -q)",
+      "Bash(python -m pytest packages/hooks packages/permission -q)",
+      "Bash(python -m pytest packages/drivers/mcs-driver-rest -q)",
+      "Bash(python -m pytest packages/drivers/mcs-driver-rest/tests/test_tooldriver.py::TestEdgeCases::test_non_http_methods_ignored -q)",
+      "Bash(python -m pytest packages/drivers/mcs-driver-rest/tests/test_tooldriver.py::TestExecuteTool::test_get_path_and_query_params -q)"
     ]
   }
 }
