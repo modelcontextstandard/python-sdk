@@ -19,16 +19,18 @@ the driver setup in `main()` differ.
   parts of a large API (like GitHub's 800+ endpoints) the LLM sees.
 - **Same client, different driver** -- the CSV and REST examples share
   the same `chat_loop` code; only the driver instantiation changes.
-- Native tool support via `NativeToolContext` (when the model supports it)
-- Tool-call signaling (TCS) for clean streaming UX
+- Native tool support via `NativeToolContext` (when the model supports it),
+  switchable with `--no-native-tools` to compare against text-prompt mode
 
 ## Client variants
 
-| File | LLM call | TCS |
-|---|---|---|
-| `chat_non_stream.py` | Single request | -- |
-| `chat_stream.py` | Token-by-token streaming | -- |
-| `chat_stream_tcs.py` | Streaming + buffering | Yes |
+| File | LLM call |
+|---|---|
+| `chat_non_stream.py` | Single request -- the whole answer goes into `process_llm_response` at once |
+| `chat_stream.py` | Token-by-token: the client feeds chunks into an `LLMStreamBuffer` and hands the buffer to the driver, which holds a forming tool call back so its JSON is never displayed |
+
+> `chat_stream_tcs.py` does not run -- it imports `ToolCallSignaling`, which was
+> removed from `mcs-driver-core`. Streaming now solves that problem without it.
 
 ## Prerequisites
 

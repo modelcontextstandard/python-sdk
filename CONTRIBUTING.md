@@ -37,6 +37,15 @@ packages/
   orchestrators/
     mcs-orchestrator-base/      # Multi-driver aggregation
     mcs-orchestrator-rest/      # REST-specific orchestrator
+  auth/
+    mcs-auth/                   # CredentialProvider protocol + AuthMiddleware
+    mcs-auth-auth0/             # Auth0 Token Vault provider
+    mcs-auth-oauth/             # Browser OAuth provider
+    mcs-auth-linkauth/          # Device-flow broker provider
+  permission/
+    mcs-permission/             # PermissionMiddleware (consent gate)
+  hooks/
+    mcs-hooks/                  # HooksMiddleware (lifecycle observers)
 ```
 
 ## Where to contribute

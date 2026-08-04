@@ -7,8 +7,9 @@ to analyse local CSV files via natural language.
 
 - How to instantiate a driver with `CsvDriver(base_dir="...")`
 - The full tool-call loop: LLM → `process_llm_response()` → `execute_tool()` → LLM
-- Non-streaming vs. streaming vs. streaming with **ToolCallSignaling** (TCS)
-- The TCS example demonstrates how to extend any driver with the mixin at the application level
+- Non-streaming vs. streaming -- in streaming the client feeds each chunk into an
+  `LLMStreamBuffer` and hands the buffer to the driver, which holds a forming
+  tool call back so its JSON is never displayed
 
 ## Prerequisites
 
@@ -25,9 +26,6 @@ python chat.py --debug
 
 # Streaming:
 python chat.py --stream --debug
-
-# Streaming + TCS (hides JSON from user during streaming):
-python chat.py --stream --tcs --debug
 ```
 
 ## Sample data

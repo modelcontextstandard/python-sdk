@@ -318,10 +318,17 @@ Reine **Live-UX-Notification** ("Tool startet jetzt", "Tool ist zurück"), die
 **nicht** durch die LLM-Konversation laufen soll. Das ist der "darf, aber
 muss nicht / nicht kritisch"-Fall.
 
+> **Status: umgesetzt, aber anders.** Die Live-UX-Notification liefert heute
+> `HooksMiddleware` (`mcs-hooks`): pre / post / on-failure Observer um
+> `execute_tool`, mehrere Beobachter pro Phase, zur Laufzeit registrierbar --
+> ohne den `MCSDriver`-Contract zu erweitern (ADR-0002). Das unten erwähnte
+> `streaming`-kwarg existiert nicht mehr: beim Streaming ist der übergebene
+> Buffer das Signal (ADR-0001).
+
 **Empfehlung -- Observer-Parameter, nicht Hook-Bus:**
 
 - Optionaler, **read-only** `observer`-Parameter an `process_llm_response`,
-  analog zum bereits vorhandenen `streaming`-kwarg im `MCSDriver`-Interface:
+  analog zum damaligen `streaming`-kwarg im `MCSDriver`-Interface:
   ```python
   def process_llm_response(self, llm_response, *, streaming=False, observer=None) -> DriverResponse: ...
   ```

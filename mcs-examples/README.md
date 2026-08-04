@@ -1,118 +1,86 @@
 # mcs-examples
 
-This folder contains runnable examples for the Python SDK.
+Runnable examples for the Python SDK. Every folder is self-contained and has
+its own README with the details.
 
-## 1) Quickstart demo (idea only, no MCS driver)
+| Folder | What it shows |
+|---|---|
+| [`quickstart/`](quickstart/) | The MCS idea without any SDK: a plain API + its OpenAPI spec is enough to give an LLM context |
+| [`rest_single_api/`](rest_single_api/README.md) | Chat clients against **any** OpenAPI endpoint via `RestDriver` -- non-streaming and streaming |
+| [`csv_analysis/`](csv_analysis/README.md) | The same clients against local CSV files via `CsvDriver` -- a driver with no network at all |
+| [`gmail_agent/`](gmail_agent/README.md) | The full stack: composite driver, OAuth credentials, and the tool-middleware chain (hooks, permission, auth) |
+| [`openwebui/`](openwebui/) | MCS drivers packaged as Open WebUI tools, including a multi-driver orchestrator setup |
+| [`skills/`](skills/) | The Gmail agent packaged as a Claude skill |
 
-Used by `docker/quickstart`:
-
-- `quickstart/fastapi_server_mcs_quickstart.py`
-- `quickstart/fastapi_rest_quickstart.py`
-
-These scripts provide the same "2-minute quickstart" concept shown in the organization README.
-
-The `docker/quickstart` container exists solely to host the API under a public URL so that chatbots like ChatGPT, Gemini, or Grok can access it directly via their built-in web tools -- no SDK, no driver, no setup required.  This demonstrates the core MCS idea: a standard API description is all you need to give context to an LLM.
-
-## 2) Reference drivers (4-step workflow)
-
-To demonstrate the full MCS driver stack we need a real protocol/transport pair -- but one that requires no external services, no API keys, and no network.
-
-`reference/` uses **CSV over LocalFS** for this purpose: CSV files on disk as the "API".  The example follows the 4-step development workflow from [Section 4](../docs/docs/Specification/4_ToolDriver_Adapter.md):
-
-| Step | File | Role |
-|---|---|---|
-| 1 | `reference/fs_adapter.py` | **Adapter interface** -- abstract filesystem backend (`list_dir`, `read_text`) |
-| 2 | `reference/localfs_adapter.py` | **Adapter implementation** -- concrete LocalFS backend |
-| 3 | `reference/csv_tooldriver.py` | **ToolDriver** -- CSV capability built on top of the adapter |
-| 4 | `reference/csv_driver.py` | **Driver** -- `MCSDriver` + `MCSToolDriver` wrapping the ToolDriver |
-| -- | `reference/csv_driver_tcs.py` | Same driver with `ToolCallSignaling` (for TCS demo) |
-| -- | `reference/demo.py` | Runs all steps + a namespacing orchestrator with two directories |
-| -- | `reference/data/sales.csv` | Sample dataset (sales) |
-| -- | `reference/data2/inventory.csv` | Sample dataset (inventory, for orchestrator demo) |
-
-Standalone demo (runs without an LLM, walks through all four building blocks):
+## Prerequisites
 
 ```bash
-cd mcs-examples
-python reference/demo.py
+uv sync --extra examples
 ```
 
-## 3) Minimal client examples (with LLM)
+Set the API key for your provider (e.g. `OPENAI_API_KEY`, also read from a
+`.env` file). The clients route through [LiteLLM](https://docs.litellm.ai/), so
+any provider works -- including a local model via `--api-base`.
 
-The following clients connect the reference drivers from above to a real LLM via [LiteLLM](https://docs.litellm.ai/), so you can test with any provider (OpenAI, Ollama, Anthropic, ...).
+## The two client shapes
 
-### Prerequisites
+Every driver folder ships the same pair, so you can compare them directly:
+
+**`chat_non_stream.py`** -- the whole LLM answer arrives at once and goes into
+`process_llm_response(text_or_dict)`. The simplest way to see the MCS loop.
 
 ```bash
-pip install -e ".[examples]"
+python rest_single_api/chat_non_stream.py --url https://mcsd.io/context7.json --debug
 ```
 
-Set the API key for your provider (e.g. `OPENAI_API_KEY`) or configure LiteLLM for a local model.
-
-### Non-streaming
+**`chat_stream.py`** -- the client feeds each chunk into an `LLMStreamBuffer`
+and hands **the buffer** to `process_llm_response`. The driver reassembles the
+provider's native message, holds back the text of a tool call that is still
+forming, and executes as soon as it is complete -- so raw tool-call JSON is
+never displayed, whether the call arrives as a native event or as inline JSON
+in the text.
 
 ```bash
-python mcs_driver_minimal_client_non_stream.py --model gpt-5-mini --debug
+# native tool-calling API (default)
+python rest_single_api/chat_stream.py --url https://mcsd.io/context7.json --debug
+
+# text-prompt mode -- the driver parses calls out of the text instead
+python rest_single_api/chat_stream.py --no-native-tools --url https://mcsd.io/context7.json --debug
 ```
 
-Sends the full LLM response to `process_llm_response(llm_text, streaming=False)` in one shot.  Good for verifying the basic MCS loop and simple LLMs.
-
-### Streaming
-
-```bash
-python mcs_driver_minimal_client_stream.py --model gpt-5-mini --debug
-```
-
-Streams LLM output token-by-token.  Tool calls are detected either via **native provider events** (e.g. OpenAI `tool_calls` deltas) or via **inline JSON** in the text buffer.
-
-When the LLM sends native tool-call events, the execution is invisible to the user -- the stream pauses briefly and continues with the result.  When the LLM uses inline JSON instead (common with local models), the raw JSON is visible in the stream.  For a seamless experience with inline JSON, see the **TCS variant** below.
-
-**Debug mode** (`--debug` / `-d`) shows:
-- The system prompt injected by the driver
-- Raw tool-call payloads when detected
-- Full `DriverResponse` details (executed/failed, result, retry_prompt)
-
-### Streaming with Tool Call Signaling (TCS)
-
-```bash
-python mcs_driver_minimal_client_stream_tcs.py --model openai\meta-llama\Llama-3.1-8B-Instruct --debug
-```
-Run a lokal model unter the name provided by --model parameter or use one with OpenRouter.
-
-For models that do not support native tool-call events, or when the driver does not handle the provider's event format, inline JSON ends up visible in the user's stream.  `ToolCallSignaling` solves this: the driver signals whether streamed tokens look like a tool call, the client buffers them instead of displaying, and once confirmed the tool executes invisibly.  The user never sees raw JSON that defining tool calls.
-
-### Convenience launcher
-
-All three variants are also available through a single entry point:
-
-```bash
-python mcs_driver_minimal_client.py                        # non-streaming
-python mcs_driver_minimal_client.py --stream               # streaming
-python mcs_driver_minimal_client.py --stream --tcs         # streaming + TCS
-python mcs_driver_minimal_client.py --stream --tcs --debug # streaming + TCS + debug
-```
+`--debug` shows the injected system prompt and the full `DriverResponse` per
+round (which tools ran, with which arguments, and what came back).
 
 ### Using a local model
 
-All clients support `--api-base` for OpenAI-compatible servers and LiteLLM's provider prefixes:
+All clients accept `--api-base` for OpenAI-compatible servers and LiteLLM's
+provider prefixes:
 
 ```bash
 # Ollama (routed automatically by LiteLLM)
-python mcs_driver_minimal_client.py --stream --model ollama/llama3 --debug
+python csv_analysis/chat_stream.py --model ollama/llama3 --debug
 
 # vLLM / llama.cpp / any OpenAI-compatible server
-python mcs_driver_minimal_client.py --stream --tcs \
+python csv_analysis/chat_stream.py \
     --model openai/meta-llama/Meta-Llama-3.1-8B-Instruct \
     --api-base http://localhost:8000/v1 --debug
 ```
 
-## 4) Orchestrator client example
+Text-prompt mode (`--no-native-tools`) is the interesting one here: models
+without a native tool-calling API write the call as JSON into their text, and
+the driver extracts it from there.
 
-- `mcs_tooldriver_minimal_client.py` -> `MCSToolDriver` + `BasicOrchestrator` usage
+## Other scripts
 
-## Implementation notes
+- `csv_analysis/chat.py` -- launcher that dispatches to the variants above
+- `csv_analysis/explore_responses.py` -- sends one prompt through several API
+  modes and records the raw request/response pairs, to compare how providers
+  represent tool calls
 
-The TCS examples (`_tcs` suffix) are intentionally separate files to keep the base examples simple.  In production you would add `ToolCallSignaling` directly to your driver rather than creating a separate class.
+## Known gap
 
-- `mcs_driver_minimal_client_stream_tcs.py` -- streaming client with buffer logic
-- `reference/csv_driver_tcs.py` -- driver with `ToolCallSignaling`
+`rest_single_api/chat_stream_tcs.py` and `csv_analysis/chat_stream_tcs.py` do
+not run: they import `ToolCallSignaling`, which was removed from
+`mcs-driver-core`. The streaming interface solves the problem TCS was built for
+without asking the driver anything -- the buffer holds a forming call back, so
+inline JSON never reaches the screen. Use `chat_stream.py` instead.

@@ -123,19 +123,19 @@ pip install uv && uv sync --extra examples
 uv run python mcs-examples/rest_single_api/chat_non_stream.py \
     --model gpt-5.2 --url https://mcsd.io/context7.json
 
-# Streaming chat
+# Streaming chat -- the driver holds a forming tool call back, so raw JSON
+# is never displayed. Works the same for native and text-embedded calls.
 uv run python mcs-examples/rest_single_api/chat_stream.py \
     --model gpt-5.2 --url https://mcsd.io/context7.json
 
-# Streaming with ToolCallSignaling (hides raw JSON from the user)
-uv run python mcs-examples/rest_single_api/chat_stream_tcs.py \
+# Same client, text-prompt mode instead of the native tool-calling API
+uv run python mcs-examples/rest_single_api/chat_stream.py --no-native-tools \
     --model gpt-5.2 --url https://mcsd.io/context7.json
 ```
 
 Source:
 [`chat_non_stream.py`](mcs-examples/rest_single_api/chat_non_stream.py) ·
-[`chat_stream.py`](mcs-examples/rest_single_api/chat_stream.py) ·
-[`chat_stream_tcs.py`](mcs-examples/rest_single_api/chat_stream_tcs.py)
+[`chat_stream.py`](mcs-examples/rest_single_api/chat_stream.py)
 
 ### 5. Inspect any OpenAPI spec
 
@@ -211,6 +211,29 @@ only what you need.
 | `packages/orchestrators/mcs-orchestrator-base` | `mcs-orchestrator-base` | Base orchestrator with pluggable resolution strategies. |
 | `packages/orchestrators/mcs-orchestrator-rest` | `mcs-orchestrator-rest` | Dynamic REST/OpenAPI orchestrator -- manages multiple API connections. |
 
+### Cross-cutting concerns (tool middleware)
+
+Auth, permission and lifecycle hooks do not add a method -- they *intervene in*
+tool execution. They are `ToolMiddleware` objects that live **inside** the
+driver, passed as a constructor parameter, so the driver keeps its identity and
+`isinstance(driver, SupportsX)` keeps working ([ADR-0002](https://modelcontextstandard.io/docs/adr/0002-tool-middleware-over-decorators)).
+
+| Component | PyPI | Purpose |
+| --- | --- | --- |
+| `packages/auth/mcs-auth` | `mcs-auth` | `CredentialProvider` protocol + `AuthMiddleware` -- catches an auth challenge at the execution boundary and returns it in-band. |
+| `packages/permission/mcs-permission` | `mcs-permission` | `PermissionMiddleware` -- gates each tool call behind a consent callback; short-circuits on denial. |
+| `packages/hooks/mcs-hooks` | `mcs-hooks` | `HooksMiddleware` -- pre / post / on-failure observers around tool execution. |
+
+```python
+from mcs.auth.middleware import AuthMiddleware
+from mcs.permission.middleware import PermissionMiddleware
+
+# Order is list order, outermost first: consent is asked before auth is handled.
+driver = RestDriver(url=spec_url)
+driver.add_middleware(PermissionMiddleware(consent_handler=ask_user))
+driver.add_middleware(AuthMiddleware())
+```
+
 ### Examples
 
 | Component | Purpose |
@@ -240,7 +263,7 @@ class GreetDriver(MCSDriver):
     def get_driver_system_message(self, model_name=None):
         return f"You have tools:\n{self.get_function_description()}\nCall them as JSON."
 
-    def process_llm_response(self, llm_response, *, streaming=False):
+    def process_llm_response(self, llm_response):
         try:
             call = json.loads(llm_response)
         except (json.JSONDecodeError, TypeError):
