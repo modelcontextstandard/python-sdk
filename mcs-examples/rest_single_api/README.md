@@ -1,15 +1,10 @@
 # REST Single API Example
 
-Interactive chat clients that connect to **any OpenAPI endpoint**
+Interactive chat client that connects to **any OpenAPI endpoint**
 using the **MCS RestDriver** (`mcs-driver-rest`).
 
-Default: **GitHub REST API** (repos + search) -- no dedicated MCP
-server needed; just the OpenAPI spec URL and a tag filter.
-
-Three client variants demonstrate the same MCS integration loop with
-different LLM calling strategies.  The `chat_loop` function is
-structurally identical across all three -- only the LLM transport and
-the driver setup in `main()` differ.
+Default: **GitHub REST API** (search) -- no dedicated MCP server needed;
+just the OpenAPI spec URL and a tag filter.
 
 ## What it shows
 
@@ -17,17 +12,26 @@ the driver setup in `main()` differ.
   can interact with it.  No custom MCP server required.
 - **Tag / path filtering** -- `--include-tags` lets you pick which
   parts of a large API (like GitHub's 800+ endpoints) the LLM sees.
-- **Same client, different driver** -- the CSV and REST examples share
-  the same `chat_loop` code; only the driver instantiation changes.
+- **Same client, different driver** -- this example and the CSV one run the
+  *identical* `ChatSession`; only the driver constructed in `main()` differs.
 - Native tool support via `NativeToolContext` (when the model supports it),
   switchable with `--no-native-tools` to compare against text-prompt mode
 
-## Client variants
+## One client, two modes
 
-| File | LLM call |
+`chat.py` is the whole client. Streaming vs. non-streaming is a flag, not a
+second program -- the MCS contract is identical either way, only who assembles
+the message differs.
+
+| Flag | What changes |
 |---|---|
-| `chat_non_stream.py` | Single request -- the whole answer goes into `process_llm_response` at once |
-| `chat_stream.py` | Token-by-token: the client feeds chunks into an `LLMStreamBuffer` and hands the buffer to the driver, which holds a forming tool call back so its JSON is never displayed |
+| *(default)* | Streaming: the client feeds chunks into an `LLMStreamBuffer` and hands the buffer to the driver, which holds a forming tool call back so its JSON is never displayed |
+| `--no-stream` | The provider assembles the message; the driver receives it in one piece |
+| `--no-native-tools` | Text-prompt mode: tools are described in the prompt and the driver parses the call out of the model's text |
+| `--debug` | System prompt, raw LLM output and the per-call `DriverResponse` report |
+
+The loop itself lives in [`_shared/session.py`](../_shared/session.py) and is
+shared with every other example.
 
 ## Prerequisites
 
@@ -39,28 +43,21 @@ export OPENAI_API_KEY=sk-...
 ## Quick start
 
 ```bash
-# Browse GitHub repos (default -- repos + search tags):
-python chat_non_stream.py --debug
+# Browse GitHub (default -- search tags):
+python chat.py --debug
 
-# Streaming:
-python chat_stream.py --debug
+# Non-streaming instead:
+python chat.py --no-stream --debug
 
-# ReqRes user API:
-python chat_non_stream.py \
-    --url https://reqres.in/openapi.json \
-    --include-tags legacy --debug
+# Text-prompt mode rather than the provider's tool-calling API:
+python chat.py --no-native-tools --debug
 
-# Swagger Petstore:
-python chat_non_stream.py \
-    --url https://petstore3.swagger.io/api/v3/oexpenapi.json
+# A completely different API -- same client:
+python chat.py --url https://mcsd.io/context7.json
 
-# Any OpenAPI spec with custom tag filter:
-python chat_non_stream.py \
-    --url https://your-api.example.com/openapi.json \
-    --include-tags users orders
+# Any OpenAPI spec with a custom tag filter:
+python chat.py --url https://your-api.example.com/openapi.json     --include-tags users orders
 
-# Local model via vLLM:
-python chat_stream.py \
-    --model openai/meta-llama/Meta-Llama-3.1-8B-Instruct \
-    --api-base http://localhost:8000/v1 --debug
+# Local model via vLLM / llama.cpp:
+python chat.py --model openai/meta-llama/Meta-Llama-3.1-8B-Instruct     --api-base http://localhost:8000/v1 --debug
 ```

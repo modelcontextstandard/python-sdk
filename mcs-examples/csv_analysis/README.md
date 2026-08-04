@@ -21,11 +21,11 @@ export OPENAI_API_KEY=sk-...
 ## Quick start
 
 ```bash
-# Non-streaming (simplest):
+# Streaming (default):
 python chat.py --debug
 
-# Streaming:
-python chat.py --stream --debug
+# Non-streaming instead:
+python chat.py --no-stream --debug
 ```
 
 ## Sample data

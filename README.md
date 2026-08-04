@@ -119,23 +119,26 @@ Full working chat clients for the REST driver are included:
 ```bash
 pip install uv && uv sync --extra examples
 
-# Non-streaming chat (simplest)
-uv run python mcs-examples/rest_single_api/chat_non_stream.py \
+# Streaming chat -- the driver holds a forming tool call back, so raw JSON is
+# never displayed. Works the same for native and text-embedded calls.
+uv run python mcs-examples/rest_single_api/chat.py \
     --model gpt-5.2 --url https://mcsd.io/context7.json
 
-# Streaming chat -- the driver holds a forming tool call back, so raw JSON
-# is never displayed. Works the same for native and text-embedded calls.
-uv run python mcs-examples/rest_single_api/chat_stream.py \
+# The same client, non-streaming -- streaming is a flag, not a second program
+uv run python mcs-examples/rest_single_api/chat.py --no-stream \
     --model gpt-5.2 --url https://mcsd.io/context7.json
 
-# Same client, text-prompt mode instead of the native tool-calling API
-uv run python mcs-examples/rest_single_api/chat_stream.py --no-native-tools \
+# Text-prompt mode instead of the provider's native tool-calling API
+uv run python mcs-examples/rest_single_api/chat.py --no-native-tools \
     --model gpt-5.2 --url https://mcsd.io/context7.json
+
+# Human-in-the-loop: every tool call asks first (PermissionMiddleware)
+uv run python mcs-examples/permission_gate/chat.py --debug
 ```
 
-Source:
-[`chat_non_stream.py`](mcs-examples/rest_single_api/chat_non_stream.py) ·
-[`chat_stream.py`](mcs-examples/rest_single_api/chat_stream.py)
+Source: [`rest_single_api/chat.py`](mcs-examples/rest_single_api/chat.py) ·
+[`permission_gate/chat.py`](mcs-examples/permission_gate/chat.py) ·
+[shared loop](mcs-examples/_shared/session.py)
 
 ### 5. Inspect any OpenAPI spec
 

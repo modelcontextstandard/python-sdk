@@ -33,7 +33,15 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(sed -n '/^def _print_debug_dr/,/^$/p' mcs-examples/rest_single_api/chat_stream.py)",
-      "Bash(sed -n '/^def _print_debug_dr\\\\|def _print_debug/,/console.print\\(Panel/p' mcs-examples/rest_single_api/chat_non_stream.py)"
+      "Bash(sed -n '/^def _print_debug_dr\\\\|def _print_debug/,/console.print\\(Panel/p' mcs-examples/rest_single_api/chat_non_stream.py)",
+      "Bash(rmdir specification/specification)",
+      "Bash(rmdir specification *)",
+      "Bash(python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/hdr_test.py\" --debug)",
+      "Bash(python chat.py --help)",
+      "Bash(python -m mcs-examples.rest_single_api.chat --help)",
+      "Bash(python -m mcs-examples.permission_gate.chat --help)",
+      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/gate3.py\")",
+      "Bash(PYTHONIOENCODING=cp1252 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/gate3.py\")"
     ]
   }
 }
