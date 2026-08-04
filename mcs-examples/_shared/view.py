@@ -201,6 +201,16 @@ class ChatView:
         self.console.print("[green]-> allowed[/green]" if granted else "[red]-> denied[/red]")
         return granted
 
+    def tool_running(self, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
+        """Pre-hook handler for ``HooksMiddleware`` -- a tool is starting.
+
+        This is how a client learns that a call is happening *without* inspecting
+        the LLM output: the driver stack tells it. Rendered as a spinner label
+        rather than a line of its own, so it replaces the "waiting" state instead
+        of pushing the answer around.
+        """
+        self._spin(f"running {tool_name}")
+
     def auto_consent(self, tool_name: str, arguments: dict[str, Any]) -> bool:
         """Consent handler that always agrees -- but still *shows* the call.
 

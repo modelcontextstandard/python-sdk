@@ -1,26 +1,35 @@
-"""MCS Gmail Agent -- streaming chat client for e-mail.
+"""MCS Gmail Agent -- chat client for e-mail, with the full middleware chain.
 
-Demonstrates the MCS auth stack with pluggable credential providers:
+This is the example where all three cross-cutting concerns run at once, and where
+the interesting one is **auth**: pluggable credential providers behind a single
+protocol.
+
 - Auth0 Token Vault (RFC 8693) for federated token exchange
 - LinkAuth broker for device-flow-like credential acquisition
 - Direct OAuth 2.0 Authorization Code Flow
 - Static tokens for quick testing
 
-The client has no knowledge of authentication or approval -- three concerns run as
-a middleware chain *inside* the driver (``add_middleware``), so the driver keeps its
-full identity and the client just talks to it:
+The client knows nothing about any of it. Three middleware run *inside* the driver
+(``add_middleware``), so the driver keeps its full identity and the client just
+talks to it:
 
-- ``AuthMiddleware`` intercepts credential challenges so the LLM can present the
-  login URL to the user.
-- ``PermissionMiddleware`` gates every tool call through a user-consent prompt
-  before it runs; the client only supplies the consent handler.
+- ``PermissionMiddleware`` gates every tool call behind a consent prompt. The
+  client supplies only the handler.
 - ``HooksMiddleware`` fires a pre-tool-use hook so the client can show progress
-  ("a tool is running") WITHOUT ever inspecting the LLM output. This is the
-  point: the client knows nothing about LLM tool-calling formats -- it hands the
-  raw message to ``process_llm_response`` as a black box and learns of tool
-  activity only through the hook.
+  ("a tool is running") WITHOUT inspecting the LLM output. That is the point: the
+  client hands the raw message to ``process_llm_response`` as a black box and
+  learns of tool activity only through this callback.
+- ``AuthMiddleware`` catches a credential challenge at the execution boundary and
+  turns it into an in-band result, so the LLM can present the login URL as part of
+  its answer instead of the program crashing.
 
-Chain (outermost first):  ``Hooks -> Permission -> Auth -> the real tool``.
+Chain order is list order, outermost first:
+``Permission -> Hooks -> Auth -> the real tool``. Permission sits *outside* Hooks
+deliberately -- a denied call never runs, so it should never announce itself as
+running either.
+
+Everything else -- the loop, the display, the streaming/blocking choice -- is the
+shared scaffolding every example uses. Only the driver setup below is Gmail's.
 
 Usage:
     # Auth0 with pre-existing refresh token (from .env):
@@ -38,50 +47,30 @@ Usage:
     # Quick test with a static Google OAuth2 access token:
     python main.py --gmail-token ya29.xxx
 
+    # Any of the above, non-streaming or with debug output:
+    python main.py --auth0-token --no-stream --debug
+
 Requires:
-    pip install mcs-driver-mail[gmail] mcs-auth-auth0 mcs-permission litellm rich python-dotenv
+    pip install mcs-driver-mail[gmail] mcs-auth-auth0 mcs-permission mcs-hooks         litellm rich python-dotenv
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
-from litellm import completion
-from rich.console import Console
-from rich.panel import Panel
 
-from mcs.auth.middleware import AuthMiddleware
-from mcs.permission.middleware import PermissionMiddleware
-from mcs.hooks.middleware import HooksMiddleware
-from mcs.driver.core import DriverResponse, MCSDriver, SupportsNativeTools
-from mcs.driver.mail import MailDriver
-from mcs.driver.mail.tooldriver import MailToolDriver
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _shared import ChatSession, ChatView, base_parser  # noqa: E402
 
-console = Console()
-
-MAX_TOOL_ROUNDS = 10
-
-
-def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="MCS Gmail Agent (streaming)")
-    auth = p.add_mutually_exclusive_group(required=True)
-    auth.add_argument("--gmail-token", help="Static Google OAuth2 access token (quick test)")
-    auth.add_argument("--auth0-token", action="store_true", help="Auth0 with pre-existing refresh token (needs AUTH0_REFRESH_TOKEN in .env)")
-    auth.add_argument("--auth0-oauth", action="store_true", help="Auth0 via browser login (Authorization Code Flow)")
-    auth.add_argument("--auth0-linkauth", action="store_true", help="Auth0 via LinkAuth broker (device-flow UX)")
-    auth.add_argument("--linkauth", action="store_true", help="LinkAuth broker direct (no Auth0)")
-
-    p.add_argument("--model", default="gpt-5.4", help="LiteLLM model identifier (default: gpt-5.4)")
-    p.add_argument("--sender-name", default=None, help="Display name for outgoing e-mails")
-    p.add_argument("--api-base", default=None,
-                   help="Custom OpenAI-compatible API base URL (e.g. http://localhost:8000/v1)")
-    p.add_argument("--api-key", default=None,
-                   help="API key for --api-base (default: 'no-key' when --api-base is set)")
-    p.add_argument("--debug", "-d", action="store_true", help="Show DriverResponse details")
-    return p.parse_args()
+from mcs.auth.middleware import AuthMiddleware  # noqa: E402
+from mcs.permission.middleware import PermissionMiddleware  # noqa: E402
+from mcs.hooks.middleware import HooksMiddleware  # noqa: E402
+from mcs.driver.mail import MailDriver  # noqa: E402
+from mcs.driver.mail.tooldriver import MailToolDriver  # noqa: E402
 
 
 def _build_credential(args: argparse.Namespace):
@@ -185,40 +174,8 @@ def _build_credential(args: argparse.Namespace):
     raise SystemExit("No authentication method specified.")
 
 
-def _ask_consent(tool_name: str, arguments: dict) -> bool:
-    """Consent handler for the PermissionMiddleware.
-
-    Called from inside ``execute_tool`` -- after the LLM has chosen a tool but
-    *before* it runs. Blocks on user input; returns True to allow, False to deny
-    (the decorator then returns a ``permission_denied`` result to the LLM).
-    """
-    console.print(
-        Panel(
-            f"[bold]{tool_name}[/bold]\n{json.dumps(arguments, indent=2)}",
-            title="Tool call -- approve?",
-            border_style="yellow",
-        )
-    )
-    answer = console.input(
-        "[bold yellow]Allow this tool call? [y/N]:[/bold yellow] "
-    ).strip().lower()
-    return answer in ("y", "yes")
-
-
-def _on_tool_start(tool_name: str, arguments: dict) -> None:
-    """Pre-tool-use hook: the driver stack tells the client a tool is running.
-
-    This is how the client learns a tool call is happening *without* inspecting
-    the LLM output. The MCS premise is that the client knows nothing about LLM
-    tool-calling -- it hands the raw LLM message to ``process_llm_response`` as a
-    black box. Native ``tool_calls``, text-embedded JSON, anything -- the client
-    only ever sees this callback, never the format.
-    """
-    console.print(f"[dim]→ running tool: {tool_name}[/dim]")
-
-
-def _build_driver(args: argparse.Namespace) -> MailDriver:
-    """Build a MailDriver whose ToolDriver is wrapped with Hooks+Permission+Auth (via DI)."""
+def _build_driver(args: argparse.Namespace, view: ChatView) -> MailDriver:
+    """A Gmail MailDriver with the three concerns attached."""
     gmail_kwargs: dict = {}
     if args.sender_name:
         gmail_kwargs["sender_name"] = args.sender_name
@@ -235,190 +192,45 @@ def _build_driver(args: argparse.Namespace) -> MailDriver:
         read_kwargs=gmail_kwargs,
         send_kwargs=gmail_kwargs,
     )
-    # Three cross-cutting concerns as a middleware chain *inside* the driver -- the
-    # driver keeps its full identity (process_llm_response, native tools, bindings) and
-    # each execute_tool routes through Hooks -> Permission -> Auth -> the real tool:
-    # Hooks notifies the client a tool is running, Permission asks the user to approve
-    # it, Auth catches credential challenges. Added outermost-first, so Hooks sees the
-    # call first and Auth (innermost) sits closest to execution. The client sees none
-    # of it, and one middleware instance could be shared across many drivers.
     driver = MailDriver(_tooldriver=tool_driver)
-    driver.add_middleware(HooksMiddleware(pre=[_on_tool_start]))
-    driver.add_middleware(PermissionMiddleware(consent_handler=_ask_consent))
+
+    # Order is list order, outermost first. Permission first: it decides whether the
+    # call happens at all, so nothing inside it should run -- or announce itself --
+    # before the user has agreed. Auth sits innermost, closest to execution, where a
+    # credential challenge is actually raised.
+    driver.add_middleware(PermissionMiddleware(consent_handler=view.ask_consent))
+    driver.add_middleware(HooksMiddleware(pre=[view.tool_running]))
     driver.add_middleware(AuthMiddleware())
     return driver
 
 
-def _stream_one_turn(
-    model: str,
-    messages: list[dict],
-    api_base: str | None = None,
-    api_key: str | None = None,
-    tools: list[dict] | None = None,
-) -> dict:
-    """Stream one LLM turn, display tokens live, return accumulated message dict.
-
-    The client collects text and displays it live, but passes the full
-    accumulated message dict to the driver without interpretation.
-    """
-    kwargs: dict = {"model": model, "messages": messages, "stream": True}
-    if api_base:
-        kwargs["api_base"] = api_base
-        kwargs["api_key"] = api_key or "no-key"
-    if tools:
-        kwargs["tools"] = tools
-    stream = completion(**kwargs)
-
-    content_buffer = ""
-    tool_calls_buffer: list[dict] = []
-    printed_header = False
-
-    for chunk in stream:  # type: ignore[union-attr]
-        choices = getattr(chunk, "choices", None)
-        delta = choices[0].delta if choices else None
-        if delta is None:
-            continue
-
-        token = getattr(delta, "content", None) or ""
-        if token:
-            content_buffer += token
-            if not printed_header:
-                console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
-                printed_header = True
-            print(token, end="", flush=True)
-
-        tc_deltas = getattr(delta, "tool_calls", None)
-        if tc_deltas:
-            for tc in tc_deltas:
-                idx = getattr(tc, "index", 0) or 0
-                while len(tool_calls_buffer) <= idx:
-                    tool_calls_buffer.append({"function": {"name": "", "arguments": ""}})
-                entry = tool_calls_buffer[idx]
-                fn = getattr(tc, "function", None)
-                if fn:
-                    if getattr(fn, "name", None):
-                        entry["function"]["name"] = fn.name
-                    if getattr(fn, "arguments", None):
-                        entry["function"]["arguments"] += fn.arguments
-                tc_id = getattr(tc, "id", None)
-                if tc_id:
-                    entry["id"] = tc_id
-                    entry["type"] = "function"
-
-    if printed_header:
-        print()
-
-    msg: dict = {"role": "assistant", "content": content_buffer or None}
-    if tool_calls_buffer:
-        msg["tool_calls"] = tool_calls_buffer
-    return msg
-
-
-def _print_debug_dr(dr: DriverResponse) -> None:
-    parts = [f"call_executed={dr.call_executed}  call_failed={dr.call_failed}"]
-    # executed_calls is the per-call report -- one line each, so a parallel batch
-    # is readable (name, args, result/error) instead of one raw blob.
-    for rec in dr.executed_calls or []:
-        if rec.error:
-            outcome = f"[red]error:[/red] {rec.error}"
-        else:
-            _r = str(rec.result)
-            outcome = "-> " + (_r[:157] + "..." if len(_r) > 160 else _r)
-        parts.append(f"  • {rec.name}({rec.arguments}) {outcome}")
-    if dr.retry_prompt:
-        parts.append(f"retry_prompt: {dr.retry_prompt}")
-    console.print(Panel("\n".join(parts), title="DriverResponse", border_style="dim"))
-
-
-def chat_loop(driver: MCSDriver, model: str, debug: bool,
-              api_base: str | None = None, api_key: str | None = None) -> None:
-    native_tools: list[dict] | None = None
-    if isinstance(driver, SupportsNativeTools):
-        ctx = driver.get_native_tool_context(model)
-        system_msg = ctx.system_message
-        native_tools = ctx.tools
-    else:
-        system_msg = driver.get_driver_system_message()
-
-    messages: list[dict] = [{"role": "system", "content": system_msg}]
-
-    binding = driver.meta.bindings[0]
-    mode = "native tools" if native_tools else "text prompt"
-    info = [
-        "[bold cyan]MCS Chat (streaming)[/bold cyan]\n",
-        f"Driver:   {driver.meta.name}",
-        f"Binding:  {binding.capability} / {binding.adapter}",
-        f"Model:    {model}",
-        f"Tools:    {mode}",
-    ]
-    if api_base:
-        info.append(f"API base: {api_base}")
-    info += [
-        f"Debug:    {'on' if debug else 'off'}",
-        "",
-        "[dim]Type 'exit' or Ctrl+C to quit.[/dim]",
-    ]
-    console.print(Panel("\n".join(info), expand=False))
-
-    if debug:
-        console.print(Panel(system_msg, title="System prompt", border_style="dim"))
-
-    while True:
-        try:
-            user_input = console.input("\n[bold green]You:[/bold green] ").strip()
-        except (EOFError, KeyboardInterrupt):
-            break
-        if not user_input or user_input.lower() in ("exit", "quit", "q"):
-            break
-
-        messages.append({"role": "user", "content": user_input})
-
-        for _round in range(MAX_TOOL_ROUNDS):
-            llm_out = _stream_one_turn(model, messages, api_base, api_key, native_tools)
-
-            # The client hands the raw LLM message to the driver as a black box.
-            # It deliberately does NOT inspect llm_out for tool calls -- that
-            # would require knowing LLM tool-calling formats and breaks the MCS
-            # premise. Tool activity is surfaced by the driver stack via the
-            # pre-tool-use hook (_on_tool_start) instead.
-            response = driver.process_llm_response(llm_out)
-
-            if debug and (response.call_executed or response.call_failed):
-                _print_debug_dr(response)
-
-            if response.messages:
-                messages.extend(response.messages)
-
-            if response.call_executed:
-                if debug:
-                    console.print("[dim]Tool executed -- streaming next LLM turn...[/dim]")
-                continue
-
-            if response.call_failed:
-                if debug:
-                    console.print(
-                        "[yellow]Tool call failed: "
-                        f"{'; '.join(r.error or '' for r in response.executed_calls or [])}[/yellow]")
-                continue
-
-            content = llm_out.get("content", "") or ""
-            messages.append({"role": "assistant", "content": content})
-            break
-        else:
-            console.print("[yellow]Max tool rounds reached -- stopping.[/yellow]")
-
-
 def main() -> None:
     load_dotenv()
-    args = _parse_args()
+    p = base_parser("MCS Gmail agent -- e-mail over the full middleware chain",
+                    default_model="gpt-5.4")
+    auth = p.add_mutually_exclusive_group(required=True)
+    auth.add_argument("--gmail-token", help="Static Google OAuth2 access token (quick test)")
+    auth.add_argument("--auth0-token", action="store_true",
+                      help="Auth0 with pre-existing refresh token (needs AUTH0_REFRESH_TOKEN in .env)")
+    auth.add_argument("--auth0-oauth", action="store_true",
+                      help="Auth0 via browser login (Authorization Code Flow)")
+    auth.add_argument("--auth0-linkauth", action="store_true",
+                      help="Auth0 via LinkAuth broker (device-flow UX)")
+    auth.add_argument("--linkauth", action="store_true", help="LinkAuth broker direct (no Auth0)")
+    p.add_argument("--sender-name", default=None, help="Display name for outgoing e-mails")
+    args = p.parse_args()
 
-    console.print("[dim]Building Gmail driver...[/dim]")
-    driver = _build_driver(args)
-    tools = driver.list_tools()
-    console.print(f"[dim]Ready -- {len(tools)} tools discovered.[/dim]")
+    view = ChatView(debug=args.debug)
+    driver = _build_driver(args, view)
+    view.tools_discovered([t.name for t in driver.list_tools()])
 
-    chat_loop(driver, args.model, args.debug, args.api_base, args.api_key)
-    console.print("\n[dim]Chat ended.[/dim]")
+    ChatSession(
+        driver, args.model, view=view,
+        streaming=args.stream, native_tools=args.native_tools,
+        api_base=args.api_base, api_key=args.api_key,
+        title="MCS Gmail Agent",
+        banner_extra=["Concerns: permission -> hooks -> auth"],
+    ).run()
 
 
 if __name__ == "__main__":
