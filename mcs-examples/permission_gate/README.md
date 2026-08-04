@@ -13,7 +13,7 @@ python chat.py --allow-all      # answers the gate automatically -- still shows 
 ```
 You: search for MCS repositories
 
-⠹ a tool call is forming...
+⠹ Assistant: a tool call is forming...
 ╭─ Tool call requested ───────────────────╮
 │ search_repos(q='MCS', sort='stars')     │
 ╰─────────────────────────────────────────╯
@@ -23,10 +23,12 @@ Allow? [y/N] n
 Assistant: Verstanden -- ich habe die Suche nicht ausgeführt.
 ```
 
-While the answer is on its way a spinner reports what is happening -- first
-`waiting for the model`, then `a tool call is forming` once the driver
-recognises one. Nothing half-written is ever printed, so there is no raw JSON to
-scrub off the screen afterwards.
+The whole turn runs under one `Assistant:` label, because a tool call *is* the
+assistant acting -- it just happens to need permission first. While the answer is
+on its way a spinner carries that label and says what is happening: first
+`waiting for the model`, then `a tool call is forming` once the driver recognises
+one. Nothing half-written is ever printed, so there is no raw JSON to scrub off
+the screen afterwards.
 
 ## What it shows
 

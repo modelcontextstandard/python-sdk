@@ -41,7 +41,8 @@
       "Bash(python -m mcs-examples.rest_single_api.chat --help)",
       "Bash(python -m mcs-examples.permission_gate.chat --help)",
       "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/gate3.py\")",
-      "Bash(PYTHONIOENCODING=cp1252 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/gate3.py\")"
+      "Bash(PYTHONIOENCODING=cp1252 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/gate3.py\")",
+      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/gate4.py\")"
     ]
   }
 }

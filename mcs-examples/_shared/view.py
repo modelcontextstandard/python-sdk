@@ -137,13 +137,19 @@ class ChatView:
         return "dots"
 
     def _spin(self, label: str) -> None:
-        """Start or relabel the live spinner. No-op-safe without a TTY."""
+        """Start or relabel the live spinner. No-op-safe without a TTY.
+
+        The spinner carries the ``Assistant:`` header itself. A tool call is the
+        assistant *acting*, so it belongs under that label just like the text does
+        -- and the header cannot be printed separately beforehand, because the
+        spinner owns its line while it runs.
+        """
+        text = f"[bold blue]Assistant:[/bold blue] [dim]{label}...[/dim]"
         if self._status is None:
-            self._status = self.console.status(f"[dim]{label}...[/dim]",
-                                               spinner=self._spinner_name())
+            self._status = self.console.status(text, spinner=self._spinner_name())
             self._status.start()
         else:
-            self._status.update(f"[dim]{label}...[/dim]")
+            self._status.update(text)
 
     def _spin_off(self) -> None:
         if self._status is not None:
