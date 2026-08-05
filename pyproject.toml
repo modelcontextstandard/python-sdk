@@ -35,6 +35,8 @@ dependencies = [
   "mcs-examples>=0.1",
   "mcs-types-web>=0.1",
   "mcs-driver-webfetch>=0.1",
+  "mcs-driver-websearch>=0.1",
+  "mcs-driver-web>=0.1",
 ]
 
 [tool.uv.sources]
@@ -69,6 +71,8 @@ mcs-driver-mcp = { workspace = true }
 mcs-examples = { workspace = true }
 mcs-types-web = { workspace = true }
 mcs-driver-webfetch = { workspace = true }
+mcs-driver-websearch = { workspace = true }
+mcs-driver-web = { workspace = true }
 
 [tool.uv.workspace]
 members = [

@@ -1,13 +1,15 @@
 # mcs-driver-webfetch
 
 **Web page fetching for the Model Context Standard (MCS)** -- lets an LLM read any
-URL as text, markdown, or raw source.
+URL as text, markdown, or (opt-in) raw source.
 
 ```python
 from mcs.driver.webfetch import WebfetchToolDriver
 
-driver = WebfetchToolDriver()          # plain HTTP by default
+driver = WebfetchToolDriver()                 # plain HTTP; text + markdown
 driver.execute_tool("fetch_page", {"url": "https://example.com"})
+
+driver = WebfetchToolDriver(allow_raw=True)   # also exposes format="raw"
 ```
 
 ---
@@ -23,7 +25,7 @@ This is the split that matters, and it is not obvious:
     (service adapter)       someone else's fetcher, still returns markup
 
   ToolDriver         →  turns RAW into what the model asked for
-    format="raw"            hand the markup over untouched
+    format="raw"            hand the markup over untouched (opt-in)
     format="text"           run extraction strategies
     format="markdown"       structure-preserving conversion
 ```
@@ -305,6 +307,28 @@ degrading quietly: a service connector that only ever sees extracted content
 cannot answer `format="raw"`, and returning text instead would answer a question
 the caller did not ask. Same principle as everywhere else here -- fail visibly
 rather than deliver invisibly.
+
+### `raw` is opt-in
+
+```python
+WebfetchToolDriver()                   # formats: text, markdown
+WebfetchToolDriver(allow_raw=True)     # formats: text, markdown, raw
+```
+
+Without `allow_raw`, the format is **not advertised at all** -- it is absent from
+the tool's `enum` and from its description, so the model never learns the option
+exists. Listing a format the driver will refuse only teaches it to try and be
+refused, once per conversation.
+
+It is still refused if guessed (`RawNotAllowed`), because unadvertised is not
+unreachable: a client can call `execute_tool` directly.
+
+Why off by default: raw is the one format that hands the model *everything* a
+page contains -- script bodies, hidden elements, comments. That is exactly what
+makes it useful for inspecting a page, and exactly what makes it a
+prompt-injection surface that no sanitiser can close without destroying the
+format's purpose. A driver that only answers questions about *content* should not
+carry that risk.
 
 ---
 

@@ -1,5 +1,6 @@
 """Web page fetching driver for the Model Context Standard."""
 
+from .driver import WebfetchDriver
 from .http_connector import HttpPageConnector
 from .ports import WebFetchPort
 from .strategies import (
@@ -17,6 +18,7 @@ from .tooldriver import (
 )
 
 __all__ = [
+    "WebfetchDriver",
     "HttpPageConnector",
     "WebFetchPort",
     "ContentStrategy",

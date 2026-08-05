@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.util
+
+import pytest
+
 from mcs.driver.webfetch.strategies import (
     BestOfExtractor,
     MarkdownExtractor,
@@ -65,6 +69,16 @@ class TestStripExtractor:
         assert "onetwo" not in text
 
 
+#: Markdown needs nh3 + markdownify. They are an optional extra, so their absence
+#: must skip rather than fail -- the "not installed" path has its own test.
+requires_markdown = pytest.mark.skipif(
+    importlib.util.find_spec("nh3") is None
+    or importlib.util.find_spec("markdownify") is None,
+    reason="needs the [markdown] extra: nh3 + markdownify",
+)
+
+
+@requires_markdown
 class TestMarkdownExtractor:
 
     def test_preserves_structure(self):
@@ -151,6 +165,7 @@ def test_title_from_html():
     assert title_from_html("<html><body>no title</body></html>") is None
 
 
+@requires_markdown
 class TestLinkSafety:
     """Markdown goes to an LLM, whose answer often gets rendered as markdown in a
     chat UI. An unsanitised href therefore travels from an attacker's page,
@@ -197,6 +212,7 @@ class TestInlineWhitespace:
         text, _ = StripExtractor().convert("<p>one</p>\n<p>two</p>", "https://x.com")
         assert not text.startswith(" ")
 
+    @requires_markdown
     def test_link_without_text_does_not_swallow_the_document(self):
         """Regression: a link wrapping only an icon has no text.
 
@@ -208,3 +224,13 @@ class TestInlineWhitespace:
             '<p>before</p><a href="https://x.com"><svg></svg></a><p>AFTER</p>',
             "https://x.com")
         assert "AFTER" in md
+
+
+def test_markdown_without_libraries_fails_loudly():
+    """A missing optional dependency must not degrade to a hand-rolled converter:
+    that would produce less safe output nobody can see is less safe."""
+    if importlib.util.find_spec("nh3") and importlib.util.find_spec("markdownify"):
+        pytest.skip("libraries present; the failure path cannot be exercised")
+    from mcs.driver.webfetch import MarkdownUnavailable
+    with pytest.raises(MarkdownUnavailable, match=r"\[markdown\]"):
+        MarkdownExtractor().convert("<p>x</p>", "https://x.com")

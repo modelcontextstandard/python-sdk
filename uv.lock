@@ -29,7 +29,9 @@ members = [
     "mcs-driver-mcp",
     "mcs-driver-rest",
     "mcs-driver-sandbox",
+    "mcs-driver-web",
     "mcs-driver-webfetch",
+    "mcs-driver-websearch",
     "mcs-examples",
     "mcs-hooks",
     "mcs-inspector",
@@ -349,6 +351,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/54/79/875f9558179573d40a9cc743038ac2bf67dfb79cecb1e8b5d70e88c94c3d/bcrypt-5.0.0-pp311-pypy311_pp73-manylinux_2_28_x86_64.whl", hash = "sha256:046ad6db88edb3c5ece4369af997938fb1c19d6a699b9c1b27b0db432faae4c4", size = 273791, upload-time = "2025-09-25T19:50:39.913Z" },
     { url = "https://files.pythonhosted.org/packages/bc/fe/975adb8c216174bf70fc17535f75e85ac06ed5252ea077be10d9cff5ce24/bcrypt-5.0.0-pp311-pypy311_pp73-manylinux_2_34_aarch64.whl", hash = "sha256:dcd58e2b3a908b5ecc9b9df2f0085592506ac2d5110786018ee5e160f28e0911", size = 270746, upload-time = "2025-09-25T19:50:43.306Z" },
     { url = "https://files.pythonhosted.org/packages/e4/f8/972c96f5a2b6c4b3deca57009d93e946bbdbe2241dca9806d502f29dd3ee/bcrypt-5.0.0-pp311-pypy311_pp73-manylinux_2_34_x86_64.whl", hash = "sha256:6b8f520b61e8781efee73cba14e3e8c9556ccfb375623f4f97429544734545b4", size = 273375, upload-time = "2025-09-25T19:50:45.43Z" },
+]
+
+[[package]]
+name = "beautifulsoup4"
+version = "4.15.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "soupsieve", version = "2.8.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "soupsieve", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/65/318323f98dbee45d42dff61d8f047181bc6f2268a9068cfad035a46be5af/beautifulsoup4-4.15.0.tar.gz", hash = "sha256:288e3ca7d54b06f2ac191970bc275c1939cb46d450b255bf6718b04aa37ab4f7", size = 632571, upload-time = "2026-06-07T16:44:20.453Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/c6/92fcd42f1ba33e1184263f25bfabf3d27c383410470f169e4b8163bf9c17/beautifulsoup4-4.15.0-py3-none-any.whl", hash = "sha256:d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9", size = 109924, upload-time = "2026-06-07T16:44:21.566Z" },
 ]
 
 [[package]]
@@ -1899,6 +1915,19 @@ wheels = [
 ]
 
 [[package]]
+name = "markdownify"
+version = "1.2.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/92/ab/d1297139c0e2ceb151ae564c8c4f57ac0155d8f1f8b4cbd5d6523c82ea36/markdownify-1.2.3.tar.gz", hash = "sha256:1a176f05522c8a2cb1dd3ab9d307dcdadbed5c26ae717855bfc42b3b6d38d937", size = 18852, upload-time = "2026-06-30T20:27:39.06Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/10/fa543d484e8b1199243fe20eedd02cc5af050edebce98a7293a5773df592/markdownify-1.2.3-py3-none-any.whl", hash = "sha256:a189a0bedfd14009030fde5f85bb6f77c56897cb839b5c25315dd7d4e3e290ba", size = 15732, upload-time = "2026-06-30T20:27:38.094Z" },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2326,6 +2355,30 @@ dependencies = [
 requires-dist = [{ name = "mcs-driver-core", editable = "packages/core" }]
 
 [[package]]
+name = "mcs-driver-web"
+version = "0.1.0"
+source = { editable = "packages/drivers/mcs-driver-web" }
+dependencies = [
+    { name = "mcs-driver-core" },
+    { name = "mcs-driver-webfetch" },
+    { name = "mcs-driver-websearch" },
+]
+
+[package.optional-dependencies]
+full = [
+    { name = "mcs-driver-webfetch", extra = ["full"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcs-driver-core", editable = "packages/core" },
+    { name = "mcs-driver-webfetch", editable = "packages/drivers/mcs-driver-webfetch" },
+    { name = "mcs-driver-webfetch", extras = ["full"], marker = "extra == 'full'", editable = "packages/drivers/mcs-driver-webfetch" },
+    { name = "mcs-driver-websearch", editable = "packages/drivers/mcs-driver-websearch" },
+]
+provides-extras = ["full"]
+
+[[package]]
 name = "mcs-driver-webfetch"
 version = "0.1.0"
 source = { editable = "packages/drivers/mcs-driver-webfetch" }
@@ -2335,8 +2388,18 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+full = [
+    { name = "markdownify" },
+    { name = "nh3" },
+    { name = "trafilatura", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "trafilatura", version = "2.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+]
 http = [
     { name = "mcs-adapter-http" },
+]
+markdown = [
+    { name = "markdownify" },
+    { name = "nh3" },
 ]
 text = [
     { name = "trafilatura", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -2345,12 +2408,39 @@ text = [
 
 [package.metadata]
 requires-dist = [
+    { name = "markdownify", marker = "extra == 'full'", specifier = ">=1.1" },
+    { name = "markdownify", marker = "extra == 'markdown'", specifier = ">=1.1" },
     { name = "mcs-adapter-http", marker = "extra == 'http'", editable = "packages/adapters/mcs-adapter-http" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-types-web", editable = "packages/types/mcs-types-web" },
+    { name = "nh3", marker = "extra == 'full'", specifier = ">=0.2" },
+    { name = "nh3", marker = "extra == 'markdown'", specifier = ">=0.2" },
+    { name = "trafilatura", marker = "extra == 'full'", specifier = ">=1.8" },
     { name = "trafilatura", marker = "extra == 'text'", specifier = ">=1.8" },
 ]
-provides-extras = ["http", "text"]
+provides-extras = ["http", "markdown", "text", "full"]
+
+[[package]]
+name = "mcs-driver-websearch"
+version = "0.1.0"
+source = { editable = "packages/drivers/mcs-driver-websearch" }
+dependencies = [
+    { name = "mcs-driver-core" },
+    { name = "mcs-types-web" },
+]
+
+[package.optional-dependencies]
+http = [
+    { name = "mcs-adapter-http" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcs-adapter-http", marker = "extra == 'http'", editable = "packages/adapters/mcs-adapter-http" },
+    { name = "mcs-driver-core", editable = "packages/core" },
+    { name = "mcs-types-web", editable = "packages/types/mcs-types-web" },
+]
+provides-extras = ["http"]
 
 [[package]]
 name = "mcs-examples"
@@ -2517,7 +2607,9 @@ dependencies = [
     { name = "mcs-driver-mcp" },
     { name = "mcs-driver-rest" },
     { name = "mcs-driver-sandbox" },
+    { name = "mcs-driver-web" },
     { name = "mcs-driver-webfetch" },
+    { name = "mcs-driver-websearch" },
     { name = "mcs-examples" },
     { name = "mcs-hooks" },
     { name = "mcs-inspector" },
@@ -2583,7 +2675,9 @@ requires-dist = [
     { name = "mcs-driver-mcp", editable = "packages/drivers/mcs-driver-mcp" },
     { name = "mcs-driver-rest", editable = "packages/drivers/mcs-driver-rest" },
     { name = "mcs-driver-sandbox", editable = "packages/drivers/mcs-driver-sandbox" },
+    { name = "mcs-driver-web", editable = "packages/drivers/mcs-driver-web" },
     { name = "mcs-driver-webfetch", editable = "packages/drivers/mcs-driver-webfetch" },
+    { name = "mcs-driver-websearch", editable = "packages/drivers/mcs-driver-websearch" },
     { name = "mcs-examples", editable = "mcs-examples" },
     { name = "mcs-hooks", editable = "packages/hooks/mcs-hooks" },
     { name = "mcs-inspector", editable = "packages/inspector" },
@@ -4280,6 +4374,30 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+]
+
+[[package]]
+name = "soupsieve"
+version = "2.8.4"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.10'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/47/2c/0a5f6f8ee0d5589e48c7640213ed5175d52cf540a06725b628cc1a45d6ce/soupsieve-2.8.4.tar.gz", hash = "sha256:e121fd02e975c695e4e9e8774a5ee35d74714b59307868dcc5319ad2d9e3328e", size = 121110, upload-time = "2026-05-24T13:55:57.154Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/f5/0c41cb68dcae6b7de4fac4188a3a9589e21fb31df21ea3a2e888db95e6c9/soupsieve-2.8.4-py3-none-any.whl", hash = "sha256:e7e6b0769c8f51ed59acab6e994b00621096cfb1c640a7509295987388fbaf65", size = 37304, upload-time = "2026-05-24T13:55:55.406Z" },
+]
+
+[[package]]
+name = "soupsieve"
+version = "2.9.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.10'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d9/38/e12680bbe6b4f8f3d17adcaf38d26850aa756c85cf4a80e79fc12a018fe8/soupsieve-2.9.1.tar.gz", hash = "sha256:c33e6605bbc71dd628b00c632d58ae607c22bade247e52553928f83bbb75b4ba", size = 122261, upload-time = "2026-07-21T16:57:17.452Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0f/2c/437fe806897c2d6cfdc3ee43a18da8bf8e568530a4ae9bac781541ca9896/soupsieve-2.9.1-py3-none-any.whl", hash = "sha256:4f4477399246b7a0c720a88ca2454b11cd6bb9ae4c9d170140786e916776c14c", size = 37404, upload-time = "2026-07-21T16:57:16.421Z" },
 ]
 
 [[package]]
