@@ -72,7 +72,8 @@
       "Bash(cp mcs-driver-webfetch/LICENSE mcs-driver-websearch/)",
       "Bash(sed -e 's/mcs-driver-webfetch/mcs-driver-websearch/g' -e 's/Web page fetching driver for the Model Context Standard -- lets an LLM read any URL as text./Web search driver for the Model Context Standard -- lets an LLM search the web via any Tavily-compatible API./' -e 's/\"web\", \"fetch\", \"scraping\"/\"web\", \"search\", \"tavily\"/' mcs-driver-webfetch/pyproject.toml)",
       "Bash(python -m pytest packages/drivers/mcs-driver-websearch -q)",
-      "Bash(python -m pytest packages/drivers/mcs-driver-web packages/drivers/mcs-driver-websearch packages/drivers/mcs-driver-webfetch -q)"
+      "Bash(python -m pytest packages/drivers/mcs-driver-web packages/drivers/mcs-driver-websearch packages/drivers/mcs-driver-webfetch -q)",
+      "Bash(PYTHONIOENCODING=utf-8 timeout 180 python -c ' *)"
     ]
   }
 }

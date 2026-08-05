@@ -179,3 +179,35 @@ class TestRawIsOptIn:
         driver = WebfetchToolDriver(HttpPageConnector(_FakeHttp()))
         assert "Hello world." in driver.execute_tool(
             "fetch_page", {"url": "https://x.com"})["content"]
+
+
+class TestTitleSource:
+
+    def test_document_title_beats_strategy_metadata(self):
+        """Extractors read og:title, which is written for social sharing and is
+        often the *site's* tagline rather than the page's subject. Measured on
+        github.com/trending: trafilatura reports "Build software better,
+        together" while <title> says "Trending repositories on GitHub today"."""
+        class _OgTitle:
+            kind = "text"
+            name = "og"
+            def convert(self, html, url):
+                return "body text", "Site Tagline"
+
+        html = "<html><head><title>The Actual Page</title></head><body>x</body></html>"
+        out = WebfetchToolDriver(HttpPageConnector(_FakeHttp(html)),
+                                 text_strategy=_OgTitle()).execute_tool(
+            "fetch_page", {"url": "https://x.com"})
+        assert out["title"] == "The Actual Page"
+
+    def test_falls_back_when_there_is_no_title_tag(self):
+        class _WithTitle:
+            kind = "text"
+            name = "s"
+            def convert(self, html, url):
+                return "body", "From Metadata"
+
+        out = WebfetchToolDriver(HttpPageConnector(_FakeHttp("<html><body>x</body></html>")),
+                                 text_strategy=_WithTitle()).execute_tool(
+            "fetch_page", {"url": "https://x.com"})
+        assert out["title"] == "From Metadata"

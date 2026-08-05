@@ -294,4 +294,9 @@ class WebfetchToolDriver(MCSToolDriver):
 
         strategy = self._markdown if fmt == "markdown" else self._text
         content, title = strategy.convert(page.text, page.url)
-        return content, title or page.title or title_from_html(page.text)
+        # The document's own <title> wins over a strategy's metadata title.
+        # Extractors read og:title, which is written for social sharing and is
+        # frequently the *site's* tagline: on github.com/trending, trafilatura
+        # reports "Build software better, together" while <title> says "Trending
+        # repositories on GitHub today". The page's own answer is the better one.
+        return content, title_from_html(page.text) or title or page.title
