@@ -494,6 +494,46 @@ class TestParallelCalls:
         assert "smtp down" in dr.messages[1]["content"]
 
 
+class TestNativeFanOut:
+    """A chain of drivers over ONE buffer, native wire -- the counterpart to
+    ``TestTextMultiCall.test_deferred_consume_is_fan_out_safe``.
+
+    Fan-out means every driver sees the same buffer in the same round. A driver that
+    finds a complete call it does not own still advances the buffer past it (otherwise
+    the call would anchor the scan forever) -- but that drop must be **deferred** to the
+    next chunk, or the first driver in the chain wipes the call before the driver that
+    owns it ever looks. For a native batch there is no text offset, so the whole message
+    is dropped; deferring it is what keeps a chain workable."""
+
+    def test_unowned_native_call_survives_for_the_next_driver(self):
+        """A does not own the call, B does: B must still see and run it this round."""
+        a = MailAndLogDriver()                             # owns log_event, NOT send_mail
+        b = EchoDriver()                                   # owns send_mail
+        buf = LLMStreamBuffer()
+        buf.add(_oai_tool_chunk("call_9", "send_mail", '{"to": "a@b.c"}'))
+
+        dra = a.process_llm_response(buf)                  # A: not mine -> deferred drop
+        assert dra.call_executed is False
+        drb = b.process_llm_response(buf)                  # B: mine -> must still see it
+        assert [r.name for r in (drb.executed_calls or [])] == ["send_mail"]
+        assert drb.executed_calls[0].arguments == {"to": "a@b.c"}
+
+    def test_call_owned_by_nobody_is_dropped_on_the_next_chunk(self):
+        """The other half of the contract: once the whole chain has passed on a call,
+        the next chunk drops it -- it must not be re-offered round after round."""
+        a = MailAndLogDriver()
+        b = EchoDriver()
+        buf = LLMStreamBuffer()
+        buf.add(_oai_tool_chunk("call_9", "nobodys_tool", "{}"))
+        a.process_llm_response(buf)
+        b.process_llm_response(buf)
+
+        buf.add(_oai_content_chunk("Anyway, "))            # next round -> drop applies
+        assert "tool_calls" not in buf.as_dict()
+        assert a.process_llm_response(buf).call_executed is False
+        assert b.process_llm_response(buf).call_executed is False
+
+
 class TestFormatIsolation:
     """Each format's events are recognised only by its own strategy."""
 

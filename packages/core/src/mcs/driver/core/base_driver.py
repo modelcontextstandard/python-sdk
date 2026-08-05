@@ -259,11 +259,13 @@ class BaseDriver(
             # buffer defers the actual drop to the next add(), so a driver that DOES own them
             # still sees them this round first (that is what makes it fan-out-safe). Text
             # advances by offset (keeping the tail -- the next call / prose); a native batch
-            # has no text offset (settled == 0) and *is* the whole message, so it resets.
+            # has no text offset (settled == 0) and *is* the whole message, so it goes whole.
+            # Both are deferred -- never buf.reset(), which drops at once and would let the
+            # first driver in a chain wipe a call the second one owns.
             if settled:
                 buf.consume_through(settled)
             else:
-                buf.reset()
+                buf.consume_all()
             return dr
 
         # ── No runnable call this round: either something is forming, or it is plain text.

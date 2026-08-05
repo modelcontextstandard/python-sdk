@@ -1,19 +1,37 @@
-"""Human-in-the-loop chat: every tool call needs the user's OK.
+"""Two chained drivers, one consent gate: every tool call needs the user's OK.
 
-The gate is a **tool middleware**, not client code. ``PermissionMiddleware``
-lives *inside* the driver and wraps ``execute_tool``: it receives the pending
-call with its arguments, asks a consent handler, and either continues the chain
-or short-circuits it with a structured ``permission_denied`` result. Nothing is
-executed on denial, and no exception escapes -- the model reads the denial back
-as a normal tool result and can react to it.
+Two things at once here, and they are independent.
 
-Two things are worth noticing:
+**Chaining.** The client holds *two* drivers -- a ``RestDriver`` on GitHub's
+OpenAPI spec and the composite ``WebDriver`` (search + fetch) -- and simply offers
+each LLM response to both. A driver that does not recognise the call returns an
+empty ``DriverResponse`` meaning "not mine", and the next one looks. No
+orchestrator, no registry, no component in between: the pass-through is part of
+the driver contract, which is exactly what makes drivers composable by the
+client.
+
+The model therefore sees four tools from two unrelated backends and picks. Ask
+for something the GitHub API cannot answer -- trending repositories, say -- and
+watch it fall back to searching and reading a page instead.
+
+**The gate.** ``PermissionMiddleware`` lives *inside* a driver and wraps
+``execute_tool``: it receives the pending call with its arguments, asks a consent
+handler, and either continues or short-circuits with a structured
+``permission_denied`` result. Nothing is executed on denial and no exception
+escapes -- the model reads the refusal as a normal tool result and adapts.
+
+Because middleware lives inside a driver, a chain of two needs it on both. The
+same instance can be shared: middleware holds configuration, not per-call state.
+
+Three things are worth noticing:
 
 * **The client loop is unchanged.** Compare it with any other example -- same
-  ``ChatSession``, same driver call. Consent is configuration, not control flow.
+  ``ChatSession``. Consent is configuration, and so is the second driver.
 * **It works identically while streaming.** The middleware runs inside
-  ``process_llm_response``, so the prompt appears mid-stream, right when the
-  driver is about to execute -- and the answer continues afterwards.
+  ``process_llm_response``, so the prompt appears mid-stream, right when a driver
+  is about to execute -- and the answer continues afterwards.
+* **`format="raw"` is not offered** unless ``--allow-raw`` is passed. While off,
+  the model is never told the option exists.
 
 The consent handler is the *view*: it owns the terminal and knows whether it is
 mid-line, so it can interrupt a streaming answer cleanly.
@@ -22,14 +40,28 @@ Usage:
     python chat.py                     # streaming (default)
     python chat.py --no-stream         # one assembled response per turn
     python chat.py --debug             # + raw LLM output and DriverResponse
-    python chat.py --allow-all         # gate open: shows the chain still runs
+    python chat.py --allow-all         # answers the gate automatically
+    python chat.py --allow-raw         # also expose format="raw"
+
+Configuration (environment or .env):
+    MCS_SEARCH_URL   base URL of a Tavily-compatible search service
+    MCS_SEARCH_KEY   its API key
+    TAVILY_API_KEY   used instead when MCS_SEARCH_* are unset (hosted Tavily)
 
 Requires:
-    pip install mcs-driver-rest mcs-permission litellm rich python-dotenv
+    pip install mcs-driver-web mcs-permission litellm rich python-dotenv
+    # optional, for better extraction and safe markdown:
+    pip install mcs-driver-web[full]
+
+Try asking:
+    "What are the top 3 trending GitHub repositories this week?"
+    -- the search API has no trending endpoint, so the model has to find the
+    page and read it. Watch which URL it decides to fetch.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -39,7 +71,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _shared import ChatSession, ChatView, base_parser  # noqa: E402
 
 from mcs.driver.rest import RestDriver  # noqa: E402
+from mcs.driver.web import WebDriver  # noqa: E402
 from mcs.permission.middleware import PermissionMiddleware  # noqa: E402
+
 
 GITHUB_SPEC = (
     "https://raw.githubusercontent.com/github/rest-api-description"
@@ -50,35 +84,70 @@ DEFAULT_TAGS = ["search"]
 
 def main() -> None:
     load_dotenv()
-    p = base_parser("MCS chat with a consent gate on every tool call")
-    p.add_argument("--url", default=GITHUB_SPEC, help="OpenAPI spec URL")
+    p = base_parser("MCS chat over two chained drivers, with a consent gate")
+    p.add_argument("--url", default=GITHUB_SPEC, help="OpenAPI spec URL for the REST driver")
     p.add_argument("--include-tags", nargs="*", default=None,
                    help="Only expose operations with these OpenAPI tags")
+    p.add_argument("--search-url", default=os.environ.get("MCS_SEARCH_URL"),
+                   help="Base URL of a Tavily-compatible search service "
+                        "(default: $MCS_SEARCH_URL, else hosted Tavily)")
+    p.add_argument("--search-key",
+                   default=os.environ.get("MCS_SEARCH_KEY")
+                   or os.environ.get("TAVILY_API_KEY"),
+                   help="API key for the search service "
+                        "(default: $MCS_SEARCH_KEY or $TAVILY_API_KEY)")
+    p.add_argument("--allow-raw", action="store_true",
+                   help="Expose format='raw' on fetch_page (off by default: raw "
+                        "hands the model every script and comment on the page)")
     p.add_argument("--allow-all", action="store_true",
                    help="Auto-approve every call (to contrast with the interactive gate)")
     args = p.parse_args()
+
+    if not args.search_key:
+        raise SystemExit(
+            "No search API key. Set MCS_SEARCH_KEY (with MCS_SEARCH_URL for a "
+            "self-hosted service) or TAVILY_API_KEY, in the environment or a .env file."
+        )
 
     view = ChatView(debug=args.debug)
 
     tags = args.include_tags if args.include_tags is not None else (
         DEFAULT_TAGS if args.url == GITHUB_SPEC else None
     )
-    driver = RestDriver(url=args.url, include_tags=tags)
-    view.tools_discovered([t.name for t in driver.list_tools()])
+    github = RestDriver(url=args.url, include_tags=tags)
+    web = WebDriver(api_key=args.search_key, base_url=args.search_url,
+                    allow_raw=args.allow_raw)
 
-    # The gate. Both handlers *show* the pending call -- only one of them asks.
-    # That is the contrast worth seeing: --allow-all does not switch the gate off,
-    # it answers it automatically, and the middleware is in the chain either way.
-    driver.add_middleware(PermissionMiddleware(
+    # Two independent drivers, chained by the client. Neither knows about the
+    # other; a call one does not recognise passes through to the next. That is
+    # the driver contract doing the work -- no orchestrator, no registry.
+    drivers = [github, web]
+    view.tools_discovered([t.name for d in drivers for t in d.list_tools()])
+
+    # The gate goes on *each* driver: middleware lives inside a driver, so a
+    # chain of two needs two. Sharing one instance is fine -- middleware holds
+    # configuration, not per-call state.
+    #
+    # Both handlers *show* the pending call; only one of them asks. That is the
+    # contrast worth seeing: --allow-all does not switch the gate off, it answers
+    # it automatically, and the middleware is in the chain either way.
+    gate = PermissionMiddleware(
         consent_handler=view.auto_consent if args.allow_all else view.ask_consent
-    ))
+    )
+    for d in drivers:
+        d.add_middleware(gate)
 
+    where = args.search_url or "api.tavily.com"
     ChatSession(
-        driver, args.model, view=view,
+        drivers, args.model, view=view,
         streaming=args.stream, native_tools=args.native_tools,
         api_base=args.api_base, api_key=args.api_key,
-        title="MCS Chat (consent gate)",
-        banner_extra=[f"Consent:  {'auto-approve' if args.allow_all else 'ask the user'}"],
+        title="MCS Chat (two drivers, consent gate)",
+        banner_extra=[
+            f"Search:   {where}",
+            f"Consent:  {'auto-approve' if args.allow_all else 'ask the user'}",
+            f"Raw HTML: {'allowed' if args.allow_raw else 'not offered'}",
+        ],
     ).run()
 
 

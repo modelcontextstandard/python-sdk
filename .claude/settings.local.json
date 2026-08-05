@@ -73,7 +73,11 @@
       "Bash(sed -e 's/mcs-driver-webfetch/mcs-driver-websearch/g' -e 's/Web page fetching driver for the Model Context Standard -- lets an LLM read any URL as text./Web search driver for the Model Context Standard -- lets an LLM search the web via any Tavily-compatible API./' -e 's/\"web\", \"fetch\", \"scraping\"/\"web\", \"search\", \"tavily\"/' mcs-driver-webfetch/pyproject.toml)",
       "Bash(python -m pytest packages/drivers/mcs-driver-websearch -q)",
       "Bash(python -m pytest packages/drivers/mcs-driver-web packages/drivers/mcs-driver-websearch packages/drivers/mcs-driver-webfetch -q)",
-      "Bash(PYTHONIOENCODING=utf-8 timeout 180 python -c ' *)"
+      "Bash(PYTHONIOENCODING=utf-8 timeout 180 python -c ' *)",
+      "Bash(python -m pytest packages/core/tests/test_native_strategies.py::TestNativeFanOut -q)",
+      "Bash(python -m pytest packages/core/tests/ -q)",
+      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/e2e_native.py\")",
+      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/chain_test.py\")"
     ]
   }
 }

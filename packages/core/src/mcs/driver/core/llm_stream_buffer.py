@@ -86,21 +86,24 @@ class LLMStreamBuffer:
         self._shown = 0                  # display cursor: chars already shown
         self._held = False               # this round's display veto (reset by add)
         self._pending_consume = 0        # deferred consume offset (applied on the next add)
+        self._pending_reset = False      # deferred full drop (native wire; ditto)
 
     def add(self, chunk: Any) -> None:
         """Feed one raw provider chunk; accumulate into the native message.
 
-        First applies any deferred :meth:`consume_through` from the previous round -- so a
-        handled text call is dropped only *after* every driver in a chain has seen it --
-        then resolves the wire format (first chunk) and delegates reassembly. The content
-        delta it returns is appended to the display buffer. Returns nothing -- what may be
-        *shown* is decided by the driver (via :meth:`hold`) and read via :meth:`text`.
-        Resets the per-round display veto (default: flow).
+        First applies any deferred consume from the previous round -- so a handled call is
+        dropped only *after* every driver in a chain has seen it -- then resolves the wire
+        format (first chunk) and delegates reassembly. The content delta it returns is
+        appended to the display buffer. Returns nothing -- what may be *shown* is decided
+        by the driver (via :meth:`hold`) and read via :meth:`text`. Resets the per-round
+        display veto (default: flow).
         """
         # 1) A new chunk means a new round has started, i.e. every driver already saw the
-        #    previous round. So NOW it is safe to actually drop a call the driver asked to
-        #    consume last round (see consume_through) -- do it before adding new content.
-        if self._pending_consume:
+        #    previous round. So NOW it is safe to actually drop what the driver asked to
+        #    consume last round -- whole batch or prefix -- before adding new content.
+        if self._pending_reset:
+            self.reset()
+        elif self._pending_consume:
             self._apply_consume()
         # 2) New round -> clear the display veto (a driver must re-assert hold() to suppress).
         self._held = False
@@ -174,7 +177,7 @@ class LLMStreamBuffer:
         call this round; only after the whole chain has passed (the next chunk arrives) is
         it dropped -- which is exactly "no driver owned it". For a **native** wire (a
         structured, non-string ``content``) there is no text offset and the batch is the
-        whole message, so this resets instead.
+        whole message, so this defers to :meth:`consume_all` instead.
         """
         if isinstance(self._acc.get("content"), str):
             # Text wire (content is a plain string): remember the furthest offset to drop,
@@ -186,8 +189,24 @@ class LLMStreamBuffer:
             self._shown = max(self._shown, end)
         else:
             # Native wire (content is a block/item list, not a string): no character offset
-            # applies, and the batch is the whole message -> just clear everything.
-            self.reset()
+            # applies, and the batch is the whole message -> drop all of it.
+            self.consume_all()
+
+    def consume_all(self) -> None:
+        """Advance past a handled **native batch**: the whole message, deferred.
+
+        The native counterpart of :meth:`consume_through`. A native batch carries no text
+        offset and *is* the entire message, so there is no tail to keep -- but the drop is
+        deferred for exactly the same reason, and it matters just as much here: a driver
+        that finds a complete native call it does not own must still advance past it, and
+        dropping right away would wipe the call before the next driver in the chain ever
+        looked at it. Deferring makes "I handled this" and "nobody owned it" converge on
+        the same safe behaviour.
+
+        This -- not :meth:`reset` -- is what a driver calls mid-stream. ``reset`` is the
+        *immediate* hard clear, and immediate is precisely what breaks a chain.
+        """
+        self._pending_reset = True
 
     def _apply_consume(self) -> None:
         """Actually drop the deferred-consumed prefix (called by :meth:`add`).
@@ -205,11 +224,13 @@ class LLMStreamBuffer:
         self._shown = max(0, self._shown - n)              # keep the cursor aligned
 
     def reset(self) -> None:
-        """Clear the accumulator to hunt for the next call; keep the wire format.
+        """Clear the accumulator **immediately**; keep the wire format.
 
-        Called by the **driver** once it has consumed a native call (executed/failed) --
-        buffer lifecycle is the driver's concern, not the client's. Text calls advance via
-        :meth:`consume_through` instead (which keeps the tail).
+        The hard clear, applied at once -- which makes it fan-out-hostile: in a chain of
+        drivers over one buffer it would wipe a call before the next driver saw it. A
+        driver mid-stream therefore calls :meth:`consume_all` (native) or
+        :meth:`consume_through` (text), both deferred; this is the mechanism they defer
+        *to*, invoked by :meth:`add` once the whole chain has passed.
         """
         self._acc = {}
         self._text_content = ""
@@ -217,6 +238,7 @@ class LLMStreamBuffer:
         self._shown = 0
         self._held = False
         self._pending_consume = 0
+        self._pending_reset = False
 
     # -- internals ------------------------------------------------------------
 

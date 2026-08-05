@@ -35,6 +35,7 @@ class ChatView:
         self.debug = debug
         self._open = False        # a line was started with end="" and not closed
         self._status: Status | None = None   # live spinner, while nothing can be shown
+        self._needs_header = False   # the next text must (re-)print "Assistant:"
 
     # -- session framing ------------------------------------------------------
 
@@ -81,14 +82,19 @@ class ChatView:
         *actual* text (see :meth:`stream_text`) and until then a spinner says the
         request is in flight.
         """
+        self._needs_header = True
         self._spin("waiting for the model")
 
     def stream_text(self, text: str) -> None:
-        # First text of the turn, or the first after an interruption (consent
-        # prompt, debug panel): stop spinning and (re-)open the answer line, so
-        # text never appears headerless.
+        # Stop spinning, then decide whether this text needs a header. It does at
+        # the start of a turn, and after an *interruption* -- something else printed
+        # (a consent panel, a debug panel), so the answer must not run on
+        # headerless. It does NOT after a mere spinner pause: nothing was printed in
+        # between, so this is the same answer continuing. Held-back text that turns
+        # out to be prose after all lands here, and a second "Assistant:" mid-answer
+        # would suggest the model started over.
         self._spin_off()
-        if not self._open:
+        if self._needs_header:
             self._resume()
         print(text, end="", flush=True)
         self._open = True
@@ -163,9 +169,13 @@ class ChatView:
 
         The spinner owns the cursor while it runs, so it has to go first --
         otherwise its live region fights with whatever prints next.
+
+        Marks the answer as broken: whatever prints next comes between the model's
+        words, so the answer needs a fresh header when it resumes.
         """
         self._spin_off()
         self._close_line()
+        self._needs_header = True
 
     def _resume(self) -> None:
         """(Re-)open the answer line.
@@ -176,6 +186,7 @@ class ChatView:
         """
         self.console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
         self._open = True
+        self._needs_header = False
 
     def tool_requested(self, tool_name: str, arguments: dict[str, Any]) -> None:
         """Show the call that is about to run. Always visible, not debug-only --
