@@ -51,7 +51,23 @@
       "Bash(python main.py)",
       "Bash(sed -n '/class AuthMiddleware/,$p' packages/auth/mcs-auth/src/mcs/auth/middleware.py)",
       "Bash(sed -n '/    def __init__/,/^$/p' packages/auth/mcs-auth/src/mcs/auth/challenge.py)",
-      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/mail_test.py\")"
+      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/mail_test.py\")",
+      "WebSearch",
+      "Bash(mkdir -p mcs-driver-webfetch/src/mcs/driver/webfetch mcs-driver-webfetch/tests)",
+      "Bash(cp mcs-driver-mailread/LICENSE mcs-driver-webfetch/)",
+      "Bash(sed -n '/^\\\\[project\\\\]/,/^\\\\[tool/p' mcs-driver-mailread/pyproject.toml)",
+      "Bash(mkdir -p mcs-adapter-webpage/src/mcs/adapter/webpage mcs-adapter-webpage/tests)",
+      "Bash(cp mcs-adapter-http/LICENSE mcs-adapter-webpage/)",
+      "Bash(PYTHONIOENCODING=utf-8 python -c ' *)",
+      "Bash(python -m pytest packages/adapters packages/types -q)",
+      "Bash(PYTHONPATH='packages/types/mcs-types-web/src;packages/drivers/mcs-driver-webfetch/src' PYTHONIOENCODING=utf-8 python -c ' *)",
+      "Bash(uv pip *)",
+      "Bash(python -c \"import trafilatura; print\\('trafilatura', trafilatura.__version__, 'installiert'\\)\")",
+      "Bash(PYTHONPATH=\"packages/types/mcs-types-web/src;packages/drivers/mcs-driver-webfetch/src\" python -m pytest packages/drivers/mcs-driver-webfetch -q)",
+      "Bash(python -m pytest packages/drivers/mcs-driver-webfetch packages/types packages/adapters -q)",
+      "Bash(export ORIO_KEY=\"ec7fcec6475c23b82477de4249551ce1faeefa4c825e24a038a24fe3ba798616\")",
+      "Bash(grep -v \"^--$\")",
+      "Bash(python -m pytest packages/drivers/mcs-driver-webfetch -q)"
     ]
   }
 }

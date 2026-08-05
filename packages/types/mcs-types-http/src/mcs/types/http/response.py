@@ -38,6 +38,11 @@ class HttpResponse:
     headers: dict[str, str] = field(default_factory=dict)
     reason: str = ""
     encoding: str | None = None
+    #: The URL the response actually came from, after any redirects. ``None``
+    #: when the adapter does not report it. Worth carrying: a redirect can change
+    #: what the content is *about*, so a consumer that cites or caches the result
+    #: needs the final address, not the requested one.
+    url: str | None = None
 
     @property
     def ok(self) -> bool:

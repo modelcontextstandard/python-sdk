@@ -106,6 +106,7 @@ class HttpAdapter:
             headers=dict(resp.headers),
             reason=resp.reason or "",
             encoding=resp.encoding,
+            url=str(resp.url),      # after redirects -- not necessarily what was requested
         )
 
     def head(self, url: str, *, timeout: int | None = None) -> int:
