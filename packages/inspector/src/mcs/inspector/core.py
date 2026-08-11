@@ -211,13 +211,16 @@ def run_inspector(
     title: str = "MCS Inspector",
     extra_columns: list[ExtraColumn] | None = None,
     driver_info: dict[str, Any] | None = None,
+    extra_commands: "dict[str, tuple[str, Callable[[str], None]]] | None" = None,
 ) -> None:
     """Run the interactive inspector loop for any MCSToolDriver.
 
     Parameters
     ----------
     td :
-        The tool driver to inspect.
+        The tool driver to inspect. May be a *rebuildable* delegate: the loop reads
+        ``list_tools()`` fresh on every ``list``, so an extra command that swaps the
+        underlying driver (toggling a capability on or off) is reflected live.
     title :
         Display title for the overview table.
     extra_columns :
@@ -225,11 +228,20 @@ def run_inspector(
     driver_info :
         Per-tool metadata dict keyed by tool name, passed to
         ``ExtraColumn.value_fn``.
+    extra_commands :
+        Driver-specific commands: first word -> ``(help text, handler)``. The handler
+        receives the rest of the line. This is how a plugin lets the user *reconfigure*
+        the driver mid-session -- switch a summarizer on, change a strategy -- instead
+        of restarting the inspector per configuration.
     """
     tools = td.list_tools()
     if not tools:
         console.print("[yellow]No tools discovered. Check driver configuration.[/yellow]")
         return
+
+    extra_help = "".join(
+        f"{name} = {help_text}   " for name, (help_text, _) in (extra_commands or {}).items()
+    )
 
     console.print()
     console.print(_build_overview_table(
@@ -238,13 +250,16 @@ def run_inspector(
     console.print(
         "\n[dim]Commands:  <number|name> = detail   "
         "run <number|name> = execute   "
+        f"{extra_help}"
         "list = show table   "
         "quit = exit[/dim]\n"
     )
 
-    tool_names = [t.name for t in tools]
-
     while True:
+        # Fresh each round: an extra command may have rebuilt the driver with a
+        # different tool surface (a summarizer toggles the prompt parameter).
+        tool_names = [t.name for t in td.list_tools()]
+
         try:
             raw = console.input("[bold green]inspect>[/bold green] ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -257,6 +272,11 @@ def run_inspector(
             console.print(_build_overview_table(
                 td, title=title, extra_columns=extra_columns, driver_info=driver_info,
             ))
+            continue
+
+        first_word = raw.split()[0].lower()
+        if extra_commands and first_word in extra_commands:
+            extra_commands[first_word][1](raw[len(first_word):].strip())
             continue
 
         is_run = raw.lower().startswith("run ")

@@ -54,14 +54,35 @@ depend on scheduling.
 
 ## The planner remembers; the transport does not
 
-`LLMPort` deliberately reports no context window, so the budget is discovered by
-working: the summarizer starts from `chunk_tokens` (default 3000) and, when a call
-returns `ContextWindowExceeded`, **learns** — the limit the backend named shrinks the
-working budget for everything after. The same document never hits the same wall twice,
-and the state lives here, with the component doing the planning, not on the adapter.
+The summarizer thinks in the model's **context window** — the number a developer
+actually has, straight off the model card (`context_window=32768` for a qwen3:4b,
+`1_000_000` for gpt-5.6). Everything else is derived:
+
+    input budget per call = context_window − answer reserve − template overhead
+
+`LLMPort` deliberately reports no window, so unset it assumes a conservative 4096 until
+the backend teaches the real number: a `ContextWindowExceeded` with a named limit
+**replaces the window outright** — the backend stated its capacity — and the same
+document never hits the same wall twice. That state lives here, with the component doing
+the planning, not on the adapter.
 
 An overflowing chunk is **split, not dropped**: every leaf of the document gets read, or
 the failure surfaces.
+
+### The Ollama trap: silent clipping, measured
+
+Ollama serves models at its `num_ctx`, **not** at the model card's window — and input
+beyond it is dropped **without any error**: measured locally, the *start* of the prompt
+was cut, `finish_reason` said `"stop"`, and usage dutifully reported exactly the window
+(32 767 for `num_ctx=32768`). The overflow exception this summarizer learns from never
+fires there.
+
+So the summarizer cross-checks the one measurement a backend cannot help giving: when
+the reported prompt tokens are far below what the prompt holds (factor 2, with an
+absolute floor — the estimate is ±30%), the silent clip is turned into the loud
+`ContextWindowExceeded` it should have been, and the *report* becomes the window. A
+1M-window claim against a 4k `num_ctx` is caught and relearned; a 10% trim is not
+provable by arithmetic and stays the operator's job: set `num_ctx` to match the card.
 
 ## `truncated` exists for a measured reason
 

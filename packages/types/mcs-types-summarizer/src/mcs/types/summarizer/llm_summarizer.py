@@ -14,13 +14,17 @@ Strategies carry the established names (LangChain / LlamaIndex vocabulary):
   map_reduce -- and stuff falls back to map_reduce when the backend proves the estimate
   wrong.
 
-**The planner remembers; the transport does not.** ``LLMPort`` deliberately reports no
-context window, so the budget is discovered by working: this class starts from
-``chunk_tokens`` and, when a call comes back with ``ContextWindowExceeded``, *learns* --
-the limit the backend named (or a halving, when it named none) shrinks the working
-budget for everything that follows. The same document never hits the same wall twice.
-That state lives here and not on the adapter because it is planning knowledge, held by
-the component doing the planning.
+**The summarizer thinks in the model's context window** -- the number a developer
+actually has, straight off the model card. Everything else is derived:
+
+    input budget per call = context_window - answer reserve - template overhead
+
+``LLMPort`` deliberately reports no window, so when none was passed a conservative
+assumption applies until the backend teaches the real number: a call that comes back
+with ``ContextWindowExceeded`` *learns* -- a named limit **is** the window and replaces
+the guess outright; without a name, halving is all there is. The same document never
+hits the same wall twice. That state lives here and not on the adapter because it is
+planning knowledge, held by the component doing the planning.
 
 **Truncation is propagated, never swallowed.** Measured on qwen3 via Ollama: a
 reasoning model can spend an entire answer budget thinking and return an empty string
@@ -48,10 +52,17 @@ from mcs.types.llm import (
 
 from .port import Summary
 
-#: Working budget (in tokens) per model call before anything about the model is known.
-#: Conservative enough to fit every >=4k window with template and answer headroom; the
-#: first ``ContextWindowExceeded`` replaces this guess with the backend's own number.
-DEFAULT_CHUNK_TOKENS = 3000
+#: Context window assumed before anything about the model is known. Deliberately the
+#: smallest window still in real use: too small merely costs extra chunks, too large
+#: costs a failed round trip. The first ``ContextWindowExceeded`` replaces this guess
+#: with the backend's own number.
+DEFAULT_ASSUMED_WINDOW = 4096
+
+#: Tokens kept free for the model's *answer* when no ``max_answer_tokens`` is set. The
+#: window covers prompt AND completion, so the input budget is never the whole window --
+#: and a thinking model spends part of this reserve on reasoning before a word of
+#: answer appears.
+DEFAULT_ANSWER_RESERVE = 1024
 
 #: Sentinel a map call answers when its chunk holds nothing relevant. Filtered before
 #: merging, so the merge model never spends attention on "this part was empty" -- and so
@@ -93,8 +104,17 @@ class LLMSummarizer:
         One of ``auto | stuff | map_reduce | refine``. A *pinned* strategy is honoured
         even into failure: pinned ``stuff`` with an oversized text raises rather than
         silently becoming something else -- the caller asked for exactly that.
-    chunk_tokens :
-        Starting per-call budget. Shrinks when the backend teaches a smaller reality.
+    context_window :
+        The model's total token window, when known -- what its model card states, which
+        is the number a developer actually has. Everything else is derived from it:
+
+            input budget per call = context_window - answer reserve - template overhead
+
+        where the answer reserve is *max_answer_tokens* when set, else
+        :data:`DEFAULT_ANSWER_RESERVE`. Unset, a conservative
+        :data:`DEFAULT_ASSUMED_WINDOW` applies until the backend teaches the real
+        number (see the module docstring); a named ``ContextWindowExceeded`` limit
+        replaces the window outright, not some derived fraction of it.
     max_answer_tokens :
         Cap for every model answer, passed as the port's ``max_completion_tokens``.
         ``None`` (default) sets no cap: a cap is a harness decision, and a tight one
@@ -122,15 +142,21 @@ class LLMSummarizer:
     STUFF_TEMPLATE = ("Question: {query}\n\nText:\n{text}\n\n"
                       "Answer the question using only the text above.")
 
+    # "Preserve the order": measured against a live GitHub Trending page, a small model
+    # happily re-sorts a list while condensing it (by stars, by its own taste) -- and on
+    # a ranking page the order IS information. Chunk order is already stable
+    # structurally; these lines pin it inside each call too.
     MAP_TEMPLATE = ("Question: {query}\n\nText (one part of a larger document):\n{text}\n\n"
                     "Extract everything from this part that helps answer the question, "
-                    "keeping exact figures and names. If nothing in this part helps, "
+                    "keeping exact figures and names. Preserve the order in which "
+                    "items appear in the text. If nothing in this part helps, "
                     "reply exactly: " + NO_CONTENT)
 
     MERGE_TEMPLATE = ("Question: {query}\n\nPartial answers gathered from different "
-                      "parts of one document:\n{text}\n\n"
+                      "parts of one document, in the document's own order:\n{text}\n\n"
                       "Combine them into one coherent answer to the question. Remove "
-                      "duplicates; keep every distinct fact.")
+                      "duplicates; keep every distinct fact, and preserve the original "
+                      "order of items unless the question asks for a different ranking.")
 
     REFINE_TEMPLATE = ("Question: {query}\n\nCurrent answer:\n{answer}\n\n"
                        "Additional text:\n{text}\n\n"
@@ -142,7 +168,7 @@ class LLMSummarizer:
         llm: LLMPort,
         *,
         strategy: str = "auto",
-        chunk_tokens: int = DEFAULT_CHUNK_TOKENS,
+        context_window: int | None = None,
         max_answer_tokens: int | None = None,
         concurrency: int = 1,
         system: str | None = None,
@@ -155,7 +181,7 @@ class LLMSummarizer:
         self._llm = llm
         self._strategy = strategy
         self._pinned = strategy != "auto"
-        self._chunk_tokens = chunk_tokens
+        self._window = context_window or DEFAULT_ASSUMED_WINDOW
         self._max_answer_tokens = max_answer_tokens
         self._concurrency = concurrency
         self._system = system if system is not None else self.SYSTEM
@@ -178,7 +204,7 @@ class LLMSummarizer:
             fits = estimate_tokens(
                 self.STUFF_TEMPLATE.format(query=query, text=text),
                 self._chars_per_token,
-            ) <= self._chunk_tokens
+            ) <= self._input_budget()
             strategy = "stuff" if fits else "map_reduce"
 
         if strategy == "stuff":
@@ -322,21 +348,66 @@ class LLMSummarizer:
 
     def _ask(self, prompt: str) -> LLMResponse:
         """One model call, portable core only -- see the module docstring."""
-        return self._llm.complete(
+        response = self._llm.complete(
             prompt, system=self._system,
             max_completion_tokens=self._max_answer_tokens,
         )
+        self._check_silent_truncation(prompt, response)
+        return response
+
+    def _check_silent_truncation(self, prompt: str, response: LLMResponse) -> None:
+        """Turn a backend's silent clipping into the loud failure it should have been.
+
+        Measured against a local Ollama: input beyond ``num_ctx`` is dropped without
+        any error -- the *start* of the prompt is cut, ``finish_reason`` says
+        ``"stop"``, and usage dutifully reports exactly the window (32 767 for
+        ``num_ctx=32768``). The overflow exception our whole learning mechanism waits
+        for never fires there, and an answer computed from half the document would
+        sail through as genuine.
+
+        The measured usage is the tell: a backend that reports processing far fewer
+        tokens than the prompt holds read a fraction of it. Coarse thresholds on
+        purpose -- the estimate is ±30%, so only gross clipping is provable from here.
+        A 1M-window claim against a 4k ``num_ctx`` is caught and relearned; a 10% trim
+        is not detectable by arithmetic and stays the operator's job (set ``num_ctx``
+        to match the model card).
+        """
+        reported = response.usage.prompt
+        if reported is None:
+            return
+        estimated = estimate_tokens(prompt, self._chars_per_token)
+        if estimated > reported * 2 and estimated - reported > 512:
+            raise ContextWindowExceeded(
+                f"The backend reports {reported} processed prompt tokens for a prompt "
+                f"holding an estimated {estimated}: it silently truncated the input "
+                "(Ollama clips at num_ctx without an error). Treating the report as "
+                "the effective window.",
+                limit=reported,
+            )
+
+    def _input_budget(self) -> int:
+        """Tokens of *payload* one call may carry: the window minus the answer reserve.
+
+        The window covers prompt and completion together, so the reserve comes off
+        first -- *max_answer_tokens* when the caller set one, else a default that
+        leaves a thinking model room to think. Template overhead is subtracted later,
+        per template, in :meth:`_budget_chars`.
+        """
+        reserve = self._max_answer_tokens or DEFAULT_ANSWER_RESERVE
+        return max(256, self._window - reserve)
 
     def _learn(self, exc: ContextWindowExceeded) -> None:
-        """Shrink the working budget from what a failure just taught.
+        """Correct the working window from what a failure just taught.
 
-        Half of the backend's named limit when it named one -- the limit covers prompt
-        *and* answer, and template plus answer need their room -- else half of what was
-        tried. Kept on the instance: the next chunk, and the next document through this
-        summarizer, start from reality instead of the default guess.
+        A named limit *is* the window -- the backend stated its capacity, so it
+        replaces the guess outright rather than feeding some derived fraction. Without
+        a name, halving is all there is. Kept on the instance: the next chunk, and the
+        next document through this summarizer, start from reality.
         """
-        learned = max(256, (exc.limit // 2) if exc.limit else (self._chunk_tokens // 2))
-        self._chunk_tokens = min(self._chunk_tokens, learned)
+        if exc.limit:
+            self._window = min(self._window, max(1024, exc.limit))
+        else:
+            self._window = max(1024, self._window // 2)
 
     def _split(self, text: str, query: str) -> list[str]:
         """Pack paragraphs into chunks that fit the working budget."""
@@ -361,18 +432,28 @@ class LLMSummarizer:
         return chunks or [text]
 
     def _budget_chars(self, template: str, query: str) -> int:
-        """How many characters of payload fit one call, after template and headroom."""
+        """How many characters of payload fit one call, after template and headroom.
+
+        The full derivation, in one place: window - answer reserve (via
+        :meth:`_input_budget`) - this template with the query already in it - a small
+        margin for the estimate being an estimate.
+        """
         skeleton = template.format(query=query, text="", answer="")
-        usable = max(256, self._chunk_tokens - estimate_tokens(
+        usable = max(256, self._input_budget() - estimate_tokens(
             skeleton, self._chars_per_token) - 64)
         return int(usable * self._chars_per_token)
 
     @staticmethod
     def _is_no_content(text: str) -> bool:
         t = text.strip()
-        # Lenient on purpose: models decorate the sentinel ("NO RELEVANT CONTENT."),
-        # and an empty answer means the same thing.
-        return not t or (NO_CONTENT in t.upper() and len(t) <= len(NO_CONTENT) + 24)
+        if not t:
+            return True
+        # Lenient by POSITION, not length: models decorate the sentinel and then
+        # explain themselves ("NO RELEVANT CONTENT -- this part is only navigation
+        # links, a language picker, ..."). Under a length rule those essays counted as
+        # partial answers and diluted the merge with non-answers; a sentinel that
+        # leads the reply means no-content no matter how much excuse follows.
+        return NO_CONTENT in t[:64].upper()
 
     def _summary(
         self, text: str, query: str, strategy: str, chunks: int,

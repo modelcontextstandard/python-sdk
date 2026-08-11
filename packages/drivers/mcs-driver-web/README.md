@@ -46,6 +46,7 @@ WebDriver(
     api_key="...",             # search backend
     base_url="https://...",    # any Tavily-compatible service
     allow_raw=False,           # fetch half: expose format="raw"? (see below)
+    summarizer=None,           # fetch half: enable fetch_page(prompt=...) (see below)
     search_kwargs={...},       # forwarded to WebsearchToolDriver
     fetch_kwargs={...},        # forwarded to WebfetchToolDriver
 )
@@ -57,6 +58,13 @@ Raw hands over everything a page contains -- script bodies, hidden elements,
 comments -- which is a prompt-injection surface no sanitiser can close without
 destroying the format's purpose. Turn it on for drivers whose job includes
 inspecting pages. See [`mcs-driver-webfetch`](../mcs-driver-webfetch/README.md).
+
+`summarizer` follows the same rule from the other direction: **injected, never
+constructed** -- pass a `SummarizerPort` (see `mcs-types-summarizer`) and `fetch_page`
+gains a `prompt` parameter that answers questions from whole pages server-side; pass
+nothing and the parameter is not advertised at all. Search finds the page, prompt-fetch
+reads it without spending the conversation's context -- that pairing is this composite's
+point.
 
 ## Tool name collisions fail at construction
 

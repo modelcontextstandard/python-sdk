@@ -51,6 +51,7 @@ class WebDriver(BaseDriver):
         api_key: str | None = None,
         base_url: str | None = None,
         allow_raw: bool = False,
+        summarizer: Any = None,
         search_kwargs: dict[str, Any] | None = None,
         fetch_kwargs: dict[str, Any] | None = None,
         custom_tool_description: str | None = None,
@@ -72,6 +73,7 @@ class WebDriver(BaseDriver):
                 api_key=api_key,
                 base_url=base_url,
                 allow_raw=allow_raw,
+                summarizer=summarizer,
                 search_kwargs=search_kwargs,
                 fetch_kwargs=fetch_kwargs,
             )

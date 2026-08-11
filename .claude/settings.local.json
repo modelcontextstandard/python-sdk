@@ -116,7 +116,21 @@
       "Bash(sed -i 's|^mcs-adapter-llm-completion = { workspace = true }|mcs-adapter-llm-completion = { workspace = true }\\\\nmcs-types-summarizer = { workspace = true }|' pyproject.toml)",
       "Bash(python -m pytest packages/types/mcs-types-summarizer -q)",
       "Bash(python -m pytest \"packages/types/mcs-types-summarizer/tests/test_summarizer.py::TestOverflowLearning\" -q)",
-      "Bash(python -m pytest packages/types/mcs-types-summarizer -m e2e -q)"
+      "Bash(python -m pytest packages/types/mcs-types-summarizer -m e2e -q)",
+      "Bash(sed -i 's/from .tooldriver import \\(\\\\n    RawNotAllowed,/X/' src/mcs/driver/webfetch/__init__.py)",
+      "Bash(python -m pytest packages/drivers/mcs-driver-webfetch packages/drivers/mcs-driver-web -q)",
+      "Bash(python -m pytest packages/drivers/mcs-driver-webfetch -m e2e -q)",
+      "Bash(python mcs-examples/permission_gate/chat.py --help)",
+      "Bash(python -m pytest packages/types/mcs-types-summarizer packages/drivers/mcs-driver-webfetch -q)",
+      "WebFetch(domain:qwenlm.github.io)",
+      "Bash(python -m pytest packages/types/mcs-types-summarizer packages/drivers/mcs-driver-webfetch packages/drivers/mcs-driver-web -q)",
+      "Bash(python -m pytest packages/types/mcs-types-summarizer packages/drivers/mcs-driver-webfetch -m e2e -q)",
+      "Bash(python -m mcs.inspector --help)",
+      "Bash(PYTHONIOENCODING=utf-8 python -m mcs.inspector webfetch --summarize-model qwen3:4b --summarize-window 32768)",
+      "Bash(grep -vE \"^\\\\s*$\")",
+      "Bash(python -m pytest packages/inspector -q)",
+      "Bash(python -m mcs.inspector websearch --api-key dummy)",
+      "Bash(python -m mcs.inspector websearch --base-url https://llm-websearch.apps.alsdienst.de)"
     ]
   }
 }

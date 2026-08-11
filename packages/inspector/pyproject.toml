@@ -32,14 +32,19 @@ urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://
 dependencies = [
     "mcs-driver-core>=0.3.0",
     "rich>=13",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
 mailread = ["mcs-driver-mailread>=0.1"]
 mailsend = ["mcs-driver-mailsend>=0.1"]
 mail     = ["mcs-driver-mail>=0.1"]
-rest     = ["mcs-driver-rest>=0.2"]
-all      = ["mcs-inspector[mail,rest]"]
+rest      = ["mcs-driver-rest>=0.2"]
+websearch = ["mcs-driver-websearch>=0.1"]
+webfetch  = ["mcs-driver-webfetch>=0.1"]
+# The glass summarizer in the webfetch inspector: condensation model wiring.
+summarize = ["mcs-types-summarizer>=0.1", "mcs-adapter-llm-completion>=0.1"]
+all       = ["mcs-inspector[mail,rest,websearch,webfetch,summarize]"]
 
 [project.scripts]
 mcs-inspect = "mcs.inspector.__main__:main"
@@ -47,6 +52,10 @@ mcs-inspect = "mcs.inspector.__main__:main"
 [tool.uv.sources]
 mcs-driver-core     = { workspace = true }
 mcs-driver-mailread = { workspace = true }
+mcs-driver-websearch = { workspace = true }
+mcs-driver-webfetch = { workspace = true }
+mcs-types-summarizer = { workspace = true }
+mcs-adapter-llm-completion = { workspace = true }
 mcs-driver-mailsend = { workspace = true }
 mcs-driver-mail     = { workspace = true }
 mcs-driver-rest     = { workspace = true }

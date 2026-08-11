@@ -44,9 +44,11 @@ Usage:
     python chat.py --allow-raw         # also expose format="raw"
 
 Configuration (environment or .env):
-    MCS_SEARCH_URL   base URL of a Tavily-compatible search service
-    MCS_SEARCH_KEY   its API key
-    TAVILY_API_KEY   used instead when MCS_SEARCH_* are unset (hosted Tavily)
+    MCS_SEARCH_URL      base URL of a Tavily-compatible search service
+    MCS_SEARCH_KEY      its API key
+    TAVILY_API_KEY      used instead when MCS_SEARCH_* are unset (hosted Tavily)
+    MCS_SUMMARIZE_MODEL / MCS_SUMMARIZE_URL   condensation model and endpoint
+    MCS_SUMMARIZE_KEY   its API key; falls back to OPENAI_API_KEY (local: none)
 
 Requires:
     pip install mcs-driver-web mcs-permission litellm rich python-dotenv
@@ -99,6 +101,22 @@ def main() -> None:
     p.add_argument("--allow-raw", action="store_true",
                    help="Expose format='raw' on fetch_page (off by default: raw "
                         "hands the model every script and comment on the page)")
+    p.add_argument("--summarize-model", default=os.environ.get("MCS_SUMMARIZE_MODEL"),
+                   help="Model id for page condensation (e.g. qwen3:4b). Enables "
+                        "fetch_page's prompt parameter: the whole page is read by "
+                        "THIS model and only the answer enters the conversation. "
+                        "(default: $MCS_SUMMARIZE_MODEL, unset = off)")
+    p.add_argument("--summarize-url",
+                   default=os.environ.get("MCS_SUMMARIZE_URL", "http://localhost:11434/v1"),
+                   help="Chat-Completions endpoint for --summarize-model "
+                        "(default: local Ollama)")
+    p.add_argument("--summarize-window", type=int, default=None,
+                   help="Context window of the condensation model (default: assume "
+                        "4096 until the backend teaches the real number). gpt-5.6: "
+                        "1000000. CAUTION Ollama: the effective window is its "
+                        "num_ctx, NOT the model card -- beyond num_ctx Ollama "
+                        "truncates silently; gross clipping is detected via usage "
+                        "and relearned, but set num_ctx to match.")
     p.add_argument("--allow-all", action="store_true",
                    help="Auto-approve every call (to contrast with the interactive gate)")
     args = p.parse_args()
@@ -115,8 +133,31 @@ def main() -> None:
         DEFAULT_TAGS if args.url == GITHUB_SPEC else None
     )
     github = RestDriver(url=args.url, include_tags=tags)
+
+    # Condensation is configuration, like consent: injected, never a silent
+    # default. The summarizer's LLM is a SECOND model beside the conversation's --
+    # typically a small local one -- whose context is disposable: it reads whole
+    # pages so the conversation only ever pays for answers.
+    summarizer = None
+    if args.summarize_model:
+        from mcs.adapter.llm.completion import CompletionLLMAdapter
+        from mcs.types.summarizer import LLMSummarizer
+
+        extra = ({"context_window": args.summarize_window}
+                 if args.summarize_window else {})
+        summarizer = LLMSummarizer(CompletionLLMAdapter(
+            args.summarize_model, base_url=args.summarize_url,
+            # Same pattern as the search key: a dedicated variable wins, the
+            # well-known one is the fallback. Local servers need neither.
+            api_key=os.environ.get("MCS_SUMMARIZE_KEY") or os.environ.get("OPENAI_API_KEY"),
+            # Only matters once an answer budget is set -- but then it must not 400.
+            max_completion_tokens_field=("max_completion_tokens"
+                                         if "api.openai.com" in args.summarize_url
+                                         else "max_tokens"),
+        ), **extra)
+
     web = WebDriver(api_key=args.search_key, base_url=args.search_url,
-                    allow_raw=args.allow_raw)
+                    allow_raw=args.allow_raw, summarizer=summarizer)
 
     # Two independent drivers, chained by the client. Neither knows about the
     # other; a call one does not recognise passes through to the next. That is
@@ -147,6 +188,7 @@ def main() -> None:
             f"Search:   {where}",
             f"Consent:  {'auto-approve' if args.allow_all else 'ask the user'}",
             f"Raw HTML: {'allowed' if args.allow_raw else 'not offered'}",
+            f"Condense: {args.summarize_model + ' @ ' + args.summarize_url if args.summarize_model else 'off (prompt= not offered)'}",
         ],
     ).run()
 

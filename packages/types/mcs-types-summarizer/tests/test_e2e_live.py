@@ -61,7 +61,7 @@ def test_small_text_is_stuffed(llm):
 def test_a_buried_fact_survives_chunking_and_merging(llm):
     """The whole point of the component: the model never sees the document at once,
     yet the answer contains the one fact that mattered."""
-    summarizer = LLMSummarizer(llm, chunk_tokens=400)      # force several chunks
+    summarizer = LLMSummarizer(llm, context_window=1280)   # tiny window forces real chunking
     s = summarizer.summarize(DOCUMENT, QUERY)
     assert s.strategy == "map_reduce"
     assert s.chunks >= 2, "the budget was meant to force real chunking"

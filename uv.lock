@@ -2519,13 +2519,18 @@ version = "0.1.3"
 source = { editable = "packages/inspector" }
 dependencies = [
     { name = "mcs-driver-core" },
+    { name = "python-dotenv" },
     { name = "rich" },
 ]
 
 [package.optional-dependencies]
 all = [
+    { name = "mcs-adapter-llm-completion" },
     { name = "mcs-driver-mail" },
     { name = "mcs-driver-rest" },
+    { name = "mcs-driver-webfetch" },
+    { name = "mcs-driver-websearch" },
+    { name = "mcs-types-summarizer" },
 ]
 mail = [
     { name = "mcs-driver-mail" },
@@ -2539,18 +2544,33 @@ mailsend = [
 rest = [
     { name = "mcs-driver-rest" },
 ]
+summarize = [
+    { name = "mcs-adapter-llm-completion" },
+    { name = "mcs-types-summarizer" },
+]
+webfetch = [
+    { name = "mcs-driver-webfetch" },
+]
+websearch = [
+    { name = "mcs-driver-websearch" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "mcs-adapter-llm-completion", marker = "extra == 'summarize'", editable = "packages/adapters/mcs-adapter-llm-completion" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-driver-mail", marker = "extra == 'mail'", editable = "packages/drivers/mcs-driver-mail" },
     { name = "mcs-driver-mailread", marker = "extra == 'mailread'", editable = "packages/drivers/mcs-driver-mailread" },
     { name = "mcs-driver-mailsend", marker = "extra == 'mailsend'", editable = "packages/drivers/mcs-driver-mailsend" },
     { name = "mcs-driver-rest", marker = "extra == 'rest'", editable = "packages/drivers/mcs-driver-rest" },
-    { name = "mcs-inspector", extras = ["mail", "rest"], marker = "extra == 'all'", editable = "packages/inspector" },
+    { name = "mcs-driver-webfetch", marker = "extra == 'webfetch'", editable = "packages/drivers/mcs-driver-webfetch" },
+    { name = "mcs-driver-websearch", marker = "extra == 'websearch'", editable = "packages/drivers/mcs-driver-websearch" },
+    { name = "mcs-inspector", extras = ["mail", "rest", "websearch", "webfetch", "summarize"], marker = "extra == 'all'", editable = "packages/inspector" },
+    { name = "mcs-types-summarizer", marker = "extra == 'summarize'", editable = "packages/types/mcs-types-summarizer" },
+    { name = "python-dotenv", specifier = ">=1.0" },
     { name = "rich", specifier = ">=13" },
 ]
-provides-extras = ["mailread", "mailsend", "mail", "rest", "all"]
+provides-extras = ["mailread", "mailsend", "mail", "rest", "websearch", "webfetch", "summarize", "all"]
 
 [[package]]
 name = "mcs-orchestrator-base"

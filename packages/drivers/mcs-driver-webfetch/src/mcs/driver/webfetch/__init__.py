@@ -13,6 +13,7 @@ from .strategies import (
 )
 from .tooldriver import (
     RawNotAllowed,
+    SummarizerNotConfigured,
     UnsupportedFormatError,
     WebfetchToolDriver,
 )
@@ -30,4 +31,5 @@ __all__ = [
     "WebfetchToolDriver",
     "UnsupportedFormatError",
     "RawNotAllowed",
+    "SummarizerNotConfigured",
 ]

@@ -52,6 +52,13 @@ class WebToolDriver(MCSToolDriver):
     allow_raw :
         Permit ``format="raw"`` on the fetch half. Off by default -- while off,
         the format is not advertised to the model at all.
+    summarizer :
+        A ``SummarizerPort`` for the fetch half: ``fetch_page`` then accepts
+        ``prompt=`` and answers questions from whole pages server-side. Injected,
+        never constructed -- and like *allow_raw*, the option is simply not
+        advertised while absent. First-class here (not buried in *fetch_kwargs*)
+        because it is the composite's headline capability: search finds the page,
+        prompt-fetch reads it without spending the conversation's context.
     search_kwargs, fetch_kwargs :
         Forwarded to the respective ToolDriver constructors.
     _search_driver, _fetch_driver :
@@ -66,6 +73,7 @@ class WebToolDriver(MCSToolDriver):
         api_key: str | None = None,
         base_url: str | None = None,
         allow_raw: bool = False,
+        summarizer: Any = None,
         search_kwargs: dict[str, Any] | None = None,
         fetch_kwargs: dict[str, Any] | None = None,
         _search_driver: MCSToolDriver | None = None,
@@ -88,7 +96,8 @@ class WebToolDriver(MCSToolDriver):
         else:
             from mcs.driver.webfetch import WebfetchToolDriver
 
-            self._fetch = WebfetchToolDriver(allow_raw=allow_raw, **(fetch_kwargs or {}))
+            self._fetch = WebfetchToolDriver(allow_raw=allow_raw, summarizer=summarizer,
+                                             **(fetch_kwargs or {}))
 
         # tool name -> owning driver
         self._dispatch: Dict[str, MCSToolDriver] = {}

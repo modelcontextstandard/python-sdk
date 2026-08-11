@@ -7,6 +7,8 @@ loses its marker, the fake answers wrongly and the assertions catch it.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from mcs.types.llm import (
@@ -41,7 +43,9 @@ class FakeLLM:
             text = self.final_answer
         return LLMResponse(
             text=text,
-            usage=TokenUsage(prompt=11, completion=7),
+            # Honest usage, like a real backend: report what the prompt holds. A fixed
+            # number would look like silent clipping to the truncation detector.
+            usage=TokenUsage(prompt=estimate_tokens(prompt), completion=7),
             finish_reason="length" if n in self.truncate else "stop",
         )
 
@@ -54,7 +58,7 @@ class FakeLLM:
         return [p for p in self.calls if "Partial answers" in p]
 
 
-#: ~19k characters over 30 paragraphs -- far beyond the default 3000-token budget.
+#: ~19k characters over 30 paragraphs -- far beyond the assumed-window budget.
 BIG = "\n\n".join(
     f"Absatz {i}: " + "Inhalt ohne besondere Bedeutung fuer die Frage. " * 15
     for i in range(30)
@@ -133,12 +137,85 @@ class TestMapReduce:
         assert s.text == "TREFFER"
         assert not llm.merge_calls
 
+    def test_a_verbose_sentinel_is_still_a_sentinel(self):
+        """Live finding: models decorate the sentinel and then explain themselves at
+        length. Those essays must not enter the merge as partial answers -- a leading
+        sentinel means no-content no matter how much excuse follows."""
+        essay = (NO_CONTENT + " -- this part of the page only contains navigation "
+                 "links, a language picker and footer boilerplate, none of which "
+                 "helps with the question.")
+        llm = FakeLLM(map_answer=lambda p: "TREFFER" if "Absatz 7:" in p else essay)
+        s = LLMSummarizer(llm).summarize(BIG, QUERY)
+        assert s.text == "TREFFER"
+        assert not llm.merge_calls                    # essays never reached a merge
+
+
+class TestSilentTruncation:
+    """Measured against a local Ollama: input beyond num_ctx is dropped with NO error
+    -- the prompt's start is cut, finish_reason says "stop", usage reports exactly the
+    window. The summarizer turns that into the overflow it should have been, using the
+    one measurement the backend cannot help giving: its own usage report."""
+
+    class ClippingLLM(FakeLLM):
+        """Reports far fewer processed prompt tokens than the prompt holds."""
+
+        def __init__(self, effective_window=100, **kw):
+            super().__init__(**kw)
+            self.effective = effective_window
+
+        def complete(self, prompt, *, system=None, max_completion_tokens=None, **kw):
+            r = super().complete(prompt, system=system,
+                                 max_completion_tokens=max_completion_tokens)
+            reported = min(self.effective, estimate_tokens(prompt))
+            return LLMResponse(text=r.text, finish_reason=r.finish_reason,
+                               usage=TokenUsage(prompt=reported, completion=7))
+
+    def test_clipping_is_detected_and_relearned(self):
+        """A 100k-window claim against a tiny effective window: the mismatch between
+        estimate and report raises, auto falls back, and the *report* becomes the
+        window -- floored, so re-chunking converges instead of looping."""
+        llm = self.ClippingLLM(effective_window=100)
+        summarizer = LLMSummarizer(llm, context_window=100_000)
+        s = summarizer.summarize(BIG, QUERY)
+        assert s.strategy == "map_reduce"             # stuff answer was discarded
+        assert s.chunks > 1
+        assert summarizer._window == 1024             # max(1024, reported 100)
+
+    def test_an_honest_backend_is_not_second_guessed(self):
+        """Reports close to the estimate (or absent) must never trigger: the estimate
+        is +-30%, so only gross clipping is provable. FakeLLM reports honestly, and
+        every other test in this file doubles as a no-false-alarm check."""
+        s = LLMSummarizer(FakeLLM()).summarize(BIG, QUERY)
+        assert s.strategy == "map_reduce"             # ran to completion, no relearning
+        assert s.text == "FINAL"
+
     def test_usage_is_summed_over_every_call(self):
         llm = FakeLLM()
         s = LLMSummarizer(llm).summarize(BIG, QUERY)
-        assert s.usage.prompt == 11 * len(llm.calls)
+        assert s.usage.prompt == sum(estimate_tokens(p) for p in llm.calls)
         assert s.usage.completion == 7 * len(llm.calls)
         assert s.usage.reasoning is None       # never reported -> stays None, not 0
+
+    def test_document_order_survives_chunking_into_the_merge(self):
+        """The live finding, pinned on the machinery's side: chunks are mapped and
+        merged in document order -- splitting keeps it, ``pool.map`` keeps it, the
+        merge prompt lists partials in it. Any re-sorting can therefore only happen
+        *inside* a model call, which is what the templates now forbid. Each map answer
+        here echoes its chunk's first paragraph number; the merge prompt must list
+        them ascending -- sequentially and fanned out alike."""
+        def echo_first_paragraph(prompt):
+            return "M" + re.search(r"Absatz (\d+):", prompt).group(1)
+
+        def merge_order(concurrency):
+            llm = FakeLLM(map_answer=echo_first_paragraph)
+            LLMSummarizer(llm, concurrency=concurrency).summarize(BIG, QUERY)
+            first_merge = llm.merge_calls[0]
+            return [int(m) for m in re.findall(r"- M(\d+)", first_merge)]
+
+        sequential = merge_order(1)
+        assert len(sequential) > 1
+        assert sequential == sorted(sequential)        # document order, ascending
+        assert merge_order(4) == sequential            # fan-out changes nothing
 
 
 class TestOverflowLearning:
@@ -155,13 +232,13 @@ class TestOverflowLearning:
         map_reduce, and the named limit shrinks the working budget -- the same
         summarizer never hits the same wall twice."""
         llm = FakeLLM(window_tokens=400)
-        summarizer = LLMSummarizer(llm, chunk_tokens=100_000)   # estimate: everything fits
+        summarizer = LLMSummarizer(llm, context_window=100_000)  # claim: everything fits
         s = summarizer.summarize(BIG, QUERY)
         assert s.strategy == "map_reduce"
         assert s.chunks > 1
-        # limit // 2 == 200, lifted to the floor below which template + query would
-        # dominate the call: max(256, 200).
-        assert summarizer._chunk_tokens == 256
+        # The named limit IS the window -- it replaces the 100k claim outright
+        # (floored at 1024, below which no real model lives).
+        assert summarizer._window == 1024
 
     def test_an_overflowing_map_chunk_is_split_until_it_fits(self):
         """Every leaf gets read: an overflow re-splits that chunk instead of dropping

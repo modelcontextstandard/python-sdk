@@ -362,6 +362,38 @@ different capability, not a `format`. It belongs in its own ToolDriver, where
 accessibility snapshots (~200-400 tokens versus thousands for a screenshot) are
 the interesting design question.
 
+## Ask the page a question: `prompt=`
+
+With a summarizer injected, `fetch_page` gains an optional `prompt`:
+
+```python
+from mcs.types.summarizer import LLMSummarizer
+from mcs.adapter.llm.completion import CompletionLLMAdapter
+
+driver = WebfetchToolDriver(
+    summarizer=LLMSummarizer(CompletionLLMAdapter("qwen3:4b",
+                             base_url="http://localhost:11434/v1")))
+
+driver.execute_tool("fetch_page", {
+    "url": "https://github.com/trending?since=weekly",
+    "format": "markdown",                       # what gets condensed -- markdown keeps links
+    "prompt": "What are the top 3 repositories, with links?",
+})
+```
+
+The whole page -- however long -- is read by the summarizer's model, whose context is
+disposable; only the answer enters the conversation. `max_chars` and `start_index` do
+not apply. The result describes its own making: `summary_strategy`, `chunks_read`,
+`source_chars` (how much source stands behind the answer -- re-ask the same URL with a
+different prompt to re-read it all), and `truncated`, which on this path means *an
+answer hit its token cap* -- incomplete, not merely short.
+
+The policy mirrors `allow_raw`: **no summarizer, no `prompt` parameter** -- the option
+is not advertised at all while unavailable, and a guessed call fails naming the fix
+(`SummarizerNotConfigured`). The summarizer is injected, never constructed here: it
+carries the LLM, and a client with governance in its LLM path lends that path instead of
+having a driver open a second one.
+
 ## Installation
 
 ```bash
