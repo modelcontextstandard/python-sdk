@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name            = "mcs-driver-mcp"
 version         = "0.1.3"
 description     = "MCS Driver that bridges MCP (Model Context Protocol) servers — exposing any MCP tool server as native MCS tools."
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license         = "Apache-2.0"
 dependencies    = ["mcs-driver-core>=0.4.0", "mcs-adapter-mcp>=0.1"]
 

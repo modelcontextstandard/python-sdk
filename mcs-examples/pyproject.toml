@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name            = "mcs-examples"
 version         = "0.2.0"
 description     = "Minimal MCS client and driver examples."
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies    = [
   "mcs-driver-core>=0.3.0",
   "requests>=2.32",

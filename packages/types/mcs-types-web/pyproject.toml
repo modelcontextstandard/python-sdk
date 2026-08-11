@@ -7,7 +7,7 @@ name            = "mcs-types-web"
 version         = "0.1.0"
 description     = "Shared web types (WebPage, SearchResult) for the Model Context Standard."
 readme          = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license         = "Apache-2.0"
 keywords        = ["mcs", "modelcontextstandard", "types", "web"]
 authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
@@ -16,8 +16,6 @@ classifiers     = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",

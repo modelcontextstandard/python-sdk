@@ -2,7 +2,7 @@
 name = "mcs-python-sdk"
 version = "0.2.2"
 description = "Model Context Standard – Python SDK workspace root."
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
   "mcs-driver-core>=0.3.0",
   "mcs-types-http>=0.1",
