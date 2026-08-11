@@ -22,9 +22,9 @@ from mcs.driver.core import (
     BaseDriver,
     LLMStreamBuffer,
     ExtractedCall,
-    OpenAICompletionExtractionStrategy,
-    OpenAIResponseExtractionStrategy,
-    AnthropicExtractionStrategy,
+    CompletionExtractionStrategy,
+    ResponseExtractionStrategy,
+    MessagesExtractionStrategy,
     DriverMeta,
     DriverBinding,
     Tool,
@@ -92,7 +92,7 @@ class TestOpenAIResponses:
     def test_wire_is_recognised(self):
         buf = LLMStreamBuffer()
         buf.add(_resp_item_added("send_mail", "call_1"))
-        assert isinstance(buf._active, OpenAIResponseExtractionStrategy)
+        assert isinstance(buf._active, ResponseExtractionStrategy)
 
     def test_tool_call_reassembled_to_native(self):
         buf = LLMStreamBuffer()
@@ -109,7 +109,7 @@ class TestOpenAIResponses:
         buf = LLMStreamBuffer()
         buf.add(_resp_item_added("send_mail", "call_1"))
         buf.add(_resp_args_delta('{"to": "a@b.c"}'))
-        assert OpenAIResponseExtractionStrategy().extract(buf.as_dict()) == [
+        assert ResponseExtractionStrategy().extract(buf.as_dict()) == [
             ExtractedCall("send_mail", {"to": "a@b.c"}, id="call_1")
         ]
 
@@ -167,7 +167,7 @@ class TestAnthropic:
     def test_wire_is_recognised(self):
         buf = LLMStreamBuffer()
         buf.add({"type": "message_start"})
-        assert isinstance(buf._active, AnthropicExtractionStrategy)
+        assert isinstance(buf._active, MessagesExtractionStrategy)
 
     def test_tool_call_reassembled_to_native(self):
         buf = LLMStreamBuffer()
@@ -185,7 +185,7 @@ class TestAnthropic:
         buf = LLMStreamBuffer()
         buf.add(_anthropic_block_start("send_mail", "toolu_1"))
         buf.add(_anthropic_json_delta('{"to": "a@b.c"}'))
-        assert AnthropicExtractionStrategy().extract(buf.as_dict()) == [
+        assert MessagesExtractionStrategy().extract(buf.as_dict()) == [
             ExtractedCall("send_mail", {"to": "a@b.c"}, id="toolu_1")
         ]
 
@@ -540,21 +540,21 @@ class TestFormatIsolation:
     def test_completion_not_claimed_by_others(self):
         chunk = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1",
                  "function": {"name": "send_mail", "arguments": "{}"}}]}}]}
-        assert OpenAICompletionExtractionStrategy().recognizes(chunk)
-        assert not OpenAIResponseExtractionStrategy().recognizes(chunk)
-        assert not AnthropicExtractionStrategy().recognizes(chunk)
+        assert CompletionExtractionStrategy().recognizes(chunk)
+        assert not ResponseExtractionStrategy().recognizes(chunk)
+        assert not MessagesExtractionStrategy().recognizes(chunk)
 
     def test_responses_not_claimed_by_others(self):
         ev = _resp_item_added("send_mail", "call_1")
-        assert OpenAIResponseExtractionStrategy().recognizes(ev)
-        assert not AnthropicExtractionStrategy().recognizes(ev)
-        assert not OpenAICompletionExtractionStrategy().recognizes(ev)
+        assert ResponseExtractionStrategy().recognizes(ev)
+        assert not MessagesExtractionStrategy().recognizes(ev)
+        assert not CompletionExtractionStrategy().recognizes(ev)
 
     def test_anthropic_not_claimed_by_others(self):
         ev = _anthropic_block_start("send_mail", "toolu_1")
-        assert AnthropicExtractionStrategy().recognizes(ev)
-        assert not OpenAIResponseExtractionStrategy().recognizes(ev)
-        assert not OpenAICompletionExtractionStrategy().recognizes(ev)
+        assert MessagesExtractionStrategy().recognizes(ev)
+        assert not ResponseExtractionStrategy().recognizes(ev)
+        assert not CompletionExtractionStrategy().recognizes(ev)
 
 
 class MailAndLogDriver(BaseDriver):
@@ -763,17 +763,17 @@ class TestForming:
     recognizes() = format identification."""
 
     def test_openai_forming_reports_name(self):
-        s = OpenAICompletionExtractionStrategy()
+        s = CompletionExtractionStrategy()
         f = s.forming({"tool_calls": [{"function": {"name": "send_mail", "arguments": ""}}]})
         assert f and f.tool_name == "send_mail"          # forming even before args stream
 
     def test_openai_tool_calls_null_is_not_forming(self):
         """The false-positive shape: envelope present but no entry -> not forming."""
-        s = OpenAICompletionExtractionStrategy()
+        s = CompletionExtractionStrategy()
         assert not s.forming({"content": "hi", "tool_calls": None})
 
     def test_anthropic_forming_on_tool_use_only(self):
-        s = AnthropicExtractionStrategy()
+        s = MessagesExtractionStrategy()
         assert s.forming({"content": [{"type": "tool_use", "name": "send_mail"}]}).tool_name == "send_mail"
         assert not s.forming({"content": [{"type": "text", "text": "hi"}]})   # a leak is not forming here
 

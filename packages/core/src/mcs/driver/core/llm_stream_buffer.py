@@ -43,9 +43,9 @@ from typing import Any
 
 from .extraction_strategy import (
     ExtractionStrategy,
-    OpenAICompletionExtractionStrategy,
-    OpenAIResponseExtractionStrategy,
-    AnthropicExtractionStrategy,
+    CompletionExtractionStrategy,
+    ResponseExtractionStrategy,
+    MessagesExtractionStrategy,
 )
 
 
@@ -57,9 +57,9 @@ def _default_strategies() -> list[ExtractionStrategy]:
     raw chunk; it is a driver-side *extraction* strategy only.
     """
     return [
-        OpenAICompletionExtractionStrategy(),
-        OpenAIResponseExtractionStrategy(),
-        AnthropicExtractionStrategy(),
+        CompletionExtractionStrategy(),
+        ResponseExtractionStrategy(),
+        MessagesExtractionStrategy(),
     ]
 
 

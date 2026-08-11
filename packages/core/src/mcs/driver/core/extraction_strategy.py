@@ -22,12 +22,12 @@ Concrete implementations:
   call embedded in free text (bridge pattern); claims mid-stream via the codec's marker
   so the driver holds display until the call parses. It does not reassemble a wire
   (text content is accumulated by whichever *wire* strategy carries it).
-- ``OpenAICompletionExtractionStrategy`` -- OpenAI Chat Completions: assembled
+- ``CompletionExtractionStrategy`` -- OpenAI Chat Completions: assembled
   ``{content, tool_calls:[{function:{name, arguments}}]}`` and the
   ``choices[0].delta.tool_calls[]`` stream.
-- ``OpenAIResponseExtractionStrategy`` -- OpenAI Responses API: an ``output`` item list
+- ``ResponseExtractionStrategy`` -- OpenAI Responses API: an ``output`` item list
   with ``function_call`` items and the ``response.*`` event stream.
-- ``AnthropicExtractionStrategy`` -- Anthropic Messages: a ``content`` block list with
+- ``MessagesExtractionStrategy`` -- Anthropic Messages: a ``content`` block list with
   ``tool_use`` blocks and the ``content_block_start`` / ``input_json_delta`` event stream.
 """
 
@@ -326,7 +326,7 @@ class _NativeToolCallStrategy(ExtractionStrategy):
         return {}
 
 
-class OpenAICompletionExtractionStrategy(_NativeToolCallStrategy):
+class CompletionExtractionStrategy(_NativeToolCallStrategy):
     """OpenAI **Chat Completions** format (also litellm's normalised chunk shape).
 
     Native message: ``{role, content, tool_calls:[{id, type, function:{name,
@@ -459,7 +459,7 @@ class OpenAICompletionExtractionStrategy(_NativeToolCallStrategy):
         return [assistant, *tool_msgs]
 
 
-class OpenAIResponseExtractionStrategy(_NativeToolCallStrategy):
+class ResponseExtractionStrategy(_NativeToolCallStrategy):
     """OpenAI **Responses API** format.
 
     Native message: ``{output:[{type:"message", content:"..."},
@@ -602,8 +602,12 @@ class OpenAIResponseExtractionStrategy(_NativeToolCallStrategy):
         return items
 
 
-class AnthropicExtractionStrategy(_NativeToolCallStrategy):
-    """Anthropic **Messages** format.
+class MessagesExtractionStrategy(_NativeToolCallStrategy):
+    """The **Messages** format (``/v1/messages``), as introduced by Anthropic.
+
+    Named after the format, not its origin -- like its two siblings here -- because it is
+    no longer one vendor's API: gateways and inference providers serve Messages-compatible
+    endpoints for open-weight models, so this strategy is not tied to Anthropic.
 
     Native message: ``{role:"assistant", content:[{type:"text", text},
     {type:"tool_use", id, name, input}]}`` -- a block list. Stream of SSE events:

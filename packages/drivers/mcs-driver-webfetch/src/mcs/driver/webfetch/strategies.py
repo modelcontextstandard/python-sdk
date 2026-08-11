@@ -224,9 +224,11 @@ class MarkdownExtractor:
     got wrong here -- void elements, inline whitespace, links without text -- plus
     nested lists and tables, which it could not do at all.
 
-    Raises :class:`MarkdownUnavailable` when the libraries are missing rather than
-    silently falling back to something less safe.
-    ``pip install mcs-driver-webfetch[markdown]``
+    Both are **required** dependencies, precisely so this format cannot fail at call
+    time: it is advertised in the tool schema, so a model will choose it. Should they
+    be unimportable anyway -- a broken or partial installation --
+    :class:`MarkdownUnavailable` is raised rather than falling back to something less
+    safe, because output nobody can see is less safe is worse than no output.
     """
 
     kind = "markdown"
@@ -250,8 +252,9 @@ class MarkdownExtractor:
             from markdownify import markdownify                 # noqa: PLC0415
         except ImportError as exc:
             raise MarkdownUnavailable(
-                "format='markdown' needs nh3 and markdownify: "
-                "pip install mcs-driver-webfetch[markdown]"
+                "format='markdown' needs nh3 and markdownify. They are required "
+                "dependencies of mcs-driver-webfetch, so this points at a broken "
+                "installation -- reinstall the package."
             ) from exc
 
         title = title_from_html(html)

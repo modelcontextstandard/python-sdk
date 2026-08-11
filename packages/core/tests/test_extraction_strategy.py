@@ -21,7 +21,7 @@ from mcs.driver.core.extraction_strategy import (
     ExtractionStrategy,
     ExtractedCall,
     TextExtractionStrategy,
-    OpenAICompletionExtractionStrategy,
+    CompletionExtractionStrategy,
 )
 
 
@@ -95,11 +95,11 @@ class TestTextExtractionStrategy:
         assert self.strategy.extract('{"foo": "bar"}') == []
 
 
-# -- OpenAICompletionExtractionStrategy -------------------------------------------------
+# -- CompletionExtractionStrategy -------------------------------------------------
 
-class TestOpenAICompletionExtractionStrategy:
+class TestCompletionExtractionStrategy:
     def setup_method(self):
-        self.strategy = OpenAICompletionExtractionStrategy()
+        self.strategy = CompletionExtractionStrategy()
 
     def test_extracts_openai_format(self):
         payload = {
@@ -309,20 +309,20 @@ class TestRecognizePhase:
     """Verify the recognise → extract protocol (native by envelope, text by content)."""
 
     def test_openai_recognizes_dict_with_tool_calls_key(self):
-        s = OpenAICompletionExtractionStrategy()
+        s = CompletionExtractionStrategy()
         assert s.recognizes({"tool_calls": [{"function": {"name": "x", "arguments": "{}"}}]})
 
     def test_openai_recognizes_dict_with_tool_calls_none(self):
         """Even tool_calls=None means 'my format, no tool call'."""
-        s = OpenAICompletionExtractionStrategy()
+        s = CompletionExtractionStrategy()
         assert s.recognizes({"role": "assistant", "content": "hi", "tool_calls": None})
 
     def test_openai_does_not_recognize_dict_without_tool_calls(self):
-        s = OpenAICompletionExtractionStrategy()
+        s = CompletionExtractionStrategy()
         assert not s.recognizes({"role": "assistant", "content": "hi"})
 
     def test_openai_does_not_recognize_str(self):
-        s = OpenAICompletionExtractionStrategy()
+        s = CompletionExtractionStrategy()
         assert not s.recognizes('{"tool_calls": []}')
 
     def test_text_recognizes_any_plain_text(self):

@@ -10,9 +10,9 @@ from .extraction_strategy import (
     ExtractedCall,
     Forming,
     TextExtractionStrategy,
-    OpenAICompletionExtractionStrategy,
-    OpenAIResponseExtractionStrategy,
-    AnthropicExtractionStrategy,
+    CompletionExtractionStrategy,
+    ResponseExtractionStrategy,
+    MessagesExtractionStrategy,
 )
 from .extraction_chain import ExtractionChain
 from .mixins import (
@@ -27,8 +27,8 @@ __all__ = [
     "BaseDriver", "LLMStreamBuffer",
     "PromptStrategy", "JsonPromptStrategy",
     "ExtractionStrategy", "ExtractedCall", "Forming", "TextExtractionStrategy",
-    "OpenAICompletionExtractionStrategy", "OpenAIResponseExtractionStrategy",
-    "AnthropicExtractionStrategy", "ExtractionChain",
+    "CompletionExtractionStrategy", "ResponseExtractionStrategy",
+    "MessagesExtractionStrategy", "ExtractionChain",
     "SupportsHealthcheck", "HealthCheckResult", "HealthStatus",
     "SupportsStreaming",
     "SupportsNativeTools", "NativeToolContext",

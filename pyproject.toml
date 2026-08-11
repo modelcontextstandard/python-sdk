@@ -34,9 +34,15 @@ dependencies = [
   "mcs-driver-mcp>=0.1",
   "mcs-examples>=0.1",
   "mcs-types-web>=0.1",
-  "mcs-driver-webfetch>=0.1",
+  # With [text]: the workspace root is the development environment, so the
+  # trafilatura path must be exercised by the suite rather than silently skipped
+  # on a fresh checkout. (Markdown is a required dependency, not an extra.)
+  "mcs-driver-webfetch[text]>=0.1",
   "mcs-driver-websearch>=0.1",
   "mcs-driver-web>=0.1",
+  "mcs-types-llm>=0.1",
+  "mcs-adapter-llm-completion>=0.1",
+  "mcs-types-summarizer>=0.1",
 ]
 
 [tool.uv.sources]
@@ -73,6 +79,9 @@ mcs-types-web = { workspace = true }
 mcs-driver-webfetch = { workspace = true }
 mcs-driver-websearch = { workspace = true }
 mcs-driver-web = { workspace = true }
+mcs-types-llm = { workspace = true }
+mcs-adapter-llm-completion = { workspace = true }
+mcs-types-summarizer = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -112,4 +121,10 @@ examples = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--import-mode=importlib"
+# Live tests are *deselected*, not skipped. A skipped test reports as a harmless dot and
+# quietly stops guarding anything -- which is exactly how the markdown extraction tests
+# went unnoticed for a while. Deselected ones are counted and named in the summary.
+addopts = "--import-mode=importlib -m 'not e2e'"
+markers = [
+  "e2e: needs a live endpoint (an LLM server, a service). Run with `-m e2e`.",
+]

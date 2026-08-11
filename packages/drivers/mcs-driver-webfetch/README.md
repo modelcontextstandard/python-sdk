@@ -365,9 +365,33 @@ the interesting design question.
 ## Installation
 
 ```bash
-pip install mcs-driver-webfetch          # plain HTTP, tag-stripping fallback
+pip install mcs-driver-webfetch          # HTTP, tag-stripping, and markdown
 pip install mcs-driver-webfetch[text]    # + trafilatura for article-quality extraction
 ```
+
+### Why markdown is *not* an extra
+
+`nh3` and `markdownify` are required dependencies. The rule we apply:
+
+> An optional dependency is right when its absence **degrades** something. It is wrong
+> when its absence **removes a capability the tool still advertises**.
+
+`format="markdown"` is listed in the tool schema, so a model will choose it — and it
+often should, because markdown is the only format that keeps links, which is exactly
+what a model needs to cite what it read. Were the libraries optional, that choice would
+raise a `MarkdownUnavailable` the model can neither predict nor fix; it would retry and
+fail identically.
+
+Hiding the format when the libraries are missing is not the way out either: the tool
+schema would then depend on what happens to be installed, and a driver's data sheet has
+to describe the driver, not one machine's environment.
+
+The cost of requiring them is small — `nh3` pulls nothing, `markdownify` two small
+pure-Python packages.
+
+`trafilatura` stays optional, and legitimately so: without it the BestOf chain simply
+votes for another extractor, so its absence costs *quality*, never a capability. It is
+also the one heavy dependency here (lxml and six more).
 
 ---
 

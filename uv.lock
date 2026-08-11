@@ -11,6 +11,7 @@ members = [
     "mcs-adapter-docker",
     "mcs-adapter-http",
     "mcs-adapter-imap",
+    "mcs-adapter-llm-completion",
     "mcs-adapter-localfs",
     "mcs-adapter-mcp",
     "mcs-adapter-smb",
@@ -41,6 +42,8 @@ members = [
     "mcs-python-sdk",
     "mcs-types-cache",
     "mcs-types-http",
+    "mcs-types-llm",
+    "mcs-types-summarizer",
     "mcs-types-web",
 ]
 
@@ -2055,6 +2058,21 @@ version = "0.1.0"
 source = { editable = "packages/adapters/mcs-adapter-imap" }
 
 [[package]]
+name = "mcs-adapter-llm-completion"
+version = "0.1.0"
+source = { editable = "packages/adapters/mcs-adapter-llm-completion" }
+dependencies = [
+    { name = "mcs-adapter-http" },
+    { name = "mcs-types-llm" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
+    { name = "mcs-types-llm", editable = "packages/types/mcs-types-llm" },
+]
+
+[[package]]
 name = "mcs-adapter-localfs"
 version = "0.2.0"
 source = { editable = "packages/adapters/mcs-adapter-localfs" }
@@ -2383,23 +2401,19 @@ name = "mcs-driver-webfetch"
 version = "0.1.0"
 source = { editable = "packages/drivers/mcs-driver-webfetch" }
 dependencies = [
+    { name = "markdownify" },
     { name = "mcs-driver-core" },
     { name = "mcs-types-web" },
+    { name = "nh3" },
 ]
 
 [package.optional-dependencies]
 full = [
-    { name = "markdownify" },
-    { name = "nh3" },
     { name = "trafilatura", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "trafilatura", version = "2.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
 http = [
     { name = "mcs-adapter-http" },
-]
-markdown = [
-    { name = "markdownify" },
-    { name = "nh3" },
 ]
 text = [
     { name = "trafilatura", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -2408,17 +2422,15 @@ text = [
 
 [package.metadata]
 requires-dist = [
-    { name = "markdownify", marker = "extra == 'full'", specifier = ">=1.1" },
-    { name = "markdownify", marker = "extra == 'markdown'", specifier = ">=1.1" },
+    { name = "markdownify", specifier = ">=1.1" },
     { name = "mcs-adapter-http", marker = "extra == 'http'", editable = "packages/adapters/mcs-adapter-http" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-types-web", editable = "packages/types/mcs-types-web" },
-    { name = "nh3", marker = "extra == 'full'", specifier = ">=0.2" },
-    { name = "nh3", marker = "extra == 'markdown'", specifier = ">=0.2" },
+    { name = "nh3", specifier = ">=0.2" },
     { name = "trafilatura", marker = "extra == 'full'", specifier = ">=1.8" },
     { name = "trafilatura", marker = "extra == 'text'", specifier = ">=1.8" },
 ]
-provides-extras = ["http", "markdown", "text", "full"]
+provides-extras = ["http", "text", "full"]
 
 [[package]]
 name = "mcs-driver-websearch"
@@ -2589,6 +2601,7 @@ dependencies = [
     { name = "mcs-adapter-docker" },
     { name = "mcs-adapter-http" },
     { name = "mcs-adapter-imap" },
+    { name = "mcs-adapter-llm-completion" },
     { name = "mcs-adapter-localfs" },
     { name = "mcs-adapter-mcp" },
     { name = "mcs-adapter-smb" },
@@ -2608,7 +2621,7 @@ dependencies = [
     { name = "mcs-driver-rest" },
     { name = "mcs-driver-sandbox" },
     { name = "mcs-driver-web" },
-    { name = "mcs-driver-webfetch" },
+    { name = "mcs-driver-webfetch", extra = ["text"] },
     { name = "mcs-driver-websearch" },
     { name = "mcs-examples" },
     { name = "mcs-hooks" },
@@ -2618,6 +2631,8 @@ dependencies = [
     { name = "mcs-permission" },
     { name = "mcs-types-cache" },
     { name = "mcs-types-http" },
+    { name = "mcs-types-llm" },
+    { name = "mcs-types-summarizer" },
     { name = "mcs-types-web" },
 ]
 
@@ -2657,6 +2672,7 @@ requires-dist = [
     { name = "mcs-adapter-docker", editable = "packages/adapters/mcs-adapter-docker" },
     { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
     { name = "mcs-adapter-imap", editable = "packages/adapters/mcs-adapter-imap" },
+    { name = "mcs-adapter-llm-completion", editable = "packages/adapters/mcs-adapter-llm-completion" },
     { name = "mcs-adapter-localfs", editable = "packages/adapters/mcs-adapter-localfs" },
     { name = "mcs-adapter-mcp", editable = "packages/adapters/mcs-adapter-mcp" },
     { name = "mcs-adapter-smb", editable = "packages/adapters/mcs-adapter-smb" },
@@ -2676,7 +2692,7 @@ requires-dist = [
     { name = "mcs-driver-rest", editable = "packages/drivers/mcs-driver-rest" },
     { name = "mcs-driver-sandbox", editable = "packages/drivers/mcs-driver-sandbox" },
     { name = "mcs-driver-web", editable = "packages/drivers/mcs-driver-web" },
-    { name = "mcs-driver-webfetch", editable = "packages/drivers/mcs-driver-webfetch" },
+    { name = "mcs-driver-webfetch", extras = ["text"], editable = "packages/drivers/mcs-driver-webfetch" },
     { name = "mcs-driver-websearch", editable = "packages/drivers/mcs-driver-websearch" },
     { name = "mcs-examples", editable = "mcs-examples" },
     { name = "mcs-hooks", editable = "packages/hooks/mcs-hooks" },
@@ -2686,6 +2702,8 @@ requires-dist = [
     { name = "mcs-permission", editable = "packages/permission/mcs-permission" },
     { name = "mcs-types-cache", editable = "packages/types/mcs-types-cache" },
     { name = "mcs-types-http", editable = "packages/types/mcs-types-http" },
+    { name = "mcs-types-llm", editable = "packages/types/mcs-types-llm" },
+    { name = "mcs-types-summarizer", editable = "packages/types/mcs-types-summarizer" },
     { name = "mcs-types-web", editable = "packages/types/mcs-types-web" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -2713,6 +2731,22 @@ source = { editable = "packages/types/mcs-types-cache" }
 name = "mcs-types-http"
 version = "0.1.0"
 source = { editable = "packages/types/mcs-types-http" }
+
+[[package]]
+name = "mcs-types-llm"
+version = "0.1.0"
+source = { editable = "packages/types/mcs-types-llm" }
+
+[[package]]
+name = "mcs-types-summarizer"
+version = "0.1.0"
+source = { editable = "packages/types/mcs-types-summarizer" }
+dependencies = [
+    { name = "mcs-types-llm" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "mcs-types-llm", editable = "packages/types/mcs-types-llm" }]
 
 [[package]]
 name = "mcs-types-web"

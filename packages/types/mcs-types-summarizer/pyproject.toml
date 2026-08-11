@@ -3,13 +3,13 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "mcs-driver-web"
+name            = "mcs-types-summarizer"
 version         = "0.1.0"
-description     = "Composite web driver for the Model Context Standard -- search the web and read pages through one driver."
+description     = "Query-focused summarization (SummarizerPort, LLMSummarizer) for the Model Context Standard."
 readme          = "README.md"
 requires-python = ">=3.9"
 license         = "Apache-2.0"
-keywords        = ["mcs", "modelcontextstandard", "driver", "web", "search", "fetch"]
+keywords        = ["mcs", "modelcontextstandard", "types", "summarizer", "llm"]
 authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
 license-files   = ["LICENSE"]
 classifiers     = [
@@ -21,29 +21,20 @@ classifiers     = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Topic :: Internet :: WWW/HTTP",
     "Topic :: Software Development :: Libraries",
     "Typing :: Typed",
 ]
 
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
 
+# The one MCS dependency is itself zero-dependency, so this package stays free of
+# third-party ballast -- the LLM arrives injected, never imported.
 dependencies = [
-    "mcs-driver-core>=0.4.0",
-    "mcs-driver-webfetch>=0.1",
-    "mcs-driver-websearch>=0.1",
+    "mcs-types-llm>=0.1",
 ]
 
-[project.optional-dependencies]
-# Article-grade extraction for the fetch half. Safe markdown is not here: it is a
-# required dependency of mcs-driver-webfetch, because an advertised format must not
-# depend on how the package was installed.
-full = ["mcs-driver-webfetch[full]>=0.1"]
-
 [tool.uv.sources]
-mcs-driver-core      = { workspace = true }
-mcs-driver-webfetch  = { workspace = true }
-mcs-driver-websearch = { workspace = true }
+mcs-types-llm = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

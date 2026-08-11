@@ -24,9 +24,9 @@ from .extraction_strategy import (
     ExtractedCall,
     Forming,
     TextExtractionStrategy,
-    OpenAICompletionExtractionStrategy,
-    OpenAIResponseExtractionStrategy,
-    AnthropicExtractionStrategy,
+    CompletionExtractionStrategy,
+    ResponseExtractionStrategy,
+    MessagesExtractionStrategy,
 )
 from .extraction_chain import ExtractionChain
 from .llm_stream_buffer import LLMStreamBuffer
@@ -74,9 +74,9 @@ class BaseDriver(
         # more entry. The buffer resolves *reassembly* over these; the driver resolves
         # *extraction* over the same list -- two axes, one list.
         self._extractors: list[ExtractionStrategy] = _extraction_strategies or [
-            OpenAICompletionExtractionStrategy(),
-            OpenAIResponseExtractionStrategy(),
-            AnthropicExtractionStrategy(),
+            CompletionExtractionStrategy(),
+            ResponseExtractionStrategy(),
+            MessagesExtractionStrategy(),
             TextExtractionStrategy(self._prompt_strategy),
         ]
         self._chain = _chain or ExtractionChain(self._extractors)

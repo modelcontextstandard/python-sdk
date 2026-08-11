@@ -67,14 +67,19 @@ The composite refuses to build instead.
 ## Installation
 
 ```bash
-pip install mcs-driver-web            # search + fetch
-pip install mcs-driver-web[full]      # + article-grade extraction and safe markdown
+pip install mcs-driver-web            # search + fetch, including markdown
+pip install mcs-driver-web[full]      # + article-grade extraction (trafilatura)
 ```
 
-The extras belong to the fetch half: `trafilatura` for readability-grade text,
-`nh3` + `markdownify` for safe markdown. Without them, `format="text"` still
-works via the dependency-free baseline and `format="markdown"` raises rather than
-degrading quietly.
+The one extra belongs to the fetch half: `trafilatura` for readability-grade
+text. Without it `format="text"` still works -- the BestOf chain simply votes for
+another extractor -- so its absence costs quality, never a capability.
+
+Safe markdown (`nh3` + `markdownify`) is **not** an extra but a required
+dependency. `format="markdown"` is advertised in the tool schema, so a model will
+pick it; an optional dependency would turn that choice into a runtime error no
+retry can fix. See [`mcs-driver-webfetch`](../mcs-driver-webfetch/README.md) for
+the rule.
 
 ## The pieces
 
