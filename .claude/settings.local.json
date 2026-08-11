@@ -130,7 +130,18 @@
       "Bash(grep -vE \"^\\\\s*$\")",
       "Bash(python -m pytest packages/inspector -q)",
       "Bash(python -m mcs.inspector websearch --api-key dummy)",
-      "Bash(python -m mcs.inspector websearch --base-url https://llm-websearch.apps.alsdienst.de)"
+      "Bash(python -m mcs.inspector websearch --base-url https://llm-websearch.apps.alsdienst.de)",
+      "Bash(python -m pytest packages/prompts -q)",
+      "Bash(python -m pytest packages/types/mcs-types-summarizer packages/drivers/mcs-driver-webfetch packages/prompts -q)",
+      "Bash(python -m pytest packages/types/mcs-types-summarizer packages/prompts packages/drivers/mcs-driver-webfetch packages/inspector -q)",
+      "Bash(python -m pytest packages/prompts packages/types/mcs-types-summarizer packages/drivers/mcs-driver-webfetch packages/adapters/mcs-adapter-llm-completion packages/inspector -q)",
+      "Bash(PYTHONIOENCODING=utf-8 python mcs-examples/prompt_variants/main.py)",
+      "Bash(python mcs-examples/prompt_variants/main.py --help)",
+      "Bash(python -m pytest packages/types/mcs-types-llm packages/types/mcs-types-summarizer -q)",
+      "Bash(PYTHONIOENCODING=utf-8 python mcs-examples/permission_gate/chat.py --allow-all --summarize-model qwen3:4b)",
+      "Bash(PYTHONIOENCODING=utf-8 python mcs-examples/permission_gate/chat.py --allow-all --summarize-model qwen3:4b --summarize-effort none --summarize-window 32768 --summarize-prompts mcs-examples/prompt_variants/prompts.toml)",
+      "Bash(basedpyright --outputjson packages/types/mcs-types-llm/src packages/types/mcs-types-summarizer/src packages/adapters/mcs-adapter-llm-completion/src mcs-examples/permission_gate/chat.py)",
+      "Bash(python -m pytest packages/types/mcs-types-llm packages/types/mcs-types-summarizer packages/adapters/mcs-adapter-llm-completion -q)"
     ]
   }
 }

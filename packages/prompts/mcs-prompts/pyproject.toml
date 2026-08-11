@@ -3,13 +3,13 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "mcs-types-summarizer"
+name            = "mcs-prompts"
 version         = "0.1.0"
-description     = "Query-focused summarization (SummarizerPort, LLMSummarizer) for the Model Context Standard."
+description     = "Prompt loading for the Model Context Standard -- per-package defaults, per-model variants, developer overrides."
 readme          = "README.md"
 requires-python = ">=3.11"
 license         = "Apache-2.0"
-keywords        = ["mcs", "modelcontextstandard", "types", "summarizer", "llm"]
+keywords        = ["mcs", "modelcontextstandard", "prompts", "llm"]
 authors         = [{ name = "Danny Gerst", email = "danny@dannygerst.de" }]
 license-files   = ["LICENSE"]
 classifiers     = [
@@ -25,20 +25,7 @@ classifiers     = [
 
 urls = {"Homepage" = "https://www.modelcontextstandard.io", "Source" = "https://github.com/modelcontextstandard/python-sdk"}
 
-# The one MCS dependency is itself zero-dependency, so this package stays free of
-# third-party ballast -- the LLM arrives injected, never imported.
-dependencies = [
-    "mcs-types-llm>=0.1",
-    # The loading mechanism; the prompts themselves ship HERE, as package data.
-    "mcs-prompts>=0.1",
-]
-
-[tool.uv.sources]
-mcs-types-llm = { workspace = true }
-mcs-prompts = { workspace = true }
+dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"mcs.types.summarizer" = ["prompts/*.toml"]

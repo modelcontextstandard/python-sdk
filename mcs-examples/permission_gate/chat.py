@@ -43,12 +43,23 @@ Usage:
     python chat.py --allow-all         # answers the gate automatically
     python chat.py --allow-raw         # also expose format="raw"
 
+    # Condensation: a second, cheap model reads whole pages so the conversation
+    # only pays for answers. The full local setup:
+    python chat.py --allow-all --summarize-model qwen3:4b \
+        --summarize-effort none --summarize-window 32768
+
+    # Cloud condenser (one call per page, needs OPENAI_API_KEY in .env):
+    python chat.py --allow-all --summarize-model gpt-5.6 \
+        --summarize-url https://api.openai.com/v1 --summarize-window 1000000
+
 Configuration (environment or .env):
     MCS_SEARCH_URL      base URL of a Tavily-compatible search service
     MCS_SEARCH_KEY      its API key
     TAVILY_API_KEY      used instead when MCS_SEARCH_* are unset (hosted Tavily)
-    MCS_SUMMARIZE_MODEL / MCS_SUMMARIZE_URL   condensation model and endpoint
-    MCS_SUMMARIZE_KEY   its API key; falls back to OPENAI_API_KEY (local: none)
+    MCS_SUMMARIZE_MODEL / MCS_SUMMARIZE_URL     condensation model and endpoint
+    MCS_SUMMARIZE_KEY      its API key; falls back to OPENAI_API_KEY (local: none)
+    MCS_SUMMARIZE_EFFORT   reasoning_effort of the condenser ('none' recommended)
+    MCS_SUMMARIZE_PROMPTS  your prompt TOML: sparse override, per-model variants
 
 Requires:
     pip install mcs-driver-web mcs-permission litellm rich python-dotenv
@@ -110,6 +121,21 @@ def main() -> None:
                    default=os.environ.get("MCS_SUMMARIZE_URL", "http://localhost:11434/v1"),
                    help="Chat-Completions endpoint for --summarize-model "
                         "(default: local Ollama)")
+    p.add_argument("--summarize-effort",
+                   default=os.environ.get("MCS_SUMMARIZE_EFFORT"),
+                   help="reasoning_effort for the condensation model. 'none' is the "
+                        "right call here: condensation is extraction, not "
+                        "deliberation -- a small thinker can spend thousands of "
+                        "tokens reasoning and drop instructions on the way. Values "
+                        "are model-dependent (Ollama maps it onto qwen3's thinking "
+                        "switch; GPT-5 accepts none/low/medium/high/xhigh). "
+                        "(default: $MCS_SUMMARIZE_EFFORT, unset = backend default)")
+    p.add_argument("--summarize-prompts",
+                   default=os.environ.get("MCS_SUMMARIZE_PROMPTS"),
+                   help="Your own prompt TOML for the summarizer (sparse override of "
+                        "its shipped prompts/default.toml; [prompts.\"model:qwen*\"] "
+                        "sections tune per model and follow the model automatically). "
+                        "(default: $MCS_SUMMARIZE_PROMPTS, unset = shipped defaults)")
     p.add_argument("--summarize-window", type=int, default=None,
                    help="Context window of the condensation model (default: assume "
                         "4096 until the backend teaches the real number). gpt-5.6: "
@@ -143,18 +169,29 @@ def main() -> None:
         from mcs.adapter.llm.completion import CompletionLLMAdapter
         from mcs.types.summarizer import LLMSummarizer
 
-        extra = ({"context_window": args.summarize_window}
-                 if args.summarize_window else {})
-        summarizer = LLMSummarizer(CompletionLLMAdapter(
-            args.summarize_model, base_url=args.summarize_url,
-            # Same pattern as the search key: a dedicated variable wins, the
-            # well-known one is the fallback. Local servers need neither.
-            api_key=os.environ.get("MCS_SUMMARIZE_KEY") or os.environ.get("OPENAI_API_KEY"),
-            # Only matters once an answer budget is set -- but then it must not 400.
-            max_completion_tokens_field=("max_completion_tokens"
-                                         if "api.openai.com" in args.summarize_url
-                                         else "max_tokens"),
-        ), **extra)
+        # Every knob sits where its knowledge sits: effort and the wire dialect on
+        # the ADAPTER (properties of talking to this model), window and prompts on
+        # the SUMMARIZER (planning and wording). The model id is passed to neither
+        # a second time -- the summarizer asks the port per run, so prompt variants
+        # in a --summarize-prompts file follow the model automatically.
+        summarizer = LLMSummarizer(
+            CompletionLLMAdapter(
+                args.summarize_model, base_url=args.summarize_url,
+                # Same pattern as the search key: a dedicated variable wins, the
+                # well-known one is the fallback. Local servers need neither.
+                api_key=os.environ.get("MCS_SUMMARIZE_KEY") or os.environ.get("OPENAI_API_KEY"),
+                # Only matters once an answer budget is set -- but then it must not 400.
+                max_completion_tokens_field=("max_completion_tokens"
+                                             if "api.openai.com" in args.summarize_url
+                                             else "max_tokens"),
+                **({"reasoning_effort": args.summarize_effort}
+                   if args.summarize_effort else {}),
+            ),
+            **({"context_window": args.summarize_window}
+               if args.summarize_window else {}),
+            **({"prompts": args.summarize_prompts}
+               if args.summarize_prompts else {}),
+        )
 
     web = WebDriver(api_key=args.search_key, base_url=args.search_url,
                     allow_raw=args.allow_raw, summarizer=summarizer)
@@ -188,7 +225,12 @@ def main() -> None:
             f"Search:   {where}",
             f"Consent:  {'auto-approve' if args.allow_all else 'ask the user'}",
             f"Raw HTML: {'allowed' if args.allow_raw else 'not offered'}",
-            f"Condense: {args.summarize_model + ' @ ' + args.summarize_url if args.summarize_model else 'off (prompt= not offered)'}",
+            "Condense: " + (
+                f"{args.summarize_model} @ {args.summarize_url}"
+                + (f"  effort={args.summarize_effort}" if args.summarize_effort else "")
+                + (f"  prompts={Path(args.summarize_prompts).name}"
+                   if args.summarize_prompts else "")
+                if args.summarize_model else "off (prompt= not offered)"),
         ],
     ).run()
 

@@ -1,0 +1,42 @@
+# Developer override for the prompt_variants example -- DELIBERATELY loud.
+#
+# Each variant forces a visible marker (and a language), so the proof of the chain is
+# in the OUTPUT itself: if the answer starts with the marker of the model you selected,
+# then LLMPort.model -> PromptBundle.resolve -> variant template travelled end to end
+# for exactly this run. Real tuning would change phrasing, not stamp banners -- this
+# file is pedagogy, not production.
+#
+# Two lessons this file itself learned live -- both ARE the point of per-model tuning:
+# 1. The 4B reasoning model dropped the marker when instructed in the SYSTEM prompt
+#    (3,500 thinking tokens between instruction and answer); task-prompt instructions,
+#    placed last, bind harder.
+# 2. Even then, a 4B thinker drops verbatim markers more often than not (and this
+#    Ollama build ignored qwen's /no_think switch outright, echoing it instead). So
+#    the marker is CORROBORATION only -- the deterministic proof is printed by the
+#    example itself, which shows per answer whether a variant or the base resolved.
+#
+# Note what is NOT here: no [prompts] base table. Overrides are sparse -- the shipped
+# defaults of mcs-types-summarizer stay in force for everything not named (map, merge,
+# refine, no_content), and models matching no section run entirely on those defaults.
+
+[prompts."model:qwen*"]
+system = "Du antwortest ausschliesslich anhand des bereitgestellten Textes, praezise und knapp. Antworte auf Deutsch."
+# placeholders: {query} {text}
+stuff = """
+Frage: {query}
+
+Text:
+{text}
+
+Beantworte die Frage nur mit dem Text oben. Beginne deine Antwort woertlich mit: [qwen-Variante]"""
+
+[prompts."model:gpt-*"]
+system = "You answer strictly from the provided text, precisely and briefly. Answer in English."
+# placeholders: {query} {text}
+stuff = """
+Question: {query}
+
+Text:
+{text}
+
+Answer using only the text above. Begin your answer verbatim with: [gpt-tuned]"""

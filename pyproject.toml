@@ -43,6 +43,7 @@ dependencies = [
   "mcs-types-llm>=0.1",
   "mcs-adapter-llm-completion>=0.1",
   "mcs-types-summarizer>=0.1",
+  "mcs-prompts>=0.1",
 ]
 
 [tool.uv.sources]
@@ -82,6 +83,7 @@ mcs-driver-web = { workspace = true }
 mcs-types-llm = { workspace = true }
 mcs-adapter-llm-completion = { workspace = true }
 mcs-types-summarizer = { workspace = true }
+mcs-prompts = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -94,6 +96,7 @@ members = [
   "packages/auth/*",
   "packages/permission/*",
   "packages/hooks/*",
+  "packages/prompts/*",
   "mcs-examples",
 ]
 

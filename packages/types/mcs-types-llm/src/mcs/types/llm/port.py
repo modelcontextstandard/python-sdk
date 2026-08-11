@@ -19,6 +19,7 @@ Because the surface is this small, adapting an LLM a client *already has* is a t
 adapter, which is the point:
 
     class MyLLM:                       # the client's own, with its cost tracking,
+        model = "my-house-model"       # or None -- see LLMPort.model
         def complete(self, prompt, *, system=None, max_completion_tokens=None, **kwargs):
             return LLMResponse(text=my_existing_stack.ask(prompt, system))
 
@@ -45,6 +46,39 @@ class LLMPort(Protocol):
     server, or a client's existing in-house stack. What they must not do is surprise the
     caller: one call in, one answer out.
     """
+
+    @property
+    def model(self) -> str | None:
+        """The model id currently behind this port, or ``None`` when unknown.
+
+        Part of the port -- not a separate capability -- for one reason above all:
+        the model id must live in exactly ONE place. The implementation was
+        constructed with it; repeating it anywhere else (a consumer's constructor, a
+        config file) is duplicated configuration, and duplicated configuration
+        drifts -- an adapter speaking qwen while a summarizer was told gpt would pick
+        wrong prompt variants with no error anywhere. So consumers ask the port, per
+        run.
+
+        Per-run asking also means per-model behaviour follows the model at call time:
+        an agent may switch models mid-operation (a router port, a fallback chain),
+        and a router answers with the *currently active* id. That is a corollary, not
+        the justification -- with a fixed adapter, resolution is a cached lookup and
+        the consumer behaves exactly like a fixed, configure-once object.
+
+        This is deliberately different from the metadata kept OUT of the port
+        (context window, tokenizer): those an implementation cannot know and would
+        have to guess. Its model id is a construction fact -- and ``None`` stays
+        honest where even that is unknown (an anonymous gateway, a wrapper that does
+        not care). Consumers treat ``None`` as "base behaviour, no variants".
+
+        A read-only *property* rather than an attribute, and not only because
+        consumers never write it: a mutable protocol attribute is invariant, so an
+        implementation whose ``model`` is a plain ``str`` would fail to typecheck
+        against ``str | None``. Property access is covariant -- a simple attribute
+        (``self.model = "qwen3:4b"``, ``model = None``) and a computed property (a
+        router) both satisfy it.
+        """
+        ...
 
     def complete(
         self,

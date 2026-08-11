@@ -21,6 +21,8 @@ answer.
 
 ```python
 class LLMPort(Protocol):
+    model: str | None      # what is CURRENTLY behind this port -- see below
+
     def complete(self, prompt: str, *, system: str | None = None,
                  max_completion_tokens: int | None = None, **kwargs: Any) -> LLMResponse: ...
 ```
@@ -29,6 +31,12 @@ No streaming, no tools, no multimodality, no conversation state — those belong
 client's loop. And no model *metadata* either: a context window and a tokenizer describe
 the model, not the connection to it, so an implementation would be guessing on behalf of
 whoever chose the model. What comes back instead is what the backend actually **measured**.
+
+The one identity the port does carry is its **model id** — a construction fact, not a
+guess, and `None` stays honest where even that is unknown. It exists because per-model
+behaviour (prompt variants, above all) must follow the model at *call time*: an agent
+may switch models mid-operation, so consumers re-ask the port per run instead of
+freezing an id anywhere.
 
 `prompt` / `system` / `max_completion_tokens` are the **portable core** — the things a caller can
 mean without knowing which backend it was given. `max_completion_tokens` is named (not left to
@@ -47,6 +55,7 @@ lines:
 
 ```python
 class MyLLM:                      # the client's own stack -- cost tracking, PII
+    model = "my-house-model"      # or None when even that is unknown
     def complete(self, prompt, *, system=None, max_completion_tokens=None, **kwargs):
         return LLMResponse(text=my_stack.ask(prompt, system))
 ```

@@ -1,0 +1,9 @@
+[prompts]
+greet = "Hello, {name}."
+farewell = "Bye, {name}."
+
+[prompts."model:qwen*"]
+greet = "QWEN says hello to {name}."
+
+[prompts."model:qwen3:4b"]
+greet = "Exactly qwen3:4b greets {name}."

@@ -25,9 +25,12 @@ class FakeLLM:
     """Deterministic LLMPort: answers by prompt kind, records calls, optional window."""
 
     def __init__(self, window_tokens=None, map_answer="PART", final_answer="FINAL",
-                 truncate_calls=()):
+                 truncate_calls=(), model=None):
         self.calls: list[str] = []
         self.window = window_tokens
+        #: LLMPort.model -- what is CURRENTLY behind this port; tests reassign it to
+        #: play the agent that switches models mid-operation.
+        self.model = model
         self.map_answer = map_answer
         self.final_answer = final_answer
         self.truncate = set(truncate_calls)
@@ -282,6 +285,63 @@ class TestTruncation:
 
     def test_clean_runs_are_not_flagged(self):
         assert LLMSummarizer(FakeLLM()).summarize(BIG, QUERY).truncated is False
+
+
+class TestPromptLoading:
+    """No prompt is hardcoded: the texts ship as package data (prompts/default.toml),
+    the developer replaces them sparsely, and model variants select tuned phrasings.
+    The mechanism is mcs-prompts; what these tests pin is the summarizer's use of it."""
+
+    def test_a_sparse_override_replaces_one_template(self):
+        llm = FakeLLM()
+        s = LLMSummarizer(llm, prompts={"stuff": "CUSTOM {query} :: {text}"})
+        s.summarize(SMALL, QUERY)
+        assert llm.calls[0].startswith("CUSTOM Wie heisst die Katze?")
+
+    def test_variants_follow_the_port_not_a_constructor(self, tmp_path):
+        """The port names its model; the summarizer resolves per run. Nobody passes a
+        model id into this component -- it asks the one party that knows."""
+        f = tmp_path / "mine.toml"
+        f.write_text(
+            '[prompts."model:qwen*"]\n'
+            'stuff = "QWENVARIANTE: {query}\\n{text}"\n',
+            encoding="utf-8",
+        )
+        tuned = FakeLLM(model="qwen3:4b")
+        LLMSummarizer(tuned, prompts=f).summarize(SMALL, QUERY)
+        assert tuned.calls[0].startswith("QWENVARIANTE:")
+
+        untouched = FakeLLM(model="gpt-5.6")
+        LLMSummarizer(untouched, prompts=f).summarize(SMALL, QUERY)
+        assert untouched.calls[0].startswith("Question:")      # base stays base
+
+    def test_variants_follow_a_model_switch_mid_operation(self, tmp_path):
+        """The reason resolution happens per RUN: an agent may switch models between
+        calls (a router port falls back, the client swaps tiers). Same summarizer,
+        same bundle -- the prompts follow the port's current answer."""
+        f = tmp_path / "mine.toml"
+        f.write_text(
+            '[prompts."model:qwen*"]\n'
+            'stuff = "QWENVARIANTE: {query}\\n{text}"\n',
+            encoding="utf-8",
+        )
+        llm = FakeLLM(model="gpt-5.6")
+        summarizer = LLMSummarizer(llm, prompts=f)
+        summarizer.summarize(SMALL, QUERY)
+        assert llm.calls[-1].startswith("Question:")           # frontier: base prompts
+
+        llm.model = "qwen3:4b"                                 # the agent switched
+        summarizer.summarize(SMALL, QUERY)
+        assert llm.calls[-1].startswith("QWENVARIANTE:")       # ...prompts followed
+
+    def test_a_custom_sentinel_keeps_template_and_filter_in_sync(self):
+        """The map template carries the sentinel via {no_content}, and the filter reads
+        the same loaded value -- overriding one place changes both, by construction."""
+        llm = FakeLLM(map_answer="GAR NICHTS")
+        s = LLMSummarizer(llm, prompts={"no_content": "GAR NICHTS"}).summarize(BIG, QUERY)
+        assert "GAR NICHTS" in llm.map_calls[0]                # template asks for it
+        assert s.text == ""                                    # filter recognises it
+        assert not llm.merge_calls
 
 
 class TestConcurrency:

@@ -1,0 +1,54 @@
+# Every word this summarizer says to its model lives HERE, not in Python -- the MCS
+# rule: prompts are data, tunable per model, replaceable by the developer. Loaded via
+# mcs-prompts; override with LLMSummarizer(prompts="./mine.toml") or a mapping, select
+# model variants with LLMSummarizer(model="qwen3:4b") and [prompts."model:qwen*"]
+# sections.
+#
+# Two phrases double as machine markers and must survive any rewrite that wants the
+# stock tooling to keep working: "one part of a larger document" (map) and
+# "Partial answers" (merge) -- the inspector's glass summarizer labels calls by them.
+# {no_content} in the map template is filled with the sentinel below, which keeps the
+# template and the filter that strips sentinel answers in sync by construction.
+
+[prompts]
+system = "You answer strictly from the provided text. Be precise and complete; do not add outside knowledge."
+
+no_content = "NO RELEVANT CONTENT"
+
+stuff = """
+Question: {query}
+
+Text:
+{text}
+
+Answer the question using only the text above."""
+
+# "Preserve the order": measured against a live GitHub Trending page, a small model
+# happily re-sorts a list while condensing it -- and on a ranking page the order IS
+# information.
+map = """
+Question: {query}
+
+Text (one part of a larger document):
+{text}
+
+Extract everything from this part that helps answer the question, keeping exact figures and names. Preserve the order in which items appear in the text. If nothing in this part helps, reply exactly: {no_content}"""
+
+merge = """
+Question: {query}
+
+Partial answers gathered from different parts of one document, in the document's own order:
+{text}
+
+Combine them into one coherent answer to the question. Remove duplicates; keep every distinct fact, and preserve the original order of items unless the question asks for a different ranking."""
+
+refine = """
+Question: {query}
+
+Current answer:
+{answer}
+
+Additional text:
+{text}
+
+Improve the current answer using the additional text. If it adds nothing, return the current answer unchanged."""

@@ -39,8 +39,11 @@ reusable components.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
+from mcs.prompts import load_prompts
 from mcs.types.llm import (
     DEFAULT_CHARS_PER_TOKEN,
     ContextWindowExceeded,
@@ -124,44 +127,24 @@ class LLMSummarizer:
         Fan-out for the map phase. ``1`` (default) runs chunks sequentially -- correct
         everywhere, including local servers that serialise requests anyway. Higher
         values run map calls in threads; the merge is order-stable either way.
-    system :
-        Steering for every call. The default pins the model to the text ("answer
-        strictly from the provided text"), which is what query-focused condensation
-        means -- replace it consciously or not at all.
+    prompts :
+        The developer's own prompt texts: a TOML path (same layout as the shipped
+        ``prompts/default.toml``, model sections allowed) or a sparse mapping
+        ``name -> template``. **No prompt is hardcoded here** -- every word this
+        component says to its model lives in its package's ``prompts/default.toml``
+        and is replaced, never edited, through this parameter. The system prompt is
+        one of them (``"system"``).
+
+        There is deliberately **no** model parameter: which prompt variants apply is
+        decided per *run*, not per construction. The port names the model currently
+        behind it (``LLMPort.model``), and every ``summarize`` call resolves the
+        bundle for exactly that -- so an agent that switches models mid-operation, or
+        a router port that falls back, gets the matching phrasings without anyone
+        reconfiguring this component.
     chars_per_token :
         Estimation ratio while nothing has been measured. The default is deliberately
         conservative; see :func:`mcs.types.llm.estimate_tokens`.
-
-    Prompt templates are class attributes (``STUFF_TEMPLATE`` and friends) -- subclass
-    to rephrase them without touching the machinery.
     """
-
-    SYSTEM = ("You answer strictly from the provided text. Be precise and complete; "
-              "do not add outside knowledge.")
-
-    STUFF_TEMPLATE = ("Question: {query}\n\nText:\n{text}\n\n"
-                      "Answer the question using only the text above.")
-
-    # "Preserve the order": measured against a live GitHub Trending page, a small model
-    # happily re-sorts a list while condensing it (by stars, by its own taste) -- and on
-    # a ranking page the order IS information. Chunk order is already stable
-    # structurally; these lines pin it inside each call too.
-    MAP_TEMPLATE = ("Question: {query}\n\nText (one part of a larger document):\n{text}\n\n"
-                    "Extract everything from this part that helps answer the question, "
-                    "keeping exact figures and names. Preserve the order in which "
-                    "items appear in the text. If nothing in this part helps, "
-                    "reply exactly: " + NO_CONTENT)
-
-    MERGE_TEMPLATE = ("Question: {query}\n\nPartial answers gathered from different "
-                      "parts of one document, in the document's own order:\n{text}\n\n"
-                      "Combine them into one coherent answer to the question. Remove "
-                      "duplicates; keep every distinct fact, and preserve the original "
-                      "order of items unless the question asks for a different ranking.")
-
-    REFINE_TEMPLATE = ("Question: {query}\n\nCurrent answer:\n{answer}\n\n"
-                       "Additional text:\n{text}\n\n"
-                       "Improve the current answer using the additional text. If it "
-                       "adds nothing, return the current answer unchanged.")
 
     def __init__(
         self,
@@ -171,7 +154,7 @@ class LLMSummarizer:
         context_window: int | None = None,
         max_answer_tokens: int | None = None,
         concurrency: int = 1,
-        system: str | None = None,
+        prompts: "str | Path | Mapping[str, str] | None" = None,
         chars_per_token: float = DEFAULT_CHARS_PER_TOKEN,
     ) -> None:
         if strategy not in _STRATEGIES:
@@ -184,8 +167,20 @@ class LLMSummarizer:
         self._window = context_window or DEFAULT_ASSUMED_WINDOW
         self._max_answer_tokens = max_answer_tokens
         self._concurrency = concurrency
-        self._system = system if system is not None else self.SYSTEM
         self._chars_per_token = chars_per_token
+        # Loaded once, resolved per run: see the `prompts` parameter docs.
+        self._bundle = load_prompts("mcs.types.summarizer", override=prompts)
+        self._active = self._bundle.resolve(None)
+
+    # -- the per-run prompt view ----------------------------------------------
+
+    @property
+    def _system(self) -> str:
+        return self._active["system"]
+
+    @property
+    def _no_content(self) -> str:
+        return self._active.get("no_content", NO_CONTENT)
 
     # -- SummarizerPort --------------------------------------------------------
 
@@ -198,18 +193,24 @@ class LLMSummarizer:
                 "summarization -- ask something, even if it is 'summarise this text'."
             )
 
+        # Prompts follow the model AT CALL TIME: the port names what is currently
+        # behind it (a router may have switched since the last run), and the bundle
+        # resolves the variants for exactly that -- cached per id, so the common case
+        # costs a dictionary lookup.
+        self._active = self._bundle.resolve(getattr(self._llm, "model", None))
+
         responses: list[LLMResponse] = []
         strategy = self._strategy
         if strategy == "auto":
             fits = estimate_tokens(
-                self.STUFF_TEMPLATE.format(query=query, text=text),
+                self._active["stuff"].format(query=query, text=text),
                 self._chars_per_token,
             ) <= self._input_budget()
             strategy = "stuff" if fits else "map_reduce"
 
         if strategy == "stuff":
             try:
-                r = self._ask(self.STUFF_TEMPLATE.format(query=query, text=text))
+                r = self._ask(self._active["stuff"].format(query=query, text=text))
                 responses.append(r)
                 return self._summary(r.text, query, "stuff", 1, responses)
             except ContextWindowExceeded as exc:
@@ -255,7 +256,8 @@ class LLMSummarizer:
     def _map_chunk(self, chunk: str, query: str) -> tuple[list[str], list[LLMResponse]]:
         """Ask one chunk; on overflow, learn and split it -- every leaf gets read."""
         try:
-            r = self._ask(self.MAP_TEMPLATE.format(query=query, text=chunk))
+            r = self._ask(self._active["map"].format(query=query, text=chunk,
+                                                      no_content=self._no_content))
         except ContextWindowExceeded as exc:
             self._learn(exc)
             if len(chunk) <= _MIN_CHUNK_CHARS:
@@ -279,7 +281,7 @@ class LLMSummarizer:
         """
         answers = list(partials)
         while len(answers) > 1:
-            budget_chars = self._budget_chars(self.MERGE_TEMPLATE, query)
+            budget_chars = self._budget_chars(self._active["merge"], query)
             merged: list[str] = []
             group: list[str] = []
             group_len = 0
@@ -300,7 +302,7 @@ class LLMSummarizer:
             return group[0]
         joined = "\n\n".join(f"- {a}" for a in group)
         try:
-            r = self._ask(self.MERGE_TEMPLATE.format(query=query, text=joined))
+            r = self._ask(self._active["merge"].format(query=query, text=joined))
         except ContextWindowExceeded as exc:
             self._learn(exc)
             if len(group) == 2:
@@ -325,9 +327,10 @@ class LLMSummarizer:
         while pending:
             chunk = pending.pop()
             prompt = (
-                self.STUFF_TEMPLATE.format(query=query, text=chunk)
+                self._active["stuff"].format(query=query, text=chunk)
                 if answer is None
-                else self.REFINE_TEMPLATE.format(query=query, answer=answer, text=chunk)
+                else self._active["refine"].format(query=query, answer=answer,
+                                                    text=chunk)
             )
             try:
                 r = self._ask(prompt)
@@ -411,7 +414,7 @@ class LLMSummarizer:
 
     def _split(self, text: str, query: str) -> list[str]:
         """Pack paragraphs into chunks that fit the working budget."""
-        max_chars = self._budget_chars(self.MAP_TEMPLATE, query)
+        max_chars = self._budget_chars(self._active["map"], query)
         chunks: list[str] = []
         current = ""
         for para in text.split("\n\n"):
@@ -438,13 +441,13 @@ class LLMSummarizer:
         :meth:`_input_budget`) - this template with the query already in it - a small
         margin for the estimate being an estimate.
         """
-        skeleton = template.format(query=query, text="", answer="")
+        skeleton = template.format(query=query, text="", answer="",
+                                   no_content=self._no_content)
         usable = max(256, self._input_budget() - estimate_tokens(
             skeleton, self._chars_per_token) - 64)
         return int(usable * self._chars_per_token)
 
-    @staticmethod
-    def _is_no_content(text: str) -> bool:
+    def _is_no_content(self, text: str) -> bool:
         t = text.strip()
         if not t:
             return True
@@ -453,7 +456,12 @@ class LLMSummarizer:
         # links, a language picker, ..."). Under a length rule those essays counted as
         # partial answers and diluted the merge with non-answers; a sentinel that
         # leads the reply means no-content no matter how much excuse follows.
-        return NO_CONTENT in t[:64].upper()
+        #
+        # The sentinel is the LOADED one, not the module constant: the map template
+        # carries it via {no_content}, so template and filter stay in sync however the
+        # prompts are overridden.
+        sentinel = self._no_content.upper()
+        return sentinel in t[:len(sentinel) + 46].upper()
 
     def _summary(
         self, text: str, query: str, strategy: str, chunks: int,

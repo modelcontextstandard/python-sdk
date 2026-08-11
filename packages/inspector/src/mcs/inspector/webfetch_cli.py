@@ -71,6 +71,12 @@ class _GlassLLM:
         self.inner = inner
         self.calls = 0
 
+    @property
+    def model(self):
+        """``LLMPort.model``, passed through -- a wrapper must not blind the consumer:
+        prompt variants resolve against whatever is REALLY behind this port."""
+        return getattr(self.inner, "model", None)
+
     def complete(self, prompt: str, *, system: str | None = None,
                  max_completion_tokens: int | None = None, **kwargs: Any):
         self.calls += 1
