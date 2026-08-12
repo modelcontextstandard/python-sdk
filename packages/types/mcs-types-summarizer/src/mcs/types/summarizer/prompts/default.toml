@@ -1,3 +1,7 @@
+[meta]
+name = "summarizer-default"
+version = "1.0.0"
+
 # Every word this summarizer says to its model lives HERE, not in Python -- the MCS
 # rule: prompts are data, tunable per model, replaceable by the developer. Loaded via
 # mcs-prompts; override with LLMSummarizer(prompts="./mine.toml") or a mapping, select
