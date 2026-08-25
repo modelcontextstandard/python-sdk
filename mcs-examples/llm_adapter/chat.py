@@ -159,9 +159,14 @@ def main() -> None:
         resolved = resolve_spec(spec, catalog)
         args.model = None                      # a bad flag falls back to asking
     model_id, base_url, api_key = resolved
+    # The full address for display: endpoint provider + backend model id. The
+    # backend only ever sees model_id; the provider half is client addressing.
+    provider_name = next((name for name, (url, _) in PROVIDERS.items()
+                          if url == base_url), None)
+    display = f"{provider_name}/{model_id}" if provider_name else model_id
     # Answer "did the key load?" before the first 401 can even ask it. Never the
     # key itself -- loaded-and-still-401 means the PROVIDER rejects the key.
-    key_env = next((env for url, env in PROVIDERS.values() if url == base_url), None)
+    key_env = PROVIDERS[provider_name][1] if provider_name else None
     console.print(f"[dim]endpoint={base_url}  "
                   + (f"key=${key_env} "
                      + ("loaded" if api_key else "[red]NOT SET in env/.env[/red]")
@@ -181,7 +186,7 @@ def main() -> None:
     # deployment first, the catalogue's knowledge only where fields stayed unknown.
     # "meta sources" in the table names who actually contributed this time.
     stated = llm.describe()
-    show_info(console, stated, f"describe() of {model_id!r}")
+    show_info(console, stated, f"describe() of {display!r}")
 
     reasoning = stated.supports_reasoning if stated else None
     effort_values: list[str] | None = None
@@ -215,7 +220,7 @@ def main() -> None:
         if cmd == "quit":
             break
         elif cmd == "info":
-            show_info(console, llm.describe(), f"describe() of {model_id!r}")
+            show_info(console, llm.describe(), f"describe() of {display!r}")
         elif cmd == "debug":
             glass.debug = arg != "off"
         elif cmd == "budget":
