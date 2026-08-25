@@ -54,17 +54,27 @@ depend on scheduling.
 
 ## The planner remembers; the transport does not
 
-The summarizer thinks in the model's **context window** — the number a developer
-actually has, straight off the model card (`context_window=32768` for a qwen3:4b,
-`1_000_000` for gpt-5.6). Everything else is derived:
+The summarizer thinks in the model's **context window**. Everything else is derived:
 
     input budget per call = context_window − answer reserve − template overhead
 
-`LLMPort` deliberately reports no window, so unset it assumes a conservative 4096 until
-the backend teaches the real number: a `ContextWindowExceeded` with a named limit
-**replaces the window outright** — the backend stated its capacity — and the same
-document never hits the same wall twice. That state lives here, with the component doing
-the planning, not on the adapter.
+The window resolves in three steps, best knowledge first:
+
+1. **The constructor** (`context_window=32768`) — for when the developer knows a
+   *serving* truth no endpoint states; Ollama serves its `num_ctx`, not the model card.
+2. **The port itself** — unset, the summarizer asks `llm.describe()` once per model id
+   and plans with what the backend states. It may: the inquiry is part of the very
+   contract it already holds, so this is using the injected port, not opening a side
+   channel.
+3. **A conservative 4096** where nothing is stated — too small merely costs extra
+   chunks, too large costs a failed round trip.
+
+All three are then corrected by the backend itself: a `ContextWindowExceeded` with a
+named limit **replaces the working window outright** — the backend stated its capacity —
+and the same document never hits the same wall twice. That state lives here, with the
+component doing the planning, not on the adapter — and **per model id**, like the prompt
+variants: a router port switching models mid-operation never plans one model's budget
+with another model's lesson.
 
 An overflowing chunk is **split, not dropped**: every leaf of the document gets read, or
 the failure surfaces.

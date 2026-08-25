@@ -12,9 +12,11 @@ import re
 import pytest
 
 from mcs.types.llm import (
+    DEFAULT_CHARS_PER_TOKEN,
     ContextWindowExceeded,
     LLMPort,
     LLMResponse,
+    ModelInfo,
     TokenUsage,
     estimate_tokens,
 )
@@ -34,6 +36,9 @@ class FakeLLM:
         self.map_answer = map_answer
         self.final_answer = final_answer
         self.truncate = set(truncate_calls)
+
+    def describe(self):
+        return None                        # LLMPort.describe: nothing to ask
 
     def complete(self, prompt, *, system=None, max_completion_tokens=None, **kwargs):
         n = len(self.calls)
@@ -153,6 +158,71 @@ class TestMapReduce:
         assert not llm.merge_calls                    # essays never reached a merge
 
 
+class TestWindowResolution:
+    """Who decides the window, in order of knowledge: the constructor (the developer
+    may know a serving truth no endpoint states), the port's own statement
+    (describe(), once per model id), the conservative assumption. Learning corrects
+    all three -- see TestSilentTruncation for the statement-vs-reality case."""
+
+    class StatingLLM(FakeLLM):
+        """A port whose backend states its window -- and counts being asked."""
+
+        def __init__(self, stated_window=65_536, **kw):
+            super().__init__(**kw)
+            self.stated_window = stated_window
+            self.describe_calls = 0
+
+        def describe(self):
+            self.describe_calls += 1
+            return ModelInfo(context_window=self.stated_window)
+
+    def test_the_port_is_asked_when_the_constructor_is_silent(self):
+        """BIG does not fit the assumed 4096, but fits a stated 65536: one stuff call
+        instead of a map/merge cascade -- the statement was actually planned with."""
+        llm = self.StatingLLM(stated_window=65_536)
+        s = LLMSummarizer(llm).summarize(BIG, QUERY)
+        assert s.strategy == "stuff"
+        assert len(llm.calls) == 1
+        assert llm.describe_calls == 1
+
+    def test_the_constructor_wins_over_the_statement(self):
+        """The developer's number is deployment truth (Ollama's num_ctx); a grander
+        statement must not override it -- and there is nothing left to ask."""
+        llm = self.StatingLLM(stated_window=262_144)
+        s = LLMSummarizer(llm, context_window=4096).summarize(BIG, QUERY)
+        assert s.strategy == "map_reduce"        # planned with 4096, not 262144
+        assert llm.describe_calls == 0
+
+    def test_silence_falls_back_to_the_assumption(self):
+        """describe() -> None (a BYO wrapper): the conservative assumption applies."""
+        s = LLMSummarizer(FakeLLM()).summarize(BIG, QUERY)
+        assert s.strategy == "map_reduce"
+
+    def test_the_inquiry_happens_once_per_model_not_per_run(self):
+        """The answer is cached per model id -- but a router switching models is a NEW
+        question, asked exactly once more."""
+        llm = self.StatingLLM(stated_window=65_536, model="a")
+        summarizer = LLMSummarizer(llm)
+        summarizer.summarize(BIG, QUERY)
+        summarizer.summarize(BIG, QUERY)
+        assert llm.describe_calls == 1
+        llm.model = "b"                          # the agent switches mid-operation
+        summarizer.summarize(BIG, QUERY)
+        assert llm.describe_calls == 2
+
+    def test_one_models_lesson_is_not_anothers_budget(self):
+        """Windows are held per model id: what an overflow taught about model 'a'
+        must not shrink the freshly stated window of model 'b'."""
+        llm = self.StatingLLM(stated_window=65_536, model="a")
+        summarizer = LLMSummarizer(llm)
+        summarizer.summarize(BIG, QUERY)
+        summarizer._learn(ContextWindowExceeded(limit=2048))   # 'a' hits a wall
+        assert summarizer._windows["a"] == 2048
+        llm.model = "b"
+        summarizer.summarize(BIG, QUERY)
+        assert summarizer._windows["b"] == 65_536              # untouched by 'a'
+
+
 class TestSilentTruncation:
     """Measured against a local Ollama: input beyond num_ctx is dropped with NO error
     -- the prompt's start is cut, finish_reason says "stop", usage reports exactly the
@@ -191,6 +261,19 @@ class TestSilentTruncation:
         s = LLMSummarizer(FakeLLM()).summarize(BIG, QUERY)
         assert s.strategy == "map_reduce"             # ran to completion, no relearning
         assert s.text == "FINAL"
+
+    def test_a_statement_is_not_a_guarantee(self):
+        """Measured on Ollama: the endpoint states the model card's 262144 while
+        serving a far smaller num_ctx. The clip detector, not the statement, has the
+        last word -- the stated window is demoted the moment usage proves it wrong."""
+        class StatingClippingLLM(TestSilentTruncation.ClippingLLM):
+            def describe(self):
+                return ModelInfo(context_window=262_144)
+        llm = StatingClippingLLM(effective_window=100)
+        summarizer = LLMSummarizer(llm)          # no constructor window: trusts... briefly
+        s = summarizer.summarize(BIG, QUERY)
+        assert s.strategy == "map_reduce"        # the stated-window stuff was discarded
+        assert summarizer._window == 1024        # max(1024, reported 100)
 
     def test_usage_is_summed_over_every_call(self):
         llm = FakeLLM()
@@ -342,6 +425,45 @@ class TestPromptLoading:
         assert "GAR NICHTS" in llm.map_calls[0]                # template asks for it
         assert s.text == ""                                    # filter recognises it
         assert not llm.merge_calls
+
+
+class TestCalibration:
+    """The a-priori chars-per-token ratio is a labelled guess; measured usage is the
+    truth. The summarizer adopts measured ratios -- downward only, toward safety."""
+
+    class DenseTokenLLM(FakeLLM):
+        """Reports usage as if text packed ~1.5 chars/token (CJK, code, markup)."""
+
+        def complete(self, prompt, *, system=None, max_completion_tokens=None, **kw):
+            r = super().complete(prompt, system=system,
+                                 max_completion_tokens=max_completion_tokens)
+            return LLMResponse(text=r.text, finish_reason=r.finish_reason,
+                               usage=TokenUsage(prompt=int(len(prompt) / 1.5),
+                                                completion=7))
+
+    class SparseTokenLLM(FakeLLM):
+        """Reports usage as if text packed ~5 chars/token (airy English prose)."""
+
+        def complete(self, prompt, *, system=None, max_completion_tokens=None, **kw):
+            r = super().complete(prompt, system=system,
+                                 max_completion_tokens=max_completion_tokens)
+            return LLMResponse(text=r.text, finish_reason=r.finish_reason,
+                               usage=TokenUsage(prompt=max(1, int(len(prompt) / 5)),
+                                                completion=7))
+
+    def test_denser_reality_tightens_the_ratio(self):
+        """The dangerous direction -- estimates too low, budgets overflow -- is
+        corrected automatically from the first measurement."""
+        summarizer = LLMSummarizer(self.DenseTokenLLM())
+        summarizer.summarize(SMALL, QUERY)
+        assert summarizer._chars_per_token < 2.0           # adopted ~1.5
+
+    def test_cheaper_reality_is_not_adopted(self):
+        """Staying conservative costs one extra chunk at worst; drifting optimistic
+        could cost an overflow. Loosening stays the developer's explicit call."""
+        summarizer = LLMSummarizer(self.SparseTokenLLM())
+        summarizer.summarize(SMALL, QUERY)
+        assert summarizer._chars_per_token == DEFAULT_CHARS_PER_TOKEN
 
 
 class TestConcurrency:

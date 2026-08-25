@@ -12,7 +12,7 @@ import pytest
 
 from mcs.adapter.llm.completion import CompletionLLMAdapter
 from mcs.types.http import HttpResponse
-from mcs.types.llm import ContextWindowExceeded, LLMError, LLMPort
+from mcs.types.llm import ContextWindowExceeded, LLMError, LLMPort, ModelInfo
 
 
 class FakeHttp:
@@ -430,3 +430,274 @@ class TestErrorTranslation:
         adapter = _adapter(http, is_overflow=lambda s, m, c: "PLATZ ZU KLEIN" in m)
         with pytest.raises(ContextWindowExceeded):                 # ...until taught
             adapter.complete("q")
+
+
+class TestDescribe:
+    """describe() relays what the endpoint STATES -- an inquiry over the same injected
+    transport, with None as the failure shape. Payload shapes are the measured ones."""
+
+    class SeqHttp:
+        """Plays back one canned response per request, in order; 404 when exhausted."""
+
+        def __init__(self, *responses):
+            self.responses = list(responses)
+            self.calls = []
+
+        def request(self, method, url, *, params=None, json_body=None, headers=None,
+                    timeout=None):
+            self.calls.append({"method": method, "url": url, "json_body": json_body})
+            status, payload = (self.responses.pop(0) if self.responses else (404, {}))
+            text = payload if isinstance(payload, str) else json.dumps(payload)
+            return HttpResponse(status_code=status, text=text)
+
+    #: Measured: what OpenAI and Ollama's /v1 layer answer -- bookkeeping only.
+    MEAGRE = {"id": "test-model", "object": "model", "created": 1, "owned_by": "x"}
+    #: Measured: Ollama /api/show for qwen3:4b, plus the bulk fields that must be cut.
+    SHOW = {"capabilities": ["completion", "tools", "thinking"],
+            "details": {"family": "qwen3"},
+            "model_info": {"qwen3.context_length": 262144,
+                           "qwen3.embedding_length": 2560},
+            "tensors": [{"name": "blk.0"}], "license": "L" * 64, "modelfile": "FROM q"}
+    #: Measured: Ollama /api/show for gemma4:e4b -- a model that understands more
+    #: than text states it in the same capabilities list.
+    SHOW_MULTIMODAL = {"capabilities": ["completion", "vision", "audio", "tools",
+                                        "thinking"],
+                       "model_info": {"gemma4.context_length": 131072}}
+    #: Measured: an OpenRouter-style architecture block -- both directions explicit,
+    #: the older "a+b->c" string beside them, order relayed as stated.
+    ARCHITECTURE = {"input_modalities": ["file", "image", "text"],
+                    "output_modalities": ["image", "text"],
+                    "modality": "text+image+file->text+image"}
+
+    def _adapter(self, http, base="http://localhost:11434/v1"):
+        return CompletionLLMAdapter("test-model", base_url=base, _http=http)
+
+    def test_an_enriched_models_endpoint_is_enough(self):
+        """vLLM-style: the window sits right in /v1/models -- no second inquiry."""
+        http = self.SeqHttp((200, {"id": "m", "max_model_len": 40960}))
+        info = self._adapter(http).describe()
+        assert info.context_window == 40960
+        assert len(http.calls) == 1
+
+    def test_a_meagre_shape_falls_through_to_api_show(self):
+        http = self.SeqHttp((200, self.MEAGRE), (200, self.SHOW))
+        info = self._adapter(http).describe()
+        assert info.context_window == 262144
+        assert info.supports_function_calling is True
+        assert info.supports_reasoning is True
+        assert http.calls[1]["url"].endswith("/api/show")
+        assert http.calls[1]["json_body"] == {"model": "test-model"}
+
+    def test_a_text_only_model_states_text_only(self):
+        """'completion' without 'vision'/'audio' IS a statement: text in, text out --
+        ("text",) is different from None (nothing said)."""
+        http = self.SeqHttp((200, self.MEAGRE), (200, self.SHOW))
+        info = self._adapter(http).describe()
+        assert info.input_modalities == ("text",)
+        assert info.output_modalities == ("text",)
+
+    def test_understanding_capabilities_become_inputs(self):
+        """Ollama names modalities without a direction (measured on gemma4:e4b:
+        'vision', 'audio'). On a completions API those are inputs; generation is not
+        served here, so output stays text."""
+        http = self.SeqHttp((200, self.MEAGRE), (200, self.SHOW_MULTIMODAL))
+        info = self._adapter(http).describe()
+        assert info.input_modalities == ("text", "image", "audio")
+        assert info.output_modalities == ("text",)
+
+    def test_gateway_architecture_states_both_directions(self):
+        """OpenRouter-style: explicit lists, relayed verbatim -- including image on
+        the OUTPUT side, which no capability mapping could express."""
+        http = self.SeqHttp((200, {"id": "m", "context_length": 128000,
+                                   "architecture": self.ARCHITECTURE}))
+        info = self._adapter(http).describe()
+        assert info.input_modalities == ("file", "image", "text")
+        assert info.output_modalities == ("image", "text")
+
+    def test_legacy_modality_string_is_the_same_statement(self):
+        """Older gateways state 'text+image->text' in one field; parsing it is a
+        spelling translation, not a guess."""
+        http = self.SeqHttp((200, {"id": "m", "context_length": 128000,
+                                   "architecture": {"modality": "text+image->text"}}))
+        info = self._adapter(http).describe()
+        assert info.input_modalities == ("text", "image")
+        assert info.output_modalities == ("text",)
+
+    def test_explicit_lists_win_over_the_legacy_string(self):
+        """When both spellings are present the explicit one is the more deliberate
+        statement -- the string is only the fallback."""
+        arch = {"input_modalities": ["text", "image", "audio"],
+                "output_modalities": ["text"],
+                "modality": "text+image->text"}
+        http = self.SeqHttp((200, {"id": "m", "context_length": 1,
+                                   "architecture": arch}))
+        info = self._adapter(http).describe()
+        assert info.input_modalities == ("text", "image", "audio")
+
+    def test_a_gateway_data_envelope_is_unwrapped(self):
+        """Measured on OpenRouter: the model object arrives as {"data": {...}}. The
+        spec object is flat and its "data" is only ever the list route's array, so
+        unwrapping a dict cannot misread a spec answer."""
+        http = self.SeqHttp((200, {"data": {"id": "m", "max_model_len": 40960,
+                                            "architecture": {"modality": "text->text"}}}))
+        info = self._adapter(http).describe()
+        assert info.context_window == 40960
+        assert info.input_modalities == ("text",)
+
+    def test_meta_is_trimmed_to_what_consumers_act_on(self):
+        """/api/show also ships tensors, the license and the whole modelfile --
+        megabytes nobody plans with. Only the statements survive."""
+        http = self.SeqHttp((200, self.MEAGRE), (200, self.SHOW))
+        meta = self._adapter(http).describe().meta
+        blob = str(meta)
+        assert "tensors" not in blob and "modelfile" not in blob and "LLLL" not in blob
+        assert meta["ollama_show"]["capabilities"] == ["completion", "tools", "thinking"]
+
+    def test_capability_silence_stays_none_not_false(self):
+        """Tri-state: a backend that says nothing about tools has not denied them --
+        and one that says nothing about modalities has not declared text-only."""
+        http = self.SeqHttp((200, {"id": "m", "context_window": 8192}))
+        info = self._adapter(http).describe()
+        assert info.supports_function_calling is None
+        assert info.input_modalities is None
+        assert info.output_modalities is None
+
+    def test_nothing_answered_is_a_none_answer(self):
+        """Measured: OpenAI's models route does not even resolve alias ids like
+        gpt-5.6 -- 404. The follow-up /api/show probe 404s too. That is not an
+        error; it is the answer 'no statement available'."""
+        http = self.SeqHttp((404, {"error": {"message": "does not exist"}}), (404, {}))
+        assert self._adapter(http).describe() is None
+
+    def test_transport_failure_never_raises(self):
+        class BoomHttp:
+            def request(self, *a, **k):
+                raise OSError("network down")
+        assert CompletionLLMAdapter("m", _http=BoomHttp()).describe() is None
+
+    class Catalog:
+        """A ModelInfoProvider fake: fixed knowledge, records what was asked."""
+
+        def __init__(self, info):
+            self.info = info
+            self.asked = []
+
+        def describe(self, model):
+            self.asked.append(model)
+            return self.info
+
+    def test_knowledge_fills_what_the_endpoint_left_unknown(self):
+        """Measured motivation: OpenAI's endpoint states nothing usable -- with a
+        catalogue injected, describe() still answers, and meta names the source."""
+        catalog = self.Catalog(ModelInfo(context_window=272000, supports_reasoning=True,
+                                         meta={"litellm": {"resolved_id": "gpt-5"}}))
+        http = self.SeqHttp((200, self.MEAGRE), (404, {}))
+        info = CompletionLLMAdapter("test-model", base_url="http://x/v1",
+                                    model_info=catalog, _http=http).describe()
+        assert info.context_window == 272000
+        assert info.supports_reasoning is True
+        assert catalog.asked == ["test-model"]
+        assert "models_endpoint" in info.meta and "litellm" in info.meta
+
+    def test_a_statement_outranks_knowledge(self):
+        """The endpoint speaks for THIS deployment; a catalogue for the model family.
+        Where both answer, the statement wins -- field by field, so knowledge still
+        fills the gaps beside it."""
+        catalog = self.Catalog(ModelInfo(context_window=999, max_output_tokens=64000,
+                                         meta={"litellm": {}}))
+        http = self.SeqHttp((200, {"id": "m", "max_model_len": 40960}))
+        info = CompletionLLMAdapter("test-model", base_url="http://x/v1",
+                                    model_info=catalog, _http=http).describe()
+        assert info.context_window == 40960          # stated, not the catalogue's 999
+        assert info.max_output_tokens == 64000       # unknown to the endpoint: filled
+
+    def test_a_raising_provider_does_not_break_the_inquiry(self):
+        class BoomCatalog:
+            def describe(self, model):
+                raise RuntimeError("catalogue exploded")
+
+        http = self.SeqHttp((200, {"id": "m", "context_window": 8192}))
+        info = CompletionLLMAdapter("test-model", base_url="http://x/v1",
+                                    model_info=BoomCatalog(), _http=http).describe()
+        assert info.context_window == 8192
+
+    def test_knowledge_resolves_the_wire_spelling_for_openai_reasoning(self):
+        """The derivation rule: reasoning + provider openai -> max_completion_tokens.
+        Both facts come from the catalogue -- data application, not a URL heuristic."""
+        catalog = self.Catalog(ModelInfo(supports_reasoning=True,
+                                         meta={"models_dev": {"provider": "openai"}}))
+        http = FakeHttp()
+        CompletionLLMAdapter("gpt-5.6", model_info=catalog,
+                             _http=http).complete("q", max_completion_tokens=100)
+        assert http.last["json_body"]["max_completion_tokens"] == 100
+        assert "max_tokens" not in http.last["json_body"]
+
+    def test_the_rule_is_membership_not_the_arbitrary_pick(self):
+        """Live failure this pins: 18 namespaces carry gpt-5.5 and the scan's entry
+        came from 'abacus' -- but openai IS among the carriers, and that is the
+        question the wire spelling depends on."""
+        catalog = self.Catalog(ModelInfo(
+            supports_reasoning=True,
+            meta={"models_dev": {"provider": "abacus",
+                                 "providers": ["abacus", "azure", "openai"]}}))
+        http = FakeHttp()
+        CompletionLLMAdapter("gpt-5.5", model_info=catalog,
+                             _http=http).complete("q", max_completion_tokens=100)
+        assert http.last["json_body"]["max_completion_tokens"] == 100
+
+    def test_reasoning_elsewhere_keeps_the_default_spelling(self):
+        """Measured: Ollama's and DeepSeek's reasoning models accept max_tokens fine.
+        The rule needs BOTH facts, so reasoning alone changes nothing."""
+        catalog = self.Catalog(ModelInfo(supports_reasoning=True,
+                                         meta={"litellm": {"litellm_provider": "deepseek"}}))
+        http = FakeHttp()
+        CompletionLLMAdapter("deepseek-reasoner", model_info=catalog,
+                             _http=http).complete("q", max_completion_tokens=100)
+        assert http.last["json_body"]["max_tokens"] == 100
+
+    def test_an_explicit_choice_wins_and_skips_the_lookup(self):
+        catalog = self.Catalog(ModelInfo(supports_reasoning=True,
+                                         meta={"models_dev": {"provider": "openai"}}))
+        http = FakeHttp()
+        CompletionLLMAdapter("gpt-5.6", model_info=catalog,
+                             max_completion_tokens_field="max_tokens",
+                             _http=http).complete("q", max_completion_tokens=100)
+        assert http.last["json_body"]["max_tokens"] == 100
+        assert catalog.asked == []
+
+    def test_the_spelling_is_resolved_once_not_per_call(self):
+        catalog = self.Catalog(ModelInfo(supports_reasoning=True,
+                                         meta={"models_dev": {"provider": "openai"}}))
+        http = FakeHttp()
+        llm = CompletionLLMAdapter("gpt-5.6", model_info=catalog, _http=http)
+        llm.complete("q", max_completion_tokens=100)
+        llm.complete("q", max_completion_tokens=200)
+        assert catalog.asked == ["gpt-5.6"]
+
+    def test_no_budget_means_no_lookup(self):
+        """Lazy on purpose: the spelling only matters once a budget is sent."""
+        catalog = self.Catalog(ModelInfo(supports_reasoning=True,
+                                         meta={"models_dev": {"provider": "openai"}}))
+        http = FakeHttp()
+        CompletionLLMAdapter("gpt-5.6", model_info=catalog, _http=http).complete("q")
+        assert catalog.asked == []
+
+    def test_a_raising_provider_falls_back_to_the_default_spelling(self):
+        class BoomCatalog:
+            def describe(self, model):
+                raise RuntimeError("catalogue exploded")
+
+        http = FakeHttp()
+        CompletionLLMAdapter("m", model_info=BoomCatalog(),
+                             _http=http).complete("q", max_completion_tokens=50)
+        assert http.last["json_body"]["max_tokens"] == 50
+
+    def test_knowledge_alone_is_still_an_answer(self):
+        """Endpoint fully silent (404 twice), catalogue knows: the inquiry answers
+        from knowledge rather than None -- meta keeps the provenance honest."""
+        catalog = self.Catalog(ModelInfo(context_window=128000, meta={"models_dev": {}}))
+        http = self.SeqHttp((404, {}), (404, {}))
+        info = CompletionLLMAdapter("test-model", base_url="http://x/v1",
+                                    model_info=catalog, _http=http).describe()
+        assert info.context_window == 128000
+        assert "models_dev" in info.meta and "models_endpoint" not in info.meta

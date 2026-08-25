@@ -20,6 +20,7 @@ adapter, which is the point:
 
     class MyLLM:                       # the client's own, with its cost tracking,
         model = "my-house-model"       # or None -- see LLMPort.model
+        def describe(self): return None    # nothing to ask -- see LLMPort.describe
         def complete(self, prompt, *, system=None, max_completion_tokens=None, **kwargs):
             return LLMResponse(text=my_existing_stack.ask(prompt, system))
 
@@ -35,6 +36,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from .model_info import ModelInfo
 from .response import LLMResponse
 
 
@@ -77,6 +79,26 @@ class LLMPort(Protocol):
         against ``str | None``. Property access is covariant -- a simple attribute
         (``self.model = "qwen3:4b"``, ``model = None``) and a computed property (a
         router) both satisfy it.
+        """
+        ...
+
+    def describe(self) -> ModelInfo | None:
+        """What the backend states about the model behind this port, or ``None``.
+
+        An **inquiry, not an operation**: implementations ask their own endpoint over
+        the same injected transport every other call uses -- never a second channel --
+        relay what it states, and answer ``None`` where there is no endpoint, no
+        answer, or nothing to ask. Failures are the ``None``-shaped answer, not
+        exceptions: a caller always needs the unknown path anyway.
+
+        This does not soften the no-guessing rule; it completes it. A *fabricated*
+        context window stays banned from this port -- a *stated* one is transport,
+        the same category as ``usage``. And a statement is not a guarantee: measured,
+        Ollama states the model card's context length while serving a smaller
+        ``num_ctx`` -- so consumers plan with what is stated and keep their nets
+        (overflow learning, clip detection) in force.
+
+        BYO wrappers: ``def describe(self): return None`` -- one line.
         """
         ...
 

@@ -1,6 +1,6 @@
 """End-to-end against a **real** endpoint. Deselected by default -- run deliberately:
 
-    pytest packages/adapters/mcs-adapter-llm-completion -m e2e
+    pytest packages/adapters/mcs-adapter-llm -m e2e
 
 Deselected rather than skipped, on purpose. A skipped test reports as a harmless dot in
 the summary and quietly stops guarding anything; a deselected one is counted and named.
@@ -38,7 +38,7 @@ import os
 import pytest
 
 from mcs.adapter.llm.completion import CompletionLLMAdapter
-from mcs.types.llm import LLMResponse
+from mcs.types.llm import LLMResponse, ModelInfo
 
 pytestmark = pytest.mark.e2e
 
@@ -97,3 +97,19 @@ def test_a_thinking_model_can_swallow_the_whole_answer_budget(llm):
             "an empty answer must be explained by finish_reason='length'; otherwise a "
             "caller has no way to tell 'nothing to say' from 'budget spent thinking'"
         )
+
+
+def test_describe_relays_what_the_endpoint_states(llm):
+    """Against Ollama the inquiry is rich (capabilities + architecture context
+    length); against OpenAI it yields None -- the models route does not even resolve
+    alias ids. Both are correct answers; neither may crash."""
+    stated = llm.describe()
+    if "11434" in BASE_URL:
+        assert isinstance(stated, ModelInfo)
+        assert stated.context_window and stated.context_window > 0
+        assert stated.supports_function_calling is not None
+        # A served completion model always states at least text in; a multimodal
+        # one (gemma4:e4b) adds image/audio -- either way the field is stated.
+        assert stated.input_modalities and "text" in stated.input_modalities
+    else:
+        assert stated is None or isinstance(stated, ModelInfo)

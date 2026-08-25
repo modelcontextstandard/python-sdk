@@ -37,6 +37,8 @@ def estimate_tokens(text: str, chars_per_token: float = DEFAULT_CHARS_PER_TOKEN)
     for :class:`~mcs.types.llm.ContextWindowExceeded` anyway. After a first call, prefer
     a ratio calibrated from the measured :class:`~mcs.types.llm.TokenUsage` -- pass it as
     *chars_per_token* and this becomes an informed estimate rather than a generic one.
+    (The ``LLMSummarizer`` does exactly that automatically, downward only: a measured
+    denser ratio replaces the guess, a cheaper one is never drifted into.)
     """
     if chars_per_token <= 0:
         raise ValueError("chars_per_token must be positive")

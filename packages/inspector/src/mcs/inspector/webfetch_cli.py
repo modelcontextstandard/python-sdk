@@ -77,6 +77,11 @@ class _GlassLLM:
         prompt variants resolve against whatever is REALLY behind this port."""
         return getattr(self.inner, "model", None)
 
+    def describe(self):
+        """``LLMPort.describe``, passed through for the same reason."""
+        inner = getattr(self.inner, "describe", None)
+        return inner() if callable(inner) else None
+
     def complete(self, prompt: str, *, system: str | None = None,
                  max_completion_tokens: int | None = None, **kwargs: Any):
         self.calls += 1
@@ -153,6 +158,7 @@ def run(args: argparse.Namespace) -> None:
             else:
                 try:
                     from mcs.adapter.llm.completion import CompletionLLMAdapter
+                    from mcs.adapter.llm.info import ModelsDevInfoProvider
                     from mcs.types.summarizer import LLMSummarizer
                 except ImportError:
                     console.print(
@@ -163,14 +169,17 @@ def run(args: argparse.Namespace) -> None:
                 llm = _GlassLLM(CompletionLLMAdapter(
                     cfg["model"], base_url=cfg["url"],
                     api_key=os.environ.get("MCS_SUMMARIZE_KEY") or os.environ.get("OPENAI_API_KEY"),
-                    max_completion_tokens_field=("max_completion_tokens"
-                                                 if "api.openai.com" in (cfg["url"] or "")
-                                                 else "max_tokens"),
+                    # Knowledge, not a URL heuristic: the catalogue settles the wire
+                    # spelling of the answer budget and fills windows the endpoint
+                    # does not state. Unknown (local) models keep every default.
+                    model_info=ModelsDevInfoProvider(),
                 ))
                 kw: dict[str, Any] = {
                     "strategy": cfg["strategy"],
                     "concurrency": cfg["concurrency"],
                 }
+                # No window configured? Not our problem: the summarizer asks the port
+                # itself (describe(), once per model) and keeps its nets.
                 if cfg["window"]:
                     kw["context_window"] = cfg["window"]
                 if cfg["answer"]:
@@ -182,7 +191,7 @@ def run(args: argparse.Namespace) -> None:
         if cfg["summarize"]:
             summ = (f"[green]on[/green]  {cfg['model']} @ {cfg['url']}\n"
                     f"            strategy={cfg['strategy']}  "
-                    f"window={cfg['window'] or 'assume 4096, learn'}  "
+                    f"window={cfg['window'] or 'ask endpoint, else learn'}  "
                     f"answer_cap={cfg['answer'] or 'none'}  "
                     f"concurrency={cfg['concurrency']}")
         else:

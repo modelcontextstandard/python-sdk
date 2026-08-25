@@ -41,7 +41,7 @@ dependencies = [
   "mcs-driver-websearch>=0.1",
   "mcs-driver-web>=0.1",
   "mcs-types-llm>=0.1",
-  "mcs-adapter-llm-completion>=0.1",
+  "mcs-adapter-llm>=0.1",
   "mcs-types-summarizer>=0.1",
   "mcs-prompts>=0.1",
 ]
@@ -81,7 +81,7 @@ mcs-driver-webfetch = { workspace = true }
 mcs-driver-websearch = { workspace = true }
 mcs-driver-web = { workspace = true }
 mcs-types-llm = { workspace = true }
-mcs-adapter-llm-completion = { workspace = true }
+mcs-adapter-llm = { workspace = true }
 mcs-types-summarizer = { workspace = true }
 mcs-prompts = { workspace = true }
 

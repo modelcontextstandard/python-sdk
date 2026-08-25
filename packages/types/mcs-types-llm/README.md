@@ -21,22 +21,64 @@ answer.
 
 ```python
 class LLMPort(Protocol):
-    model: str | None      # what is CURRENTLY behind this port -- see below
+    @property
+    def model(self) -> str | None: ...            # what is CURRENTLY behind this port
+
+    def describe(self) -> ModelInfo | None: ...   # what the backend STATES about it
 
     def complete(self, prompt: str, *, system: str | None = None,
                  max_completion_tokens: int | None = None, **kwargs: Any) -> LLMResponse: ...
 ```
 
 No streaming, no tools, no multimodality, no conversation state — those belong to the
-client's loop. And no model *metadata* either: a context window and a tokenizer describe
-the model, not the connection to it, so an implementation would be guessing on behalf of
-whoever chose the model. What comes back instead is what the backend actually **measured**.
+client's loop. And no *guessed* model metadata either: a context window and a tokenizer
+describe the model, not the connection to it, so an implementation answering for them
+from its own head would be guessing on behalf of whoever chose the model. What comes
+back from `complete` is what the backend actually **measured**.
 
 The one identity the port does carry is its **model id** — a construction fact, not a
 guess, and `None` stays honest where even that is unknown. It exists because per-model
 behaviour (prompt variants, above all) must follow the model at *call time*: an agent
 may switch models mid-operation, so consumers re-ask the port per run instead of
 freezing an id anywhere.
+
+### `describe()` — an inquiry, not an operation
+
+`describe()` completes the no-guessing rule rather than softening it. Implementations
+ask their **own endpoint over the same injected transport** every other call uses —
+never a second channel — relay what it *states* as `ModelInfo`, and answer `None` where
+there is no endpoint, no answer, or nothing to ask. Failures are the `None`-shaped
+answer, not exceptions: a caller always needs the unknown path anyway.
+
+```python
+stated = llm.describe()
+if stated and stated.context_window:
+    plan_with(stated.context_window)      # a statement -- so keep your nets in force
+
+stated.context_window              # total window, as stated
+stated.max_output_tokens           # per-completion ceiling, where named
+stated.supports_function_calling   # tri-state: None means "not stated", not "no"
+stated.supports_reasoning
+stated.input_modalities            # what can be SENT -- e.g. ("text", "image", "audio")
+stated.output_modalities           # what comes back; beyond text still the exception
+stated.meta                        # the trimmed raw statements, keyed by source
+```
+
+Every `ModelInfo` field is `None`-able because *silence and statement are different
+answers*: `supports_function_calling=None` means the backend said nothing, not "no",
+and `input_modalities=None` is not a text-only declaration — `("text",)` is. The
+modalities matter most on the **input** side: whether an image can be *sent* decides a
+caller's request shape, and backends do state it (measured: a local gemma4:e4b states
+`vision` and `audio`, OpenRouter-style gateways state both directions explicitly).
+The vocabulary is the backends' shared lowercase one — `text`, `image`, `audio`,
+`video`, `file` — relayed in stated order, never validated here.
+
+And a statement is not a guarantee — measured, Ollama states the model card's context
+length (`262144` for qwen3) while actually serving its configured `num_ctx` (`32768`
+here) and silently truncating beyond it. Consumers plan with what is stated and keep
+their own nets (overflow learning, clip detection) in force.
+
+BYO wrappers stay three lines plus one: `def describe(self): return None`.
 
 `prompt` / `system` / `max_completion_tokens` are the **portable core** — the things a caller can
 mean without knowing which backend it was given. `max_completion_tokens` is named (not left to
@@ -56,6 +98,7 @@ lines:
 ```python
 class MyLLM:                      # the client's own stack -- cost tracking, PII
     model = "my-house-model"      # or None when even that is unknown
+    def describe(self): return None    # nothing to ask
     def complete(self, prompt, *, system=None, max_completion_tokens=None, **kwargs):
         return LLMResponse(text=my_stack.ask(prompt, system))
 ```
@@ -63,7 +106,7 @@ class MyLLM:                      # the client's own stack -- cost tracking, PII
 That is the recommended path whenever a client has one. A client that has built token
 accounting, cost tracking or PII filtering into its LLM calls should lend *that* rather
 than let MCS open a second, ungoverned route to a provider. Adapters
-(`mcs-adapter-llm-completion` and its siblings) are a convenience for clients that have
+(`mcs-adapter-llm`) are a convenience for clients that have
 no such stack — never a silent default when nothing is passed.
 
 ## What comes back

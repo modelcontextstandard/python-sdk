@@ -26,7 +26,7 @@ Configuration (environment or .env):
                         Local servers need none.
 
 Requires:
-    pip install mcs-types-summarizer mcs-adapter-llm-completion rich python-dotenv
+    pip install mcs-types-summarizer mcs-adapter-llm rich python-dotenv
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from mcs.adapter.llm.completion import CompletionLLMAdapter
+from mcs.adapter.llm.info import ModelsDevInfoProvider
 from mcs.prompts import load_prompts
 from mcs.types.summarizer import LLMSummarizer
 
@@ -80,6 +81,10 @@ class RouterLLM:
         """LLMPort.model: the id currently behind this port."""
         return self._adapters[self._current].model
 
+    def describe(self):
+        """LLMPort.describe: whatever the CURRENT backend states."""
+        return self._adapters[self._current].describe()
+
     def complete(self, prompt: str, *, system: str | None = None,
                  max_completion_tokens: int | None = None, **kwargs: Any):
         return self._adapters[self._current].complete(
@@ -118,13 +123,16 @@ def main() -> None:
     args = p.parse_args()
 
     specs = [_parse_model(s) for s in (args.model or ["qwen3:4b"])]
+    # ONE catalogue for every adapter: the provider caches its document, so sharing
+    # the instance means one fetch -- and it settles the wire spelling of the answer
+    # budget per model (knowledge, not a URL heuristic).
+    catalog = ModelsDevInfoProvider()
     adapters = {
         model_id: CompletionLLMAdapter(
             model_id, base_url=url,
             api_key=os.environ.get("MCS_SUMMARIZE_KEY") or os.environ.get("OPENAI_API_KEY"),
-            max_completion_tokens_field=("max_completion_tokens"
-                                         if "api.openai.com" in url else "max_tokens"),
-            **({"reasoning_effort": args.effort} if args.effort else {}),
+            model_info=catalog,
+            reasoning_effort=args.effort or None,
         )
         for model_id, url in specs
     }
@@ -132,10 +140,7 @@ def main() -> None:
     # ONE summarizer for every model -- that is the point. The prompts.toml next to
     # this file carries loud per-model variants; the shipped defaults cover the rest.
     router = RouterLLM(adapters)
-    summarizer = LLMSummarizer(
-        router, prompts=PROMPTS,
-        **({"context_window": args.window} if args.window else {}),
-    )
+    summarizer = LLMSummarizer(router, prompts=PROMPTS, context_window=args.window)
 
     text = args.file.read_text(encoding="utf-8") if args.file else DOCUMENT
 

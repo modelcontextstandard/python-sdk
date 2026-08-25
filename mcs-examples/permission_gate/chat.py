@@ -137,12 +137,13 @@ def main() -> None:
                         "sections tune per model and follow the model automatically). "
                         "(default: $MCS_SUMMARIZE_PROMPTS, unset = shipped defaults)")
     p.add_argument("--summarize-window", type=int, default=None,
-                   help="Context window of the condensation model (default: assume "
-                        "4096 until the backend teaches the real number). gpt-5.6: "
-                        "1000000. CAUTION Ollama: the effective window is its "
-                        "num_ctx, NOT the model card -- beyond num_ctx Ollama "
-                        "truncates silently; gross clipping is detected via usage "
-                        "and relearned, but set num_ctx to match.")
+                   help="Context window of the condensation model. Unset, the "
+                        "summarizer asks the endpoint itself (describe, once per "
+                        "model), else assumes 4096 and learns. Set it when you know "
+                        "the SERVING truth better than the backend states: Ollama's "
+                        "effective window is its num_ctx, NOT the model card it "
+                        "reports -- beyond num_ctx it truncates silently (gross "
+                        "clipping is detected via usage and relearned).")
     p.add_argument("--allow-all", action="store_true",
                    help="Auto-approve every call (to contrast with the interactive gate)")
     args = p.parse_args()
@@ -167,30 +168,30 @@ def main() -> None:
     summarizer = None
     if args.summarize_model:
         from mcs.adapter.llm.completion import CompletionLLMAdapter
+        from mcs.adapter.llm.info import ModelsDevInfoProvider
         from mcs.types.summarizer import LLMSummarizer
 
         # Every knob sits where its knowledge sits: effort and the wire dialect on
         # the ADAPTER (properties of talking to this model), window and prompts on
         # the SUMMARIZER (planning and wording). The model id is passed to neither
         # a second time -- the summarizer asks the port per run, so prompt variants
-        # in a --summarize-prompts file follow the model automatically.
+        # in a --summarize-prompts file follow the model automatically. The window
+        # works the same way: unset, the summarizer asks the port itself (describe(),
+        # once per model) and keeps its nets. The flag is for when the developer
+        # knows the serving truth better than the backend states it -- Ollama serves
+        # its num_ctx, not the model card.
         summarizer = LLMSummarizer(
             CompletionLLMAdapter(
-                args.summarize_model, base_url=args.summarize_url,
+                args.summarize_model, 
+                base_url=args.summarize_url,
                 # Same pattern as the search key: a dedicated variable wins, the
                 # well-known one is the fallback. Local servers need neither.
-                api_key=os.environ.get("MCS_SUMMARIZE_KEY") or os.environ.get("OPENAI_API_KEY"),
-                # Only matters once an answer budget is set -- but then it must not 400.
-                max_completion_tokens_field=("max_completion_tokens"
-                                             if "api.openai.com" in args.summarize_url
-                                             else "max_tokens"),
-                **({"reasoning_effort": args.summarize_effort}
-                   if args.summarize_effort else {}),
+                api_key=os.environ.get("MCS_SUMMARIZE_KEY") or os.environ.get("OPENAI_API_KEY"),                
+                model_info=ModelsDevInfoProvider(),                
+                reasoning_effort=args.summarize_effort,
             ),
-            **({"context_window": args.summarize_window}
-               if args.summarize_window else {}),
-            **({"prompts": args.summarize_prompts}
-               if args.summarize_prompts else {}),
+            context_window=args.summarize_window,
+            prompts=args.summarize_prompts,
         )
 
     web = WebDriver(api_key=args.search_key, base_url=args.search_url,
@@ -227,6 +228,8 @@ def main() -> None:
             f"Raw HTML: {'allowed' if args.allow_raw else 'not offered'}",
             "Condense: " + (
                 f"{args.summarize_model} @ {args.summarize_url}"
+                + (f"  window={args.summarize_window:,}" if args.summarize_window
+                   else "  window=ask the endpoint, else learn")
                 + (f"  effort={args.summarize_effort}" if args.summarize_effort else "")
                 + (f"  prompts={Path(args.summarize_prompts).name}"
                    if args.summarize_prompts else "")

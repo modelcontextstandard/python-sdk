@@ -141,7 +141,31 @@
       "Bash(PYTHONIOENCODING=utf-8 python mcs-examples/permission_gate/chat.py --allow-all --summarize-model qwen3:4b)",
       "Bash(PYTHONIOENCODING=utf-8 python mcs-examples/permission_gate/chat.py --allow-all --summarize-model qwen3:4b --summarize-effort none --summarize-window 32768 --summarize-prompts mcs-examples/prompt_variants/prompts.toml)",
       "Bash(basedpyright --outputjson packages/types/mcs-types-llm/src packages/types/mcs-types-summarizer/src packages/adapters/mcs-adapter-llm-completion/src mcs-examples/permission_gate/chat.py)",
-      "Bash(python -m pytest packages/types/mcs-types-llm packages/types/mcs-types-summarizer packages/adapters/mcs-adapter-llm-completion -q)"
+      "Bash(python -m pytest packages/types/mcs-types-llm packages/types/mcs-types-summarizer packages/adapters/mcs-adapter-llm-completion -q)",
+      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/Wizard/AppData/Local/Temp/claude/c--Development-Projekte-modelcontextstandard-python-sdk/97cde2eb-84d3-4f49-af24-c9299368e82d/scratchpad/order_truth.py\")",
+      "Bash(python -m pytest packages/types/mcs-types-summarizer packages/types/mcs-types-llm packages/drivers/mcs-driver-webfetch -q)",
+      "Bash(curl -s -m 15 http://localhost:11434/v1/models/qwen3:4b)",
+      "Bash(curl -s -m 15 http://localhost:11434/api/show -d '{\"model\":\"qwen3:4b\"}')",
+      "Bash(python -c \"from dotenv import dotenv_values;print\\(dotenv_values\\('.env'\\)['OPENAI_API_KEY']\\)\")",
+      "Bash(curl -s -m 20 https://api.openai.com/v1/models/gpt-5.6 -H 'Authorization: Bearer __TRACKED_VAR__')",
+      "Bash(curl -s -m 20 https://api.openai.com/v1/models -H 'Authorization: Bearer __TRACKED_VAR__')",
+      "Bash(python -c \"from mcs.types.llm import ModelInfo, LLMPort; print\\('Import ok:', ModelInfo\\(context_window=1\\).context_window\\)\")",
+      "Bash(PYTHONIOENCODING=utf-8 python mcs-examples/permission_gate/chat.py --allow-all --summarize-model qwen3:4b --summarize-effort none)",
+      "Bash(python -m pytest packages -q)",
+      "Bash(curl -s http://localhost:11434/api/tags)",
+      "Bash(python -c \"import json,sys; print\\([m['name'] for m in json.load\\(sys.stdin\\)['models']]\\)\")",
+      "Bash(python -m pytest packages/adapters/mcs-adapter-llm-completion packages/types/mcs-types-llm -q)",
+      "Bash(python -m pytest packages/types/mcs-types-summarizer packages/inspector packages/drivers/mcs-driver-webfetch -q)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:ai-sdk.dev)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(git mv *)",
+      "Bash(python -m pytest packages/adapters/mcs-adapter-llm packages/types/mcs-types-llm -q)",
+      "Bash(python -m pytest packages/adapters/mcs-adapter-llm/tests/test_e2e_catalog.py -m e2e -q)",
+      "Bash(rm packages/adapters/mcs-adapter-llm/src/mcs/adapter/llm/info/catalogs.py packages/adapters/mcs-adapter-llm/src/mcs/adapter/llm/info/__pycache__ -rf)",
+      "Bash(python -m pytest packages/adapters/mcs-adapter-llm packages/types -q)",
+      "Bash(python -m py_compile mcs-examples/permission_gate/chat.py mcs-examples/prompt_variants/main.py)",
+      "Bash(python -m pytest packages -q -rs)"
     ]
   }
 }

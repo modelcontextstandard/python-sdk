@@ -7,7 +7,7 @@ members = [
     "mcs-adapter-docker",
     "mcs-adapter-http",
     "mcs-adapter-imap",
-    "mcs-adapter-llm-completion",
+    "mcs-adapter-llm",
     "mcs-adapter-localfs",
     "mcs-adapter-mcp",
     "mcs-adapter-smb",
@@ -1476,9 +1476,9 @@ version = "0.1.0"
 source = { editable = "packages/adapters/mcs-adapter-imap" }
 
 [[package]]
-name = "mcs-adapter-llm-completion"
+name = "mcs-adapter-llm"
 version = "0.1.0"
-source = { editable = "packages/adapters/mcs-adapter-llm-completion" }
+source = { editable = "packages/adapters/mcs-adapter-llm" }
 dependencies = [
     { name = "mcs-adapter-http" },
     { name = "mcs-types-llm" },
@@ -1937,7 +1937,7 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
-    { name = "mcs-adapter-llm-completion" },
+    { name = "mcs-adapter-llm" },
     { name = "mcs-driver-mail" },
     { name = "mcs-driver-rest" },
     { name = "mcs-driver-webfetch" },
@@ -1957,7 +1957,7 @@ rest = [
     { name = "mcs-driver-rest" },
 ]
 summarize = [
-    { name = "mcs-adapter-llm-completion" },
+    { name = "mcs-adapter-llm" },
     { name = "mcs-types-summarizer" },
 ]
 webfetch = [
@@ -1969,7 +1969,7 @@ websearch = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mcs-adapter-llm-completion", marker = "extra == 'summarize'", editable = "packages/adapters/mcs-adapter-llm-completion" },
+    { name = "mcs-adapter-llm", marker = "extra == 'summarize'", editable = "packages/adapters/mcs-adapter-llm" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-driver-mail", marker = "extra == 'mail'", editable = "packages/drivers/mcs-driver-mail" },
     { name = "mcs-driver-mailread", marker = "extra == 'mailread'", editable = "packages/drivers/mcs-driver-mailread" },
@@ -2038,7 +2038,7 @@ dependencies = [
     { name = "mcs-adapter-docker" },
     { name = "mcs-adapter-http" },
     { name = "mcs-adapter-imap" },
-    { name = "mcs-adapter-llm-completion" },
+    { name = "mcs-adapter-llm" },
     { name = "mcs-adapter-localfs" },
     { name = "mcs-adapter-mcp" },
     { name = "mcs-adapter-smb" },
@@ -2105,7 +2105,7 @@ requires-dist = [
     { name = "mcs-adapter-docker", editable = "packages/adapters/mcs-adapter-docker" },
     { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
     { name = "mcs-adapter-imap", editable = "packages/adapters/mcs-adapter-imap" },
-    { name = "mcs-adapter-llm-completion", editable = "packages/adapters/mcs-adapter-llm-completion" },
+    { name = "mcs-adapter-llm", editable = "packages/adapters/mcs-adapter-llm" },
     { name = "mcs-adapter-localfs", editable = "packages/adapters/mcs-adapter-localfs" },
     { name = "mcs-adapter-mcp", editable = "packages/adapters/mcs-adapter-mcp" },
     { name = "mcs-adapter-smb", editable = "packages/adapters/mcs-adapter-smb" },

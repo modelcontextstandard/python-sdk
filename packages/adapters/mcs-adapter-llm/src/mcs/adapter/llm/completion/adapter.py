@@ -24,11 +24,15 @@ package adds **no** new runtime dependency beyond it.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any, Callable
 
 from mcs.adapter.http import HttpAdapter
-from mcs.types.llm import ContextWindowExceeded, LLMError, LLMResponse, TokenUsage
+from mcs.types.llm import (ContextWindowExceeded, LLMError, LLMResponse,
+                           ModelInfo, ModelInfoProvider, TokenUsage)
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
@@ -78,7 +82,10 @@ _LIMIT_PATTERNS = (
 #: OpenAI's reasoning models reject it and want ``max_completion_tokens`` instead. There
 #: is no name both understand, so this is a setting -- the ``max_completion_tokens_field``
 #: constructor argument -- and never a probe: the official SDK exposes both spellings
-#: side by side in ``create()`` and leaves the choice to the caller, and so do we.
+#: side by side in ``create()`` and leaves the choice to the caller, and so do we. The
+#: one exception is *knowledge*, not probing: with a ``model_info`` catalogue injected
+#: and no explicit choice, the spelling is derived from what the catalogue states (see
+#: ``_field_from_knowledge``).
 DEFAULT_MAX_COMPLETION_TOKENS_FIELD = "max_tokens"
 
 #: Where a backend may put the model's thinking. ``reasoning_content`` is what LiteLLM
@@ -163,12 +170,20 @@ class CompletionLLMAdapter:
     max_completion_tokens_field :
         **The wire field name** for the answer budget the port calls
         ``max_completion_tokens``. Older and local servers understand only
-        ``"max_tokens"`` (the default); OpenAI's reasoning models reject that name
-        outright and want ``"max_completion_tokens"``. There is no name both accept, and
-        the official SDK settles it the same way this parameter does: ``create()``
-        exposes both spellings side by side and choosing is the caller's job -- no
-        detection, no hidden retry. Get it wrong and the backend's 400 names the right
-        field; this adapter appends where to put it.
+        ``"max_tokens"``; OpenAI's reasoning models reject that name outright and want
+        ``"max_completion_tokens"``. There is no name both accept, and the official SDK
+        settles it the same way this parameter does: ``create()`` exposes both
+        spellings side by side and choosing is the caller's job -- no detection, no
+        hidden retry. Get it wrong and the backend's 400 names the right field; this
+        adapter appends where to put it.
+
+        Left unset (``None``), the adapter derives the spelling from **knowledge**
+        when a *model_info* provider was injected: a reasoning model under the
+        ``openai`` provider takes ``"max_completion_tokens"``, everything else the
+        ``"max_tokens"`` default. That is data application, not a heuristic -- the
+        catalogue states reasoning and provider, and the one measured rejection is
+        OpenAI's. Resolved once, lazily, on the first call that sends a budget; an
+        explicit value always wins and skips the lookup entirely.
     extra_body :
         Construction-time body defaults, merged over the named values (so they can
         override them); per-call ``complete(**kwargs)`` wins over both. Together with
@@ -188,6 +203,14 @@ class CompletionLLMAdapter:
         standard way for a backend to say "too long" (see :data:`_OVERFLOW_PHRASES`), so a
         server we have never met may word it in a way this adapter misses. Rather than
         wait for a release, teach it here.
+    model_info :
+        A :class:`~mcs.types.llm.ModelInfoProvider` -- **knowledge** to fall back on
+        where the endpoint states nothing (see :mod:`mcs.adapter.llm.info` for the
+        catalogue implementations). ``describe()`` asks the endpoint first and lets
+        this provider fill only the fields that stayed unknown: a statement is ground
+        truth for this connection, knowledge is maintained data that may lag it.
+        Optional and never a silent default -- without it, ``describe()`` relays the
+        endpoint alone, exactly as before.
     _http :
         Injected transport (DPI). Supply one to share connection settings, a proxy or
         Basic-Auth with the rest of an application -- or a fake, in tests.
@@ -201,11 +224,12 @@ class CompletionLLMAdapter:
         api_key: str | None = None,
         temperature: float | None = None,
         reasoning_effort: str | None = None,
-        max_completion_tokens_field: str = DEFAULT_MAX_COMPLETION_TOKENS_FIELD,
+        max_completion_tokens_field: str | None = None,
         extra_body: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
         timeout: int = 120,
         is_overflow: Callable[[int, str, str], bool] | None = None,
+        model_info: ModelInfoProvider | None = None,
         _http: HttpAdapter | None = None,
     ) -> None:
         self.model = model
@@ -216,6 +240,7 @@ class CompletionLLMAdapter:
         self.timeout = timeout
         self._is_overflow = is_overflow or _looks_like_overflow
         self._max_tokens_field = max_completion_tokens_field
+        self._model_info = model_info
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -226,6 +251,172 @@ class CompletionLLMAdapter:
         self._extra_headers = {} if _http is None else headers
 
     # -- LLMPort ---------------------------------------------------------------
+
+    #: Field names under which an enriched /v1/models entry states its window --
+    #: vLLM (max_model_len), Groq (context_window), Together (context_length),
+    #: Mistral (max_context_length), gateways (max_input_tokens). The plain OpenAI
+    #: shape has none of them (measured: four bookkeeping fields, and alias ids like
+    #: gpt-5.6 are not even resolved there).
+    _INFO_WINDOW_KEYS = ("context_window", "max_model_len", "context_length",
+                         "max_context_length", "max_input_tokens")
+    _INFO_OUTPUT_KEYS = ("max_output_tokens", "max_completion_tokens")
+
+    def describe(self) -> ModelInfo | None:
+        """Ask the endpoint about the model; relay what it states (``LLMPort.describe``).
+
+        Two inquiries, both over the **injected** transport -- the MCS promise that
+        every byte travels through the client's adapter holds here too:
+
+        1. ``GET {base}/models/{id}`` -- the route every OpenAI-shaped server has.
+           Enriched servers (vLLM, Groq, Mistral, gateways) put the window right
+           there; the plain shape answers bookkeeping only.
+        2. When no window surfaced and the base URL has a ``/v1`` root, Ollama's
+           native ``POST /api/show`` on the same server -- rich: capabilities
+           (``tools``, ``thinking``, ``vision``, ``audio``) and the architecture's
+           context length. Stated, not guaranteed: measured, 262 144 for a model
+           served at ``num_ctx`` 32 768 -- the consumer's clip detector stays the net.
+
+        Then, when the adapter was constructed with a *model_info* provider,
+        **knowledge** fills whatever the endpoint left unknown -- field by field,
+        statement first: what this connection's backend said about itself outranks
+        what a catalogue remembers about the model family.
+
+        Failures are the ``None``-shaped answer, never exceptions: this is an
+        inquiry, and every caller needs the unknown path anyway.
+        """
+        info: dict[str, Any] = {}
+        meta: dict[str, Any] = {}
+        self._describe_models_endpoint(info, meta)
+        if info.get("context_window") is None:
+            self._describe_ollama_show(info, meta)
+        self._describe_knowledge(info, meta)
+        if not meta:
+            return None
+        return ModelInfo(
+            context_window=info.get("context_window"),
+            max_output_tokens=info.get("max_output_tokens"),
+            supports_function_calling=info.get("supports_function_calling"),
+            supports_reasoning=info.get("supports_reasoning"),
+            input_modalities=info.get("input_modalities"),
+            output_modalities=info.get("output_modalities"),
+            meta=meta,
+        )
+
+    def _describe_models_endpoint(self, info: dict, meta: dict) -> None:
+        try:
+            resp = self._http.request(
+                "GET", f"{self.base_url}/models/{self.model}",
+                headers=self._extra_headers or None, timeout=self.timeout,
+            )
+            if resp.status_code >= 400:
+                return
+            data = json.loads(resp.text)
+        except Exception:  # noqa: BLE001 -- an inquiry; silence IS the answer
+            logger.debug("describe: models endpoint yielded nothing", exc_info=True)
+            return
+        if not isinstance(data, dict):
+            return
+        if isinstance(data.get("data"), dict):
+            # A gateway envelope, {"data": {...}} -- OpenRouter's shape. The spec
+            # object is flat, and its "data" is only ever the LIST route's array,
+            # so unwrapping a dict cannot misread a spec answer.
+            data = data["data"]
+        meta["models_endpoint"] = data
+        for key in self._INFO_WINDOW_KEYS:
+            if isinstance(data.get(key), int):
+                info.setdefault("context_window", data[key])
+                break
+        for key in self._INFO_OUTPUT_KEYS:
+            if isinstance(data.get(key), int):
+                info.setdefault("max_output_tokens", data[key])
+                break
+        supported = data.get("supported_parameters")
+        if isinstance(supported, list):
+            info.setdefault("supports_function_calling", "tools" in supported)
+        arch = data.get("architecture")
+        if isinstance(arch, dict):
+            # OpenRouter-style gateways state both directions explicitly; the older
+            # "text+image->text" string is the same statement in one field. Explicit
+            # lists win -- setdefault keeps the first (most explicit) answer.
+            for field_name in ("input_modalities", "output_modalities"):
+                stated = arch.get(field_name)
+                if (isinstance(stated, list) and stated
+                        and all(isinstance(m, str) for m in stated)):
+                    info.setdefault(field_name, tuple(stated))
+            legacy = arch.get("modality")
+            if isinstance(legacy, str) and "->" in legacy:
+                accepts, _, produces = legacy.partition("->")
+                info.setdefault("input_modalities",
+                                tuple(m for m in accepts.split("+") if m))
+                info.setdefault("output_modalities",
+                                tuple(m for m in produces.split("+") if m))
+
+    def _describe_ollama_show(self, info: dict, meta: dict) -> None:
+        if not self.base_url.endswith("/v1"):
+            return
+        root = self.base_url[: -len("/v1")]
+        try:
+            resp = self._http.request(
+                "POST", f"{root}/api/show", json_body={"model": self.model},
+                headers=self._extra_headers or None, timeout=self.timeout,
+            )
+            if resp.status_code >= 400:
+                return
+            data = json.loads(resp.text)
+        except Exception:  # noqa: BLE001
+            logger.debug("describe: /api/show yielded nothing", exc_info=True)
+            return
+        if not isinstance(data, dict):
+            return
+        # Trimmed on purpose: /api/show also carries tensors, the license text and
+        # the whole modelfile -- megabytes nobody plans with.
+        show: dict[str, Any] = {}
+        for key, value in (data.get("model_info") or {}).items():
+            if key.endswith(".context_length") and isinstance(value, int):
+                info.setdefault("context_window", value)
+                show["context_length"] = value
+        capabilities = data.get("capabilities")
+        if isinstance(capabilities, list):
+            show["capabilities"] = capabilities
+            info.setdefault("supports_function_calling", "tools" in capabilities)
+            info.setdefault("supports_reasoning", "thinking" in capabilities)
+            # Ollama names what a model UNDERSTANDS ("vision", "audio" -- measured on
+            # gemma4:e4b) without naming a direction. On a completions API those are
+            # inputs, and generation is not served here, so output stays text. The
+            # raw list rides in meta for the day that changes.
+            if "completion" in capabilities:
+                accepts = ["text"]
+                accepts += [modality for capability, modality
+                            in (("vision", "image"), ("audio", "audio"))
+                            if capability in capabilities]
+                info.setdefault("input_modalities", tuple(accepts))
+                info.setdefault("output_modalities", ("text",))
+        if isinstance(data.get("details"), dict):
+            show["details"] = data["details"]
+        if show:
+            meta["ollama_show"] = show
+
+    def _describe_knowledge(self, info: dict, meta: dict) -> None:
+        """Let an injected catalogue fill the fields the endpoint left unknown."""
+        if self._model_info is None:
+            return
+        try:
+            known = self._model_info.describe(self.model)
+        except Exception:  # noqa: BLE001 -- a provider must not break the inquiry
+            logger.debug("describe: model_info provider raised", exc_info=True)
+            return
+        if known is None:
+            return
+        for field_name in ("context_window", "max_output_tokens",
+                           "supports_function_calling", "supports_reasoning",
+                           "input_modalities", "output_modalities"):
+            value = getattr(known, field_name)
+            if info.get(field_name) is None and value is not None:
+                info[field_name] = value
+        # Catalogue sources keep their own meta keys (litellm, models_dev) -- they sit
+        # beside the endpoint's, so nothing is overwritten and provenance stays legible.
+        meta.update(known.meta)
+
 
     def complete(
         self,
@@ -269,9 +460,50 @@ class CompletionLLMAdapter:
             body["reasoning_effort"] = self.reasoning_effort
         body.update(self.extra_body)
         if max_completion_tokens is not None:
-            body[self._max_tokens_field] = max_completion_tokens
+            body[self._resolve_max_tokens_field()] = max_completion_tokens
         body.update(call_kwargs)
         return body
+
+    def _resolve_max_tokens_field(self) -> str:
+        """The wire spelling of the budget field -- explicit, derived, or default.
+
+        Resolved once and kept: an explicit constructor value was never ``None`` and
+        wins unseen; otherwise knowledge is consulted a single time, on the first call
+        that actually sends a budget -- never in the constructor, which must not do
+        network I/O.
+        """
+        if self._max_tokens_field is None:
+            self._max_tokens_field = (self._field_from_knowledge()
+                                      or DEFAULT_MAX_COMPLETION_TOKENS_FIELD)
+        return self._max_tokens_field
+
+    def _field_from_knowledge(self) -> str | None:
+        """The one derivation this adapter performs from catalogue knowledge.
+
+        Measured ground: only OpenAI's reasoning models reject ``max_tokens`` --
+        reasoning models elsewhere (Ollama's qwen, DeepSeek) accept it fine. So the
+        rule needs both facts, and both are data: the catalogue states
+        ``supports_reasoning``, and its meta names the provider the model was found
+        under (``models_dev.provider`` / ``litellm.litellm_provider``).
+        """
+        if self._model_info is None:
+            return None
+        try:
+            known = self._model_info.describe(self.model)
+        except Exception:  # noqa: BLE001 -- knowledge must not break the call path
+            logger.debug("max-tokens field: model_info provider raised", exc_info=True)
+            return None
+        if known is None or not known.supports_reasoning:
+            return None
+        sources = known.meta or {}
+        models_dev = sources.get("models_dev") or {}
+        # Membership, not a pick: one id sits under many namespaces (the first-party
+        # provider plus every gateway reselling it -- measured, 18 for gpt-5.5), and
+        # the question here is only "does openai serve this id".
+        openai_serves = ("openai" in (models_dev.get("providers") or ())
+                         or models_dev.get("provider") == "openai"
+                         or (sources.get("litellm") or {}).get("litellm_provider") == "openai")
+        return "max_completion_tokens" if openai_serves else None
 
     def _post(self, body: dict[str, Any]):
         return self._http.request(

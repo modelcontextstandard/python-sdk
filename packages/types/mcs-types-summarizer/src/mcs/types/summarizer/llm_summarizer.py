@@ -19,12 +19,19 @@ actually has, straight off the model card. Everything else is derived:
 
     input budget per call = context_window - answer reserve - template overhead
 
-``LLMPort`` deliberately reports no window, so when none was passed a conservative
-assumption applies until the backend teaches the real number: a call that comes back
-with ``ContextWindowExceeded`` *learns* -- a named limit **is** the window and replaces
-the guess outright; without a name, halving is all there is. The same document never
-hits the same wall twice. That state lives here and not on the adapter because it is
-planning knowledge, held by the component doing the planning.
+The window resolves in three steps, best knowledge first. The **constructor** wins:
+the developer may know a serving truth no endpoint states (Ollama serves its
+``num_ctx``, not the model card). Unset, the summarizer **asks the port** --
+``LLMPort.describe()``, once per model id -- and plans with what the backend states;
+it may do so because the inquiry is part of the very contract it already holds.
+Where nothing is stated either, a conservative assumption applies. All three are then
+corrected by the backend itself: a call that comes back with
+``ContextWindowExceeded`` *learns* -- a named limit **is** the window and replaces the
+guess outright; without a name, halving is all there is. The same document never hits
+the same wall twice. This state lives here and not on the adapter because it is
+planning knowledge, held by the component doing the planning -- per model id, like
+the prompt variants, so an agent that switches models mid-operation never plans one
+model's budget with another model's lesson.
 
 **Truncation is propagated, never swallowed.** Measured on qwen3 via Ollama: a
 reasoning model can spend an entire answer budget thinking and return an empty string
@@ -108,16 +115,20 @@ class LLMSummarizer:
         even into failure: pinned ``stuff`` with an oversized text raises rather than
         silently becoming something else -- the caller asked for exactly that.
     context_window :
-        The model's total token window, when known -- what its model card states, which
-        is the number a developer actually has. Everything else is derived from it:
+        The model's total token window, for when the developer knows better than the
+        backend states -- Ollama's effective window is its ``num_ctx``, not the model
+        card. Everything else is derived from it:
 
             input budget per call = context_window - answer reserve - template overhead
 
         where the answer reserve is *max_answer_tokens* when set, else
-        :data:`DEFAULT_ANSWER_RESERVE`. Unset, a conservative
-        :data:`DEFAULT_ASSUMED_WINDOW` applies until the backend teaches the real
-        number (see the module docstring); a named ``ContextWindowExceeded`` limit
-        replaces the window outright, not some derived fraction of it.
+        :data:`DEFAULT_ANSWER_RESERVE`. **Unset, the summarizer asks the port
+        itself** (``describe()``, once per model id) and plans with what the backend
+        states; where nothing is stated, a conservative
+        :data:`DEFAULT_ASSUMED_WINDOW` applies. Every step stays correctable: a named
+        ``ContextWindowExceeded`` limit replaces the working window outright, and the
+        silent-truncation detector demotes a stated-but-not-served number the moment
+        usage proves it wrong.
     max_answer_tokens :
         Cap for every model answer, passed as the port's ``max_completion_tokens``.
         ``None`` (default) sets no cap: a cap is a harness decision, and a tight one
@@ -164,13 +175,48 @@ class LLMSummarizer:
         self._llm = llm
         self._strategy = strategy
         self._pinned = strategy != "auto"
-        self._window = context_window or DEFAULT_ASSUMED_WINDOW
+        self._configured_window = context_window
+        #: Working window per model id -- resolved lazily in :meth:`summarize`, learned
+        #: in :meth:`_learn`. Per model, like the prompt variants: a router port may
+        #: switch models mid-operation, and one model's lesson is not another's budget.
+        self._windows: dict[str | None, int] = {}
+        self._current: str | None = None
         self._max_answer_tokens = max_answer_tokens
         self._concurrency = concurrency
         self._chars_per_token = chars_per_token
         # Loaded once, resolved per run: see the `prompts` parameter docs.
         self._bundle = load_prompts("mcs.types.summarizer", override=prompts)
         self._active = self._bundle.resolve(None)
+
+    # -- the per-model window --------------------------------------------------
+
+    @property
+    def _window(self) -> int:
+        """Working window of the model currently behind the port."""
+        return self._windows.get(self._current, DEFAULT_ASSUMED_WINDOW)
+
+    @_window.setter
+    def _window(self, value: int) -> None:
+        self._windows[self._current] = value
+
+    def _resolve_window(self) -> int:
+        """First window for a model this instance has not planned for yet.
+
+        Best knowledge first: the constructor (the developer may know a serving truth
+        no endpoint states), then the port's own statement -- ``describe()`` is part
+        of the contract this component already holds, so asking it is using the
+        injected port, not opening a side channel -- then the conservative
+        assumption. Whatever this returns is a starting point, not a verdict: the
+        learning in :meth:`_learn` and the silent-truncation detector correct it the
+        moment the backend proves otherwise.
+        """
+        if self._configured_window:
+            return self._configured_window
+        describe = getattr(self._llm, "describe", None)
+        stated = describe() if callable(describe) else None
+        if stated is not None and stated.context_window:
+            return stated.context_window
+        return DEFAULT_ASSUMED_WINDOW
 
     # -- the per-run prompt view ----------------------------------------------
 
@@ -193,11 +239,16 @@ class LLMSummarizer:
                 "summarization -- ask something, even if it is 'summarise this text'."
             )
 
-        # Prompts follow the model AT CALL TIME: the port names what is currently
-        # behind it (a router may have switched since the last run), and the bundle
-        # resolves the variants for exactly that -- cached per id, so the common case
-        # costs a dictionary lookup.
-        self._active = self._bundle.resolve(getattr(self._llm, "model", None))
+        # Prompts AND window follow the model AT CALL TIME: the port names what is
+        # currently behind it (a router may have switched since the last run), the
+        # bundle resolves the variants for exactly that, and an unseen model gets its
+        # window resolved once -- both cached per id, so the common case costs two
+        # dictionary lookups.
+        model = getattr(self._llm, "model", None)
+        self._active = self._bundle.resolve(model)
+        self._current = model
+        if model not in self._windows:
+            self._windows[model] = self._resolve_window()
 
         responses: list[LLMResponse] = []
         strategy = self._strategy
@@ -356,7 +407,31 @@ class LLMSummarizer:
             max_completion_tokens=self._max_answer_tokens,
         )
         self._check_silent_truncation(prompt, response)
+        self._calibrate(prompt, response)
         return response
+
+    def _calibrate(self, prompt: str, response: LLMResponse) -> None:
+        """Replace the guessed chars-per-token ratio with measurement -- downward only.
+
+        The a-priori ratio is a labelled guess (see :mod:`mcs.types.llm.tokens`); every
+        response carries the truth for THIS model and THIS kind of text in its measured
+        prompt tokens. When reality packs more tokens into the same characters than
+        assumed (CJK, code, markup), guess-based budgets overflow -- so a denser
+        measured ratio replaces the guess for every call after.
+
+        Downward only, deliberately. Learning that text is *cheaper* than assumed
+        would trade a proven-safe budget for fewer chunks; that optimisation is the
+        developer's explicit call (``chars_per_token=``), not something to drift into.
+        The rule doubles as a corruption guard: a silent clip below the detection
+        threshold inflates the measured ratio -- and inflated ratios fall on the
+        ignored side. (The denominator also includes system prompt and chat-template
+        overhead, biasing measurements slightly conservative -- same direction, fine.)
+        """
+        reported = response.usage.prompt
+        if reported and reported > 0:
+            measured = len(prompt) / reported
+            if measured < self._chars_per_token:
+                self._chars_per_token = max(1.0, measured)
 
     def _check_silent_truncation(self, prompt: str, response: LLMResponse) -> None:
         """Turn a backend's silent clipping into the loud failure it should have been.

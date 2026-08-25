@@ -3,9 +3,9 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "mcs-adapter-llm-completion"
+name            = "mcs-adapter-llm"
 version         = "0.1.0"
-description     = "Chat Completions LLM adapter (LLMPort over /v1/chat/completions) for the Model Context Standard."
+description     = "LLM adapters for the Model Context Standard: Chat Completions (LLMPort) and model-info catalog providers."
 readme          = "README.md"
 requires-python = ">=3.11"
 license         = "Apache-2.0"

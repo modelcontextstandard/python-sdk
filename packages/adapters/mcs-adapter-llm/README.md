@@ -1,6 +1,8 @@
-# mcs-adapter-llm-completion
+# mcs-adapter-llm
 
-**An `LLMPort` over the Chat Completions wire format**, for the Model Context Standard.
+**The LLM adapters for the Model Context Standard**: an `LLMPort` over the Chat
+Completions wire format, and `ModelInfoProvider` catalogues for model knowledge.
+Siblings for other wire formats (`/v1/messages`, `/v1/responses`) will live here too.
 
 ```python
 from mcs.adapter.llm.completion import CompletionLLMAdapter
@@ -41,10 +43,10 @@ runtime dependency beyond it.
 
 ## Transport only, and stateless
 
-No context window, no tokenizer, no remembered limits. Those describe the **model**, not
-the connection to it, and an adapter answering for them would be guessing on behalf of
-whoever chose the model — a generic Chat Completions URL rarely even says which model is
-behind it.
+No *guessed* context window, no tokenizer, no remembered limits. Those describe the
+**model**, not the connection to it, and an adapter answering for them from its own head
+would be guessing on behalf of whoever chose the model — a generic Chat Completions URL
+rarely even says which model is behind it.
 
 What it does instead is report what the backend **measured**:
 
@@ -63,6 +65,102 @@ Two backend quirks are absorbed here so consumers never meet them: Ollama's nati
 [openclaw#53448](https://github.com/openclaw/openclaw/issues/53448)), and the
 non-standard `message.reasoning` field, whose text is where a missing answer budget went
 and which appears nowhere else — it lands in `meta["reasoning_text"]`.
+
+### `describe()` — relaying what the endpoint states
+
+The port's inquiry is implemented here over the **same injected `_http`** every
+completion uses — the MCS transport promise holds; a type never opens a network path,
+and the adapter never opens a second one. Two sources, tried in order, both measured:
+
+1. **`GET {base_url}/models/{id}`** — the spec's route. Enriched servers (vLLM's
+   `max_model_len`, gateways like OpenRouter) answer usefully and the inquiry ends
+   here; a gateway's `{"data": {...}}` envelope is unwrapped, and an OpenRouter-style
+   `architecture` block states modalities in **both directions**
+   (`input_modalities` / `output_modalities` lists, with the older
+   `"text+image->text"` string as fallback — explicit lists win). **OpenAI itself
+   answers meagrely**: the route resolves `gpt-5.5`, but states only
+   `id / created / owned_by` — no window, no capabilities. And the `/v1/models`
+   *list* does not even contain the dated alias ids.
+2. **`POST {root}/api/show`** — only when `base_url` ends in `/v1` (an Ollama
+   convention) and the first source stated no window. Rich where it answers:
+   `capabilities` (`completion, tools, thinking, vision, audio`) and the
+   architecture's `context_length`.
+
+| endpoint | states |
+|---|---|
+| OpenAI `GET /v1/models/gpt-5.5` | identity fields only → `ModelInfo` with all-`None` fields |
+| vLLM `GET /v1/models/{id}` | `max_model_len` → `context_window` |
+| OpenRouter-style gateways | `architecture.input_modalities: ['text', 'image', ...]` → both directions verbatim |
+| Ollama `GET /v1/models/{id}` | meagre → falls through |
+| Ollama `POST /api/show` | `qwen3.context_length=262144`, capabilities → window, tools, thinking, modalities |
+
+**Modalities need one translation of direction.** Ollama names what a model
+*understands* without saying which way — measured across three local models:
+
+| model | capabilities stated | relayed as |
+|---|---|---|
+| qwen3:4b | `completion, tools, thinking` | in `("text",)`, out `("text",)` |
+| qwen3.6 | + `vision` | in `("text", "image")` |
+| gemma4:e4b | + `vision, audio` | in `("text", "image", "audio")` |
+
+On a completions API those capabilities are **inputs** — generation is not served
+here, so output stays `("text",)`. The raw capabilities list rides in `meta` for the
+day that changes. Gateway `architecture` blocks need no such translation: they state
+both directions themselves, including image on the *output* side for image-producing
+chat models, and are relayed verbatim.
+
+The Ollama caveat is the reason `describe()` is worded as *stating*, not *knowing*:
+`262144` is the model card's architecture limit, while the server actually serves its
+configured `num_ctx` (`32768` here) and silently truncates beyond it. A statement is a
+planning input, not a guarantee — consumers keep their clip detectors in force.
+
+Everything harvested lands untouched in `ModelInfo.meta` (bulk fields like tensors,
+license and modelfile trimmed), so an unanticipated field is not lost. Transport
+failures never raise: `describe()` answers `None` — an inquiry must not break the
+component that merely wondered.
+
+### Knowledge, where the endpoint states nothing
+
+Some backends state nothing usable — measured, OpenAI's own models route answers
+bookkeeping only. For those there are the community-maintained catalogues, wrapped as
+`ModelInfoProvider` implementations in `mcs.adapter.llm.info`:
+
+```python
+from mcs.adapter.llm.info import LiteLLMInfoProvider, ModelsDevInfoProvider
+
+catalog = ModelsDevInfoProvider()            # models.dev -- purpose-built, provider-first
+catalog = LiteLLMInfoProvider()              # LiteLLM's JSON -- price-rich, flat ids
+
+known = catalog.describe("gpt-5.6")          # standalone: ModelInfo | None
+llm = CompletionLLMAdapter("gpt-5.6", api_key=..., model_info=catalog)
+llm.describe()                               # endpoint first, catalogue fills the gaps
+```
+
+**Statement beats knowledge.** What this connection's backend says about itself is
+ground truth for this deployment; a catalogue describes the model family and may lag
+reality (it cannot know a local server's `num_ctx`). `describe()` therefore merges
+field by field, endpoint first, and `meta` names every source that contributed
+(`models_endpoint`, `ollama_show`, `litellm`, `models_dev`).
+
+Both providers fetch their document **once** per instance over the injected transport
+(models.dev refuses clients without a `User-Agent` — measured, handled), answer from
+memory after that, and answer `None` for unknown models and every failure. The raw
+entries survive in `meta` — including LiteLLM's price fields, which nothing here maps
+yet but a cost tracker will want, and models.dev's exclusives (`temperature: false`,
+the accepted `reasoning_options` effort values).
+
+This is deliberately **knowledge as data, not logic** — the same split the TypeScript
+ecosystem settled on: the AI SDK keeps model ids dumb strings, models.dev carries the
+knowledge, the client composes. Exactly **one** request-path decision is settled from
+knowledge, and only when the caller left it open: the wire spelling of the budget
+field. A reasoning model that `openai` serves takes `max_completion_tokens` (the one
+measured rejection); everything else keeps `max_tokens`. That is a membership check
+against data — one id sits under many namespaces (measured: 18 for `gpt-5.5`, the
+first-party provider plus every gateway reselling it), so the question is "does openai
+serve this id", never "who is the canonical provider". Resolved lazily on the first
+call that sends a budget; an explicit `max_completion_tokens_field` always wins and
+skips the lookup. Compare the AI SDK, which answers the same question with model-id
+regexes in its first-party provider — knowledge as *code*, a release per model family.
 
 ### The trap this exists for
 
@@ -158,12 +256,15 @@ side and the developer picks. We do the same, as one constructor knob:
 ```python
 CompletionLLMAdapter("qwen3:8b", base_url=...)                            # default: "max_tokens"
 CompletionLLMAdapter("gpt-5.6", api_key=..., max_completion_tokens_field="max_completion_tokens")
+CompletionLLMAdapter("gpt-5.6", api_key=..., model_info=ModelsDevInfoProvider())  # derived
 ```
 
 No probe, no hidden retry, no state. Get it wrong and the failure is loud and cheap: the
 backend's 400 already names the right field, and the adapter appends where to put it —
 `(construct this adapter with max_completion_tokens_field='max_completion_tokens')`. A one-time
-development-time discovery instead of a per-instance probing call in production.
+development-time discovery instead of a per-instance probing call in production. The
+third form derives the spelling from **knowledge** instead (see the catalogue section
+below): data application, not a probe, and an explicit choice still wins.
 
 The port's budget parameter is `max_completion_tokens` — named after what it actually
 caps, the completion including any reasoning spent inside it. The constructor's
@@ -232,7 +333,10 @@ CompletionLLMAdapter(
     api_key=None,                           # local servers usually want none
     temperature=None,                       # unset by default -- GPT-5 rejects 0
     reasoning_effort=None,                  # "none" | "low" | "medium" | "high" | "xhigh"
-    max_completion_tokens_field="max_tokens",   # wire spelling of the port's budget param
+    max_completion_tokens_field=None,       # wire spelling of the port's budget param:
+                                            #   None = derive from model_info, else "max_tokens"
+    model_info=None,                        # a ModelInfoProvider: fills describe() gaps,
+                                            #   settles the budget spelling -- never silent
     extra_body={"num_ctx": 32768},          # backend-specific knobs the port has no room for
     timeout=120,                            # a long chunk is not a web request
     _http=my_http_adapter,                  # DPI: share a proxy, Basic-Auth, or inject a fake
@@ -270,7 +374,7 @@ The offline suite proves the adapter behaves as we *assume* a backend does. A li
 proves the assumption:
 
 ```bash
-pytest packages/adapters/mcs-adapter-llm-completion -m e2e
+pytest packages/adapters/mcs-adapter-llm -m e2e
 ```
 
 Deselected by default rather than skipped — a skipped test reports as a harmless dot and
@@ -292,7 +396,7 @@ MCS_E2E_LLM_BASE_URL=https://api.openai.com/v1 \
 MCS_E2E_LLM_MODEL=gpt-5.5,gpt-5.6 \
 MCS_E2E_LLM_MAX_TOKENS=max_completion_tokens \
 MCS_E2E_LLM_KEY=$OPENAI_API_KEY \
-  pytest packages/adapters/mcs-adapter-llm-completion -m e2e
+  pytest packages/adapters/mcs-adapter-llm -m e2e
 ```
 
 Every finding in this README came from running these, not from reading a specification.
@@ -300,7 +404,7 @@ Every finding in this README came from running these, not from reading a specifi
 ## Installation
 
 ```bash
-pip install mcs-adapter-llm-completion
+pip install mcs-adapter-llm
 ```
 
 ## Links
