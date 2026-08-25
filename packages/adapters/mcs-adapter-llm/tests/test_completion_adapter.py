@@ -284,6 +284,20 @@ class TestResponse:
         assert answer.text == ""
         assert answer.truncated is True
 
+    def test_null_content_with_reasoning_is_the_thinking_trap_not_an_error(self):
+        """Measured on kimi-k3 via OpenRouter: the whole budget spent thinking
+        arrives as content: null with 12k characters in `reasoning` -- the same
+        trap Ollama spells as content: "". Empty text plus truncated, never an
+        exception; the thinking survives in meta."""
+        payload = _answer(None, choice={
+            "finish_reason": "length",
+            "message": {"role": "assistant", "content": None,
+                        "reasoning": "Let me think at length..."}})
+        answer = _adapter(FakeHttp(payload=payload)).complete("q")
+        assert answer.text == ""
+        assert answer.truncated is True
+        assert answer.meta["reasoning_text"] == "Let me think at length..."
+
     def test_a_complete_answer_is_not_truncated(self):
         payload = _answer("Mimi", choice={"finish_reason": "stop"})
         assert _adapter(FakeHttp(payload=payload)).complete("q").truncated is False

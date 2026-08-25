@@ -33,7 +33,8 @@ Usage (from the workspace venv -- ``uv run python ...`` or activate ``.venv`` fi
 Inside the loop:
     <any text>            one complete() to the model
     effort <value|off>    reasoning_effort (offered per the tri-state above)
-    budget <tokens>       max_completion_tokens per call (default 1024, 0 = none)
+    budget <tokens>       max_completion_tokens per call -- caps thinking AND
+                          content together (default: none, 0 = none)
     info                  show describe() again
     debug on|off          watch the wire
     quit
@@ -140,10 +141,11 @@ def main() -> None:
                    help="knowledge source injected into the adapter (default: "
                         "models.dev -- the only one that names effort values)")
     p.add_argument("--effort", default=None, help="initial reasoning_effort")
-    p.add_argument("--budget", type=int, default=1024,
-                   help="max_completion_tokens per call (default 1024, deliberately "
-                        "set so the wire-field resolution runs on the first call; "
-                        "0 sends none)")
+    p.add_argument("--budget", type=int, default=0,
+                   help="max_completion_tokens per call. Caps thinking AND content "
+                        "together -- spec semantics, there is no content-only cap. "
+                        "Default: none (the model runs free); set one to watch the "
+                        "wire-field resolution and the TRUNCATED trap.")
     p.add_argument("--debug", action="store_true", help="start with the wire visible")
     args = p.parse_args()
 

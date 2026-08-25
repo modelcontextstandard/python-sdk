@@ -518,11 +518,15 @@ class CompletionLLMAdapter:
     def _field_from_knowledge(self) -> str | None:
         """The budget-spelling derivation from catalogue knowledge.
 
-        Measured ground: only OpenAI's reasoning models reject ``max_tokens`` --
-        reasoning models elsewhere (Ollama's qwen, DeepSeek) accept it fine. So the
-        rule needs both facts, and both are data: the catalogue states
-        ``supports_reasoning``, and its meta names the provider the model was found
-        under (``models_dev.provider`` / ``litellm.litellm_provider``).
+        Measured ground, both directions: only OpenAI's reasoning models reject
+        ``max_tokens`` -- and ``supports_reasoning`` alone must NOT flip the field,
+        because Ollama **silently ignores** ``max_completion_tokens`` (measured:
+        asked for 60, got 2676 with ``finish=stop``) while OpenRouter honours both
+        spellings identically. Reasoning-only would strip every catalogued
+        reasoning model on a local server of its budget cap without any error. So
+        the rule needs both facts, and both are data: the catalogue states
+        ``supports_reasoning``, and its meta names the provider the model was
+        found under (``models_dev.provider`` / ``litellm.litellm_provider``).
         """
         known = self._knowledge()
         if known is None or not known.supports_reasoning:
@@ -581,14 +585,25 @@ class CompletionLLMAdapter:
         content = message.get("content")
         if content is None:
             # An empty *string* is a legitimate answer and passes through; a missing or
-            # null content is not -- the model produced something other than text, which
-            # this port has no way to represent. A *refusal* is the one case where the
-            # backend says why, and the spec gives it its own field: carry that reason
-            # out rather than reporting a blank failure.
+            # null content usually is not -- the model produced something other than
+            # text, which this port has no way to represent. Two exceptions, both the
+            # backend saying why:
+            #
+            # A *refusal* has its own spec field -- carry the reason out rather than
+            # reporting a blank failure.
             refusal = message.get("refusal")
             if refusal:
                 raise LLMError(f"The model refused: {refusal}")
-            raise LLMError(f"Response carried no text content: {payload[:200]}")
+            # And a reasoning model that spent its whole budget thinking. Measured on
+            # kimi-k3 via OpenRouter: ``content: null`` with 12k characters of
+            # thinking in the ``reasoning`` field -- the same trap Ollama spells as
+            # ``content: ""``. Text-less but not broken: empty text plus ``truncated``
+            # is the honest translation, and the thinking survives in ``meta`` below.
+            if any(message.get(key) for key in _REASONING_KEYS) \
+                    or message.get("thinking_blocks"):
+                content = ""
+            else:
+                raise LLMError(f"Response carried no text content: {payload[:200]}")
 
         meta: dict[str, Any] = {}
         if isinstance(data.get("usage"), dict):
