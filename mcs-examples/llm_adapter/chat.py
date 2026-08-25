@@ -157,6 +157,13 @@ def main() -> None:
         resolved = resolve_spec(spec, catalog)
         args.model = None                      # a bad flag falls back to asking
     model_id, base_url, api_key = resolved
+    # Answer "did the key load?" before the first 401 can even ask it. Never the
+    # key itself -- loaded-and-still-401 means the PROVIDER rejects the key.
+    key_env = next((env for url, env in PROVIDERS.values() if url == base_url), None)
+    console.print(f"[dim]endpoint={base_url}  "
+                  + (f"key=${key_env} "
+                     + ("loaded" if api_key else "[red]NOT SET in env/.env[/red]")
+                     if key_env else "key: none needed") + "[/dim]")
 
     state = {"effort": args.effort, "budget": args.budget or None}
 

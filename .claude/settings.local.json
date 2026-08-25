@@ -178,7 +178,9 @@
       "Bash(python -m py_compile mcs-examples/llm_adapter/chat.py)",
       "Bash(python -c \"import mcs.types.http as h; print\\([n for n in dir\\(h\\) if not n.startswith\\('_'\\)]\\)\")",
       "Bash(python chat.py)",
-      "Bash(python -m py_compile mcs-examples/llm_adapter/chat.py mcs-examples/llm_adapter/catalog.py)"
+      "Bash(python -m py_compile mcs-examples/llm_adapter/chat.py mcs-examples/llm_adapter/catalog.py)",
+      "Bash(python mcs-examples/llm_adapter/chat.py --model openrouter/moonshotai/kimi-k3)",
+      "PowerShell(\"User-Ebene:    \" + \\([Environment]::GetEnvironmentVariable\\('OPENROUTER_API_KEY','User'\\) -ne $null\\); \"Machine-Ebene: \" + \\([Environment]::GetEnvironmentVariable\\('OPENROUTER_API_KEY','Machine'\\) -ne $null\\))"
     ]
   }
 }
