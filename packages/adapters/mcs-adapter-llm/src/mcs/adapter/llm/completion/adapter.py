@@ -150,6 +150,18 @@ class CompletionLLMAdapter:
         rewriting, say -- constructs two adapters: they are stateless and can share one
         ``_http``. That is the same move as LangChain's ``bind()`` or a second
         LlamaIndex ``OpenAI(...)``, without the mutable configuration layer.
+
+        With a *model_info* provider injected, a configured value is additionally
+        **withheld** when the catalogue states the model rejects the parameter
+        (``supports_temperature is False`` -- models.dev states exactly that for
+        OpenAI's reasoning models). Only stated-False withholds; silence sends, and
+        a per-call ``temperature`` in kwargs always travels -- the call wins.
+
+        The statement is about the reasoning *mode*, measured: gpt-5.5 rejects
+        0.0/0.2 outright and under ``reasoning_effort="low"``, yet accepts both
+        under ``"none"``. The gate stays deliberately conservative rather than
+        encoding that moving target -- a caller wanting ``none`` *and* a
+        temperature names it on the call.
     reasoning_effort :
         How hard the model may think, where the backend has the notion. Worth a named
         parameter rather than leaving it to *extra_body*, because it moves cost and
@@ -241,6 +253,8 @@ class CompletionLLMAdapter:
         self._is_overflow = is_overflow or _looks_like_overflow
         self._max_tokens_field = max_completion_tokens_field
         self._model_info = model_info
+        self._knowledge_fetched = False
+        self._knowledge_value: ModelInfo | None = None
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -297,12 +311,14 @@ class CompletionLLMAdapter:
             max_output_tokens=info.get("max_output_tokens"),
             supports_function_calling=info.get("supports_function_calling"),
             supports_reasoning=info.get("supports_reasoning"),
+            supports_temperature=info.get("supports_temperature"),
             input_modalities=info.get("input_modalities"),
             output_modalities=info.get("output_modalities"),
             meta=meta,
         )
 
-    def _describe_models_endpoint(self, info: dict, meta: dict) -> None:
+    def _describe_models_endpoint(self, info: dict[str, Any],
+                                  meta: dict[str, Any]) -> None:
         try:
             resp = self._http.request(
                 "GET", f"{self.base_url}/models/{self.model}",
@@ -351,7 +367,8 @@ class CompletionLLMAdapter:
                 info.setdefault("output_modalities",
                                 tuple(m for m in produces.split("+") if m))
 
-    def _describe_ollama_show(self, info: dict, meta: dict) -> None:
+    def _describe_ollama_show(self, info: dict[str, Any],
+                              meta: dict[str, Any]) -> None:
         if not self.base_url.endswith("/v1"):
             return
         root = self.base_url[: -len("/v1")]
@@ -396,19 +413,15 @@ class CompletionLLMAdapter:
         if show:
             meta["ollama_show"] = show
 
-    def _describe_knowledge(self, info: dict, meta: dict) -> None:
+    def _describe_knowledge(self, info: dict[str, Any],
+                            meta: dict[str, Any]) -> None:
         """Let an injected catalogue fill the fields the endpoint left unknown."""
-        if self._model_info is None:
-            return
-        try:
-            known = self._model_info.describe(self.model)
-        except Exception:  # noqa: BLE001 -- a provider must not break the inquiry
-            logger.debug("describe: model_info provider raised", exc_info=True)
-            return
+        known = self._knowledge()
         if known is None:
             return
         for field_name in ("context_window", "max_output_tokens",
                            "supports_function_calling", "supports_reasoning",
+                           "supports_temperature",
                            "input_modalities", "output_modalities"):
             value = getattr(known, field_name)
             if info.get(field_name) is None and value is not None:
@@ -455,7 +468,17 @@ class CompletionLLMAdapter:
         # portable budget (a *call* argument, hence above construction), per-call kwargs.
         body: dict[str, Any] = {"model": self.model, "messages": messages}
         if self.temperature is not None:
-            body["temperature"] = self.temperature
+            known = self._knowledge()
+            if known is not None and known.supports_temperature is False:
+                # The second knowledge application, same shape as the budget field:
+                # a construction default is withheld when the model is STATED to
+                # reject the parameter (measured: GPT-5 400s on any value but its
+                # default). Only stated-False withholds -- silence sends -- and a
+                # per-call temperature in kwargs still travels: the call wins.
+                logger.debug("temperature omitted: %s is stated to reject it",
+                             self.model)
+            else:
+                body["temperature"] = self.temperature
         if self.reasoning_effort is not None:
             body["reasoning_effort"] = self.reasoning_effort
         body.update(self.extra_body)
@@ -477,8 +500,23 @@ class CompletionLLMAdapter:
                                       or DEFAULT_MAX_COMPLETION_TOKENS_FIELD)
         return self._max_tokens_field
 
+    def _knowledge(self) -> ModelInfo | None:
+        """What the catalogue knows about this model -- fetched once, lazily.
+
+        Shared by every knowledge application on the call path (the budget field's
+        spelling, the temperature gate): one lookup per adapter instance, never in
+        the constructor, and a raising provider is a ``None``-shaped answer.
+        """
+        if not self._knowledge_fetched and self._model_info is not None:
+            self._knowledge_fetched = True
+            try:
+                self._knowledge_value = self._model_info.describe(self.model)
+            except Exception:  # noqa: BLE001 -- knowledge must not break the call path
+                logger.debug("model_info provider raised", exc_info=True)
+        return self._knowledge_value
+
     def _field_from_knowledge(self) -> str | None:
-        """The one derivation this adapter performs from catalogue knowledge.
+        """The budget-spelling derivation from catalogue knowledge.
 
         Measured ground: only OpenAI's reasoning models reject ``max_tokens`` --
         reasoning models elsewhere (Ollama's qwen, DeepSeek) accept it fine. So the
@@ -486,13 +524,7 @@ class CompletionLLMAdapter:
         ``supports_reasoning``, and its meta names the provider the model was found
         under (``models_dev.provider`` / ``litellm.litellm_provider``).
         """
-        if self._model_info is None:
-            return None
-        try:
-            known = self._model_info.describe(self.model)
-        except Exception:  # noqa: BLE001 -- knowledge must not break the call path
-            logger.debug("max-tokens field: model_info provider raised", exc_info=True)
-            return None
+        known = self._knowledge()
         if known is None or not known.supports_reasoning:
             return None
         sources = known.meta or {}

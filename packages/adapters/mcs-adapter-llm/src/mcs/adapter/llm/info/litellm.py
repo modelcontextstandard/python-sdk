@@ -23,10 +23,17 @@ DEFAULT_LITELLM_URL = (
 class LiteLLMInfoProvider(ModelInfoCatalog):
     """:class:`~mcs.types.llm.ModelInfoProvider` over LiteLLM's JSON.
 
-    Lookup is the exact id first, then any ``provider/id``-prefixed entry (a client
-    says ``"llama3"``, the file says ``"ollama/llama3"``). The raw entry rides in
-    ``meta["litellm"]`` -- including the price fields this maps nowhere yet, so a cost
-    tracker finds them the day it exists.
+    The file mixes three key notations (measured): plain ids (``gpt-5.6``, 459),
+    LiteLLM's own ``provider/id`` routing scheme (``snowflake/claude-haiku-4-5``,
+    2594 -- the prefix matches ``litellm_provider`` for 93%), and backend-native
+    dotted ids taken verbatim (``us.openai.gpt-5.6-luna``, 122 -- all AWS Bedrock
+    cross-region inference profiles, ``<region-scope>.<vendor>.<model>``). Lookup
+    follows that order: the exact id first, then a ``/``-suffixed entry, then a
+    ``.``-suffixed one -- so a client saying ``"llama3"`` finds ``"ollama/llama3"``
+    and one saying ``"gpt-5.6-luna"`` finds the Bedrock profile.
+    ``meta["litellm"]["resolved_id"]`` always names the entry that answered. The
+    raw entry rides in ``meta["litellm"]`` too -- including the price fields this
+    maps nowhere yet, so a cost tracker finds them the day it exists.
 
     Note the file's field semantics: ``max_input_tokens`` is the input window and
     ``max_tokens`` is a legacy alias for the *output* limit. ``context_window`` is
@@ -43,8 +50,10 @@ class LiteLLMInfoProvider(ModelInfoCatalog):
         if not data:
             return None
         resolved, entry = model, data.get(model)
-        if not isinstance(entry, dict):
-            suffix = f"/{model}"
+        for separator in ("/", "."):
+            if isinstance(entry, dict):
+                break
+            suffix = separator + model
             resolved, entry = next(
                 ((key, value) for key, value in sorted(data.items())
                  if key.endswith(suffix) and isinstance(value, dict)),

@@ -28,4 +28,4 @@ def test_models_dev_still_speaks_the_mapped_schema():
     assert info.supports_function_calling is True
     assert info.input_modalities and "text" in info.input_modalities
     # The statement nobody else makes -- the reason this catalogue earns its keep.
-    assert info.meta["models_dev"]["temperature"] is False
+    assert info.supports_temperature is False

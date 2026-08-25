@@ -165,7 +165,20 @@
       "Bash(rm packages/adapters/mcs-adapter-llm/src/mcs/adapter/llm/info/catalogs.py packages/adapters/mcs-adapter-llm/src/mcs/adapter/llm/info/__pycache__ -rf)",
       "Bash(python -m pytest packages/adapters/mcs-adapter-llm packages/types -q)",
       "Bash(python -m py_compile mcs-examples/permission_gate/chat.py mcs-examples/prompt_variants/main.py)",
-      "Bash(python -m pytest packages -q -rs)"
+      "Bash(python -m pytest packages -q -rs)",
+      "Bash(python main.py --model gpt-5.5 --effort none)",
+      "Bash(python main.py --model gpt-5.5@openai --model qwen3:4b@ollama --model \"google/gemini-2.5-flash@openrouter\" --effort none)",
+      "Bash(python -m py_compile mcs-examples/llm_adapter/main.py)",
+      "Bash(python catalog.py)",
+      "Bash(python -m pytest packages/adapters/mcs-adapter-llm -q)",
+      "Bash(python chat.py --model openai/gpt-5.5)",
+      "Bash(python chat.py --model ollama/qwen3:4b)",
+      "Bash(python -m py_compile mcs-examples/llm_adapter/catalog.py mcs-examples/llm_adapter/chat.py mcs-examples/llm_adapter/_view.py)",
+      "Bash(uvx basedpyright *)",
+      "Bash(python -m py_compile mcs-examples/llm_adapter/chat.py)",
+      "Bash(python -c \"import mcs.types.http as h; print\\([n for n in dir\\(h\\) if not n.startswith\\('_'\\)]\\)\")",
+      "Bash(python chat.py)",
+      "Bash(python -m py_compile mcs-examples/llm_adapter/chat.py mcs-examples/llm_adapter/catalog.py)"
     ]
   }
 }

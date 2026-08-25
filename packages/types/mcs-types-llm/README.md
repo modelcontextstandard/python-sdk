@@ -59,6 +59,7 @@ stated.context_window              # total window, as stated
 stated.max_output_tokens           # per-completion ceiling, where named
 stated.supports_function_calling   # tri-state: None means "not stated", not "no"
 stated.supports_reasoning
+stated.supports_temperature        # stated False = the model rejects the parameter
 stated.input_modalities            # what can be SENT -- e.g. ("text", "image", "audio")
 stated.output_modalities           # what comes back; beyond text still the exception
 stated.meta                        # the trimmed raw statements, keyed by source

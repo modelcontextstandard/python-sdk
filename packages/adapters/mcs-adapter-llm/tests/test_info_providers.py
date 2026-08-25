@@ -44,6 +44,11 @@ LITELLM = {
         "max_input_tokens": 8192, "max_output_tokens": 8192,
         "supports_function_calling": True,
     },
+    # Measured: Bedrock cross-region profiles keep their backend-native dotted id.
+    "us.openai.gpt-5.6-luna": {
+        "litellm_provider": "bedrock_converse", "mode": "chat",
+        "max_input_tokens": 200000,
+    },
     "sample_spec": {"mode": "chat"},
 }
 
@@ -56,6 +61,9 @@ MODELS_DEV = {
             "gpt-5.6": {
                 "id": "gpt-5.6", "reasoning": True, "tool_call": True,
                 "temperature": False,
+                # Measured: some entries carry their own "provider" field (a dict
+                # of serving info) -- it must never shadow the bookkeeping keys.
+                "provider": {"npm": "@ai-sdk/openai-compatible"},
                 "reasoning_options": [{"type": "effort",
                                        "values": ["none", "low", "medium", "high",
                                                   "xhigh", "max"]}],
@@ -64,9 +72,17 @@ MODELS_DEV = {
             },
         },
     },
+    "aaa-gateway": {
+        "id": "aaa-gateway",
+        "models": {"gpt-5.6": {"id": "gpt-5.6", "limit": {"context": 2}}},
+    },
     "zeta-gateway": {
         "id": "zeta-gateway",
-        "models": {"gpt-5.6": {"id": "gpt-5.6", "limit": {"context": 1}}},
+        "models": {"gpt-5.6": {"id": "gpt-5.6", "limit": {"context": 1}},
+                   "openai/gpt-5.6": {"id": "openai/gpt-5.6",
+                                      "limit": {"context": 7}},
+                   "vendorx/model-y": {"id": "vendorx/model-y",
+                                       "limit": {"context": 9}}},
     },
 }
 
@@ -95,9 +111,19 @@ class TestLiteLLM:
         assert info.context_window == 8192
         assert info.meta["litellm"]["resolved_id"] == "ollama/llama3"
 
+    def test_bedrock_dotted_ids_are_found_by_plain_name(self):
+        """Bedrock profiles keep their native dotted id (measured: all 122 dotted
+        keys are bedrock) -- the third lookup stage reaches them."""
+        info = LiteLLMInfoProvider(_http=CatalogHttp(LITELLM)).describe("gpt-5.6-luna")
+        assert info.context_window == 200000
+        assert info.meta["litellm"]["resolved_id"] == "us.openai.gpt-5.6-luna"
+
     def test_silence_stays_none_not_false(self):
+        """LiteLLM's JSON has no temperature statement at all -- None, never False,
+        so a consumer's stated-False gate never fires on this catalogue."""
         info = LiteLLMInfoProvider(_http=CatalogHttp(LITELLM)).describe("llama3")
         assert info.supports_reasoning is None
+        assert info.supports_temperature is None
         assert info.input_modalities is None
 
     def test_unknown_model_is_a_none_answer(self):
@@ -135,17 +161,22 @@ class TestModelsDev:
         assert info.max_output_tokens == 128000
         assert info.supports_function_calling is True
         assert info.supports_reasoning is True
+        assert info.supports_temperature is False   # the statement nobody else makes
         assert info.input_modalities == ("text", "image", "pdf")
         assert info.output_modalities == ("text",)
 
-    def test_every_carrier_is_listed_the_pick_is_only_labelled(self):
+    def test_every_carrier_is_listed_the_fullest_fills_the_fields(self):
         """One id under many namespaces (measured: 18 for gpt-5.5) and no canonical
         marker -- so meta lists ALL carriers for membership questions ("does openai
-        serve this id?"), and "provider" merely names whose near-identical copy
-        filled the fields (alphabetically first, an arbitrary choice by design)."""
+        serve this id?"), and the FULLEST entry fills the fields: gateway copies
+        drop statements (measured: abacus lists reasoning_options: [] where openai
+        names five values), so most-fields-stated wins over alphabetical order."""
         info = ModelsDevInfoProvider(_http=CatalogHttp(MODELS_DEV)).describe("gpt-5.6")
-        assert info.meta["models_dev"]["providers"] == ["openai", "zeta-gateway"]
+        assert info.meta["models_dev"]["providers"] == [
+            "aaa-gateway", "openai", "zeta-gateway"]
+        # The entry's own "provider" dict (serving info) must not shadow ours.
         assert info.meta["models_dev"]["provider"] == "openai"
+        assert info.context_window == 1050000       # not aaa-gateway's 2
 
     def test_a_provider_hint_pins_the_namespace(self):
         info = ModelsDevInfoProvider(
@@ -165,6 +196,38 @@ class TestModelsDev:
         http = CatalogHttp(MODELS_DEV)
         ModelsDevInfoProvider(_http=http).describe("gpt-5.6")
         assert http.calls[0]["headers"]["User-Agent"]
+
+    def test_a_qualified_id_addresses_its_namespace_first(self):
+        """namespace/id pins per call -- deployment facts differ per namespace, so
+        'which model is meant' is only answerable WITH the namespace. The openai
+        namespace carries gpt-5.6, so the addressing wins even though a gateway
+        also lists the literal id "openai/gpt-5.6"."""
+        info = ModelsDevInfoProvider(
+            _http=CatalogHttp(MODELS_DEV)).describe("openai/gpt-5.6")
+        assert info.context_window == 1050000    # openai's entry, not zeta's literal
+        assert info.meta["models_dev"]["providers"] == ["openai"]
+
+    def test_a_walk_miss_falls_back_to_the_literal_id(self):
+        """'vendorx' is no namespace, but zeta-gateway carries the literal id
+        'vendorx/model-y' -- the second class answers."""
+        info = ModelsDevInfoProvider(
+            _http=CatalogHttp(MODELS_DEV)).describe("vendorx/model-y")
+        assert info.context_window == 9
+        assert info.meta["models_dev"]["providers"] == ["zeta-gateway"]
+
+    def test_the_walk_reaches_a_gateways_vendor_qualified_id(self):
+        """Tree walk, one level: zeta-gateway's exact id 'vendorx/model-y'."""
+        info = ModelsDevInfoProvider(
+            _http=CatalogHttp(MODELS_DEV)).describe("zeta-gateway/vendorx/model-y")
+        assert info.context_window == 9
+        assert info.meta["models_dev"]["providers"] == ["zeta-gateway"]
+
+    def test_walk_miss_plus_literal_miss_is_none_never_a_reread(self):
+        """The live case this pins: 'openrouter/moonshot-ai/kimi-k3' is dead when
+        openrouter does not carry the rest and nobody carries the whole string.
+        Segments are never re-read into some other split's answer."""
+        assert ModelsDevInfoProvider(
+            _http=CatalogHttp(MODELS_DEV)).describe("foo/openai/gpt-5.6") is None
 
     def test_unknown_model_is_a_none_answer(self):
         assert ModelsDevInfoProvider(_http=CatalogHttp(MODELS_DEV)).describe("x") is None

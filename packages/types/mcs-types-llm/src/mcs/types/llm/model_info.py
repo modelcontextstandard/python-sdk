@@ -53,6 +53,13 @@ class ModelInfo:
     supports_reasoning :
         Whether the model thinks before answering (and hence eats answer budget doing
         so). Tri-state for the same reason.
+    supports_temperature :
+        Whether the model accepts a ``temperature`` at all. **Stated as False** by
+        models.dev for OpenAI's reasoning models -- and measured: GPT-5 rejects every
+        value but its default with a 400. LiteLLM's JSON says nothing here, so it
+        stays ``None`` there. The point of carrying it: a consumer can *withhold* a
+        configured temperature when the model is stated to reject one -- silence
+        (``None``) withholds nothing.
     input_modalities :
         What the model **accepts**, as stated -- lowercase names in the backends' shared
         vocabulary (``text``, ``image``, ``audio``, ``video``, ``file``), order as
@@ -73,6 +80,7 @@ class ModelInfo:
     max_output_tokens: int | None = None
     supports_function_calling: bool | None = None
     supports_reasoning: bool | None = None
+    supports_temperature: bool | None = None
     input_modalities: tuple[str, ...] | None = None
     output_modalities: tuple[str, ...] | None = None
     meta: dict[str, Any] = field(default_factory=dict)

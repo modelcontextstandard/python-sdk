@@ -151,16 +151,30 @@ the accepted `reasoning_options` effort values).
 
 This is deliberately **knowledge as data, not logic** — the same split the TypeScript
 ecosystem settled on: the AI SDK keeps model ids dumb strings, models.dev carries the
-knowledge, the client composes. Exactly **one** request-path decision is settled from
-knowledge, and only when the caller left it open: the wire spelling of the budget
-field. A reasoning model that `openai` serves takes `max_completion_tokens` (the one
-measured rejection); everything else keeps `max_tokens`. That is a membership check
-against data — one id sits under many namespaces (measured: 18 for `gpt-5.5`, the
-first-party provider plus every gateway reselling it), so the question is "does openai
-serve this id", never "who is the canonical provider". Resolved lazily on the first
-call that sends a budget; an explicit `max_completion_tokens_field` always wins and
-skips the lookup. Compare the AI SDK, which answers the same question with model-id
-regexes in its first-party provider — knowledge as *code*, a release per model family.
+knowledge, the client composes. Exactly **two** request-path decisions are settled
+from knowledge, both only where the caller left room:
+
+- **The wire spelling of the budget field.** A reasoning model that `openai` serves
+  takes `max_completion_tokens` (the one measured rejection); everything else keeps
+  `max_tokens`. That is a membership check against data — one id sits under many
+  namespaces (measured: 18 for `gpt-5.5`, the first-party provider plus every gateway
+  reselling it), so the question is "does openai serve this id", never "who is the
+  canonical provider". Resolved lazily on the first call that sends a budget; an
+  explicit `max_completion_tokens_field` wins and skips the lookup.
+- **Withholding a configured `temperature`.** models.dev states
+  `supports_temperature: false` for exactly the models that 400 on any value
+  (measured on GPT-5), so a construction default is withheld rather than crashing
+  the call. Only stated-False withholds — silence sends — and a per-call
+  `temperature` still travels: the call wins, the backend stays authoritative.
+  Measured nuance: the statement describes the reasoning *mode* — gpt-5.5 rejects
+  0.2 outright and under `reasoning_effort="low"`, yet accepts it under `"none"`.
+  The gate stays conservative rather than encoding that moving target; `none` plus
+  a wanted temperature is exactly what the per-call override is for.
+
+One catalogue lookup serves both, fetched lazily and never in the constructor.
+Compare the AI SDK, which answers the same two questions with model-id regexes and
+parameter-stripping in its first-party provider — knowledge as *code*, a release per
+model family.
 
 ### The trap this exists for
 

@@ -682,6 +682,46 @@ class TestDescribe:
         CompletionLLMAdapter("gpt-5.6", model_info=catalog, _http=http).complete("q")
         assert catalog.asked == []
 
+    def test_a_stated_no_temperature_withholds_the_configured_default(self):
+        """Measured: GPT-5 400s on any temperature but its default. When the
+        catalogue STATES the rejection, a configured construction default is
+        withheld instead of crashing the call."""
+        catalog = self.Catalog(ModelInfo(supports_temperature=False))
+        http = FakeHttp()
+        CompletionLLMAdapter("gpt-5.6", temperature=0.2, model_info=catalog,
+                             _http=http).complete("q")
+        assert "temperature" not in http.last["json_body"]
+
+    def test_silence_about_temperature_withholds_nothing(self):
+        """Tri-state: None is not a rejection -- the configured value travels."""
+        catalog = self.Catalog(ModelInfo(supports_reasoning=True))
+        http = FakeHttp()
+        CompletionLLMAdapter("m", temperature=0.2, model_info=catalog,
+                             _http=http).complete("q")
+        assert http.last["json_body"]["temperature"] == 0.2
+
+    def test_a_per_call_temperature_wins_over_the_gate(self):
+        """The call wins, always: a developer who names temperature on THIS call
+        is stating backend knowledge, and the backend stays authoritative."""
+        catalog = self.Catalog(ModelInfo(supports_temperature=False))
+        http = FakeHttp()
+        CompletionLLMAdapter("gpt-5.6", temperature=0.2, model_info=catalog,
+                             _http=http).complete("q", temperature=1.0)
+        assert http.last["json_body"]["temperature"] == 1.0
+
+    def test_knowledge_is_fetched_once_for_field_and_gate_together(self):
+        catalog = self.Catalog(ModelInfo(supports_reasoning=True,
+                                         supports_temperature=False,
+                                         meta={"models_dev": {"providers": ["openai"]}}))
+        http = FakeHttp()
+        llm = CompletionLLMAdapter("gpt-5.6", temperature=0.2, model_info=catalog,
+                                   _http=http)
+        llm.complete("q", max_completion_tokens=100)
+        llm.complete("q", max_completion_tokens=100)
+        assert catalog.asked == ["gpt-5.6"]
+        assert "temperature" not in http.last["json_body"]
+        assert http.last["json_body"]["max_completion_tokens"] == 100
+
     def test_a_raising_provider_falls_back_to_the_default_spelling(self):
         class BoomCatalog:
             def describe(self, model):
