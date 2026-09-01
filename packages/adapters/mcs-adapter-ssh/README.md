@@ -1,11 +1,11 @@
 # mcs-adapter-ssh
 
-SSH adapter for the **MCS Sandbox Driver**.
+The **remote-host execution modality** for the MCS Bash Driver.
 
-Implements the `SandboxPort` protocol over SSH + SFTP using
+Satisfies the bash driver's `ExecutorPort` over SSH + SFTP using
 [paramiko](https://www.paramiko.org/).  Turns **any reachable Linux server**
-into a sandbox environment -- no Docker, no cloud vendor, no special runtime.
-Just an SSH server.
+into the machine behind the `bash` tool -- no Docker, no cloud vendor, no
+special runtime.  Just an SSH server.
 
 ## Installation
 
@@ -15,26 +15,26 @@ pip install mcs-adapter-ssh
 
 ## Usage
 
-The adapter is typically used through `mcs-driver-sandbox`, not directly:
+The adapter is **injected** into the bash driver -- the client constructs the
+modality, and the model sees one `bash` tool:
 
 ```python
-from mcs.driver.sandbox import SandboxToolDriver
+from mcs.adapter.ssh import SSHAdapter
+from mcs.driver.bash import BashToolDriver
 
-# Hetzner VPS
-td = SandboxToolDriver(
-    adapter="ssh",
+# Hetzner VPS, key auth
+td = BashToolDriver(SSHAdapter(
     host="49.12.xxx.xxx",
     user="deploy",
     key_path="~/.ssh/id_ed25519",
-)
+))
 
 # Password auth
-td = SandboxToolDriver(
-    adapter="ssh",
+td = BashToolDriver(SSHAdapter(
     host="192.168.1.100",
     user="agent",
     password="s3cret",
-)
+))
 ```
 
 ### Direct usage
@@ -102,7 +102,7 @@ The SSH adapter is the most versatile backend for the MCS Sandbox Driver:
 
 - **Homepage:** <https://www.modelcontextstandard.io>
 - **Source:** <https://github.com/modelcontextstandard/python-sdk>
-- **Driver package:** [mcs-driver-sandbox](../../../drivers/mcs-driver-sandbox/)
+- **Driver package:** [mcs-driver-bash](../../../drivers/mcs-driver-bash/)
 
 ## License
 

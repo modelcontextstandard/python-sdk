@@ -1,4 +1,4 @@
-"""Docker adapter implementing the SandboxPort protocol.
+"""Docker adapter: the containerised execution modality (ExecutorPort).
 
 Manages a persistent Docker container backed by a named volume.
 The container is created on first ``start()`` and reused on subsequent calls.

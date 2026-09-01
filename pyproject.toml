@@ -30,7 +30,8 @@ dependencies = [
   "mcs-adapter-docker>=0.1",
   "mcs-adapter-ssh>=0.1",
   "mcs-adapter-mcp>=0.1",
-  "mcs-driver-sandbox>=0.1",
+  "mcs-driver-bash>=0.1",
+  "mcs-adapter-local>=0.1",
   "mcs-driver-mcp>=0.1",
   "mcs-examples>=0.1",
   "mcs-types-web>=0.1",
@@ -73,7 +74,8 @@ mcs-hooks = { workspace = true }
 mcs-adapter-docker = { workspace = true }
 mcs-adapter-ssh = { workspace = true }
 mcs-adapter-mcp = { workspace = true }
-mcs-driver-sandbox = { workspace = true }
+mcs-driver-bash = { workspace = true }
+mcs-adapter-local = { workspace = true }
 mcs-driver-mcp = { workspace = true }
 mcs-examples = { workspace = true }
 mcs-types-web = { workspace = true }

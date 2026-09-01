@@ -1,11 +1,12 @@
 # mcs-adapter-docker
 
-Docker adapter for the **MCS Sandbox Driver**.
+The **containerised execution modality** for the MCS Bash Driver.
 
-Implements the `SandboxPort` protocol using the Docker Engine API.  Commands
-run inside an isolated container, files are transferred via the Docker
-`put_archive` / `get_archive` API, and a named volume provides persistence
-across container restarts.
+Satisfies the bash driver's `ExecutorPort` using the Docker Engine API.
+Commands run inside an isolated container, files are transferred via the
+Docker `put_archive` / `get_archive` API (client-side provisioning -- the
+model gets no file tools), and a named volume provides persistence across
+container restarts.
 
 ## Installation
 
@@ -18,17 +19,20 @@ Docker Engine on Linux).
 
 ## Usage
 
-The adapter is typically used through `mcs-driver-sandbox`, not directly:
+The adapter is **injected** into the bash driver -- the client constructs the
+modality, operates its lifecycle, and the model sees one `bash` tool:
 
 ```python
-from mcs.driver.sandbox import SandboxToolDriver
+from mcs.adapter.docker import DockerAdapter
+from mcs.driver.bash import BashToolDriver
 
-td = SandboxToolDriver(
-    adapter="docker",
+adapter = DockerAdapter(
     image="ubuntu:24.04",
     container_name="agent-workspace",
     volume="agent-data",
 )
+adapter.start()                     # lifecycle is client business
+td = BashToolDriver(adapter)        # the model gets `bash`, nothing else
 ```
 
 ### Direct usage
@@ -81,7 +85,7 @@ adapter.stop()
 
 - **Homepage:** <https://www.modelcontextstandard.io>
 - **Source:** <https://github.com/modelcontextstandard/python-sdk>
-- **Driver package:** [mcs-driver-sandbox](../../../drivers/mcs-driver-sandbox/)
+- **Driver package:** [mcs-driver-bash](../../../drivers/mcs-driver-bash/)
 
 ## License
 

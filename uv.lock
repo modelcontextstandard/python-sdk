@@ -8,6 +8,7 @@ members = [
     "mcs-adapter-http",
     "mcs-adapter-imap",
     "mcs-adapter-llm",
+    "mcs-adapter-local",
     "mcs-adapter-localfs",
     "mcs-adapter-mcp",
     "mcs-adapter-smb",
@@ -17,6 +18,7 @@ members = [
     "mcs-auth-auth0",
     "mcs-auth-linkauth",
     "mcs-auth-oauth",
+    "mcs-driver-bash",
     "mcs-driver-core",
     "mcs-driver-csv",
     "mcs-driver-filesystem",
@@ -25,7 +27,6 @@ members = [
     "mcs-driver-mailsend",
     "mcs-driver-mcp",
     "mcs-driver-rest",
-    "mcs-driver-sandbox",
     "mcs-driver-web",
     "mcs-driver-webfetch",
     "mcs-driver-websearch",
@@ -1491,6 +1492,11 @@ requires-dist = [
 ]
 
 [[package]]
+name = "mcs-adapter-local"
+version = "0.1.0"
+source = { editable = "packages/adapters/mcs-adapter-local" }
+
+[[package]]
 name = "mcs-adapter-localfs"
 version = "0.2.0"
 source = { editable = "packages/adapters/mcs-adapter-localfs" }
@@ -1588,6 +1594,17 @@ requires-dist = [
     { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
     { name = "mcs-auth", editable = "packages/auth/mcs-auth" },
 ]
+
+[[package]]
+name = "mcs-driver-bash"
+version = "0.2.0"
+source = { editable = "packages/drivers/mcs-driver-bash" }
+dependencies = [
+    { name = "mcs-driver-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "mcs-driver-core", editable = "packages/core" }]
 
 [[package]]
 name = "mcs-driver-core"
@@ -1776,17 +1793,6 @@ requires-dist = [
     { name = "mcs-inspector", marker = "extra == 'inspector'", editable = "packages/inspector" },
 ]
 provides-extras = ["inspector"]
-
-[[package]]
-name = "mcs-driver-sandbox"
-version = "0.1.3"
-source = { editable = "packages/drivers/mcs-driver-sandbox" }
-dependencies = [
-    { name = "mcs-driver-core" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "mcs-driver-core", editable = "packages/core" }]
 
 [[package]]
 name = "mcs-driver-web"
@@ -2039,6 +2045,7 @@ dependencies = [
     { name = "mcs-adapter-http" },
     { name = "mcs-adapter-imap" },
     { name = "mcs-adapter-llm" },
+    { name = "mcs-adapter-local" },
     { name = "mcs-adapter-localfs" },
     { name = "mcs-adapter-mcp" },
     { name = "mcs-adapter-smb" },
@@ -2048,6 +2055,7 @@ dependencies = [
     { name = "mcs-auth-auth0" },
     { name = "mcs-auth-linkauth" },
     { name = "mcs-auth-oauth" },
+    { name = "mcs-driver-bash" },
     { name = "mcs-driver-core" },
     { name = "mcs-driver-csv" },
     { name = "mcs-driver-filesystem" },
@@ -2056,7 +2064,6 @@ dependencies = [
     { name = "mcs-driver-mailsend" },
     { name = "mcs-driver-mcp" },
     { name = "mcs-driver-rest" },
-    { name = "mcs-driver-sandbox" },
     { name = "mcs-driver-web" },
     { name = "mcs-driver-webfetch", extra = ["text"] },
     { name = "mcs-driver-websearch" },
@@ -2106,6 +2113,7 @@ requires-dist = [
     { name = "mcs-adapter-http", editable = "packages/adapters/mcs-adapter-http" },
     { name = "mcs-adapter-imap", editable = "packages/adapters/mcs-adapter-imap" },
     { name = "mcs-adapter-llm", editable = "packages/adapters/mcs-adapter-llm" },
+    { name = "mcs-adapter-local", editable = "packages/adapters/mcs-adapter-local" },
     { name = "mcs-adapter-localfs", editable = "packages/adapters/mcs-adapter-localfs" },
     { name = "mcs-adapter-mcp", editable = "packages/adapters/mcs-adapter-mcp" },
     { name = "mcs-adapter-smb", editable = "packages/adapters/mcs-adapter-smb" },
@@ -2115,6 +2123,7 @@ requires-dist = [
     { name = "mcs-auth-auth0", editable = "packages/auth/mcs-auth-auth0" },
     { name = "mcs-auth-linkauth", editable = "packages/auth/mcs-auth-linkauth" },
     { name = "mcs-auth-oauth", editable = "packages/auth/mcs-auth-oauth" },
+    { name = "mcs-driver-bash", editable = "packages/drivers/mcs-driver-bash" },
     { name = "mcs-driver-core", editable = "packages/core" },
     { name = "mcs-driver-csv", editable = "packages/drivers/mcs-driver-csv" },
     { name = "mcs-driver-filesystem", editable = "packages/drivers/mcs-driver-filesystem" },
@@ -2123,7 +2132,6 @@ requires-dist = [
     { name = "mcs-driver-mailsend", editable = "packages/drivers/mcs-driver-mailsend" },
     { name = "mcs-driver-mcp", editable = "packages/drivers/mcs-driver-mcp" },
     { name = "mcs-driver-rest", editable = "packages/drivers/mcs-driver-rest" },
-    { name = "mcs-driver-sandbox", editable = "packages/drivers/mcs-driver-sandbox" },
     { name = "mcs-driver-web", editable = "packages/drivers/mcs-driver-web" },
     { name = "mcs-driver-webfetch", extras = ["text"], editable = "packages/drivers/mcs-driver-webfetch" },
     { name = "mcs-driver-websearch", editable = "packages/drivers/mcs-driver-websearch" },

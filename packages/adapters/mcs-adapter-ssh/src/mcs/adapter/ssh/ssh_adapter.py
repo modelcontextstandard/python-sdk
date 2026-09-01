@@ -1,4 +1,4 @@
-"""SSH adapter implementing the SandboxPort protocol.
+"""SSH adapter: the remote-host execution modality (ExecutorPort).
 
 Turns any reachable Linux server (Hetzner VPS, Coolify host, Raspberry Pi,
 cloud VM, …) into a sandbox environment via SSH + SFTP.  No Docker required

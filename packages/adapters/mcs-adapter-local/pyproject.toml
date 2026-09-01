@@ -3,12 +3,12 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "mcs-adapter-docker"
+name            = "mcs-adapter-local"
 version         = "0.1.0"
-description     = "Docker adapter for the MCS Bash Driver — runs commands in isolated containers."
+description     = "MCS Local Adapter — the run-it-right-here execution modality for the bash driver. No isolation, on purpose; pair with a consent gate."
 requires-python = ">=3.11"
 license         = "Apache-2.0"
-dependencies    = ["docker>=7.0"]
+dependencies    = []
 
 [tool.setuptools.packages.find]
 where = ["src"]
