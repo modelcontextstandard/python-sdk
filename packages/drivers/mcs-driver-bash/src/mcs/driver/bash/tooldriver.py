@@ -96,21 +96,30 @@ class BashToolDriver(MCSToolDriver):
         self._default_timeout = default_timeout
         self._max_timeout = max_timeout
         self._max_output_chars = max_output_chars
+        # The modality may name itself -- read structurally, the LLMPort.model
+        # pattern. A `bash` tool with PowerShell behind it would lure the model
+        # into POSIX syntax: the trained tool name beats a description line, so
+        # the name must never contradict what the shell actually speaks.
+        self._tool_name: str = getattr(executor, "tool_name", None) or "bash"
+        self._shell_note: str | None = getattr(executor, "shell_note", None)
 
     # -- MCSToolDriver interface ----------------------------------------------
 
     def list_tools(self) -> List[Tool]:
         return [
             Tool(
-                name="bash",
+                name=self._tool_name,
                 description=(
                     "Execute a shell command and return exit_code, stdout and "
-                    "stderr. Each call is independent -- state such as the "
-                    "working directory or environment variables does not "
-                    "reliably persist between calls, so chain dependent steps "
-                    "with '&&'. Output beyond a limit is truncated and the "
-                    "result says so; re-run with a filter (grep, head, tail) "
-                    "to see specific parts."
+                    "stderr. "
+                    + (f"Commands run in {self._shell_note} -- use its "
+                       f"syntax. " if self._shell_note else "")
+                    + "Each call is independent -- state such as the working "
+                    "directory or environment variables does not reliably "
+                    "persist between calls, so run dependent steps as one "
+                    "command. Output beyond a limit is truncated and the "
+                    "result says so; re-run with a filter to see specific "
+                    "parts."
                 ),
                 parameters=[
                     ToolParameter(
@@ -144,7 +153,7 @@ class BashToolDriver(MCSToolDriver):
         ]
 
     def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
-        if tool_name != "bash":
+        if tool_name != self._tool_name:
             raise ValueError(f"Unknown tool: {tool_name}")
 
         command = arguments["command"]

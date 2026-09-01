@@ -134,6 +134,44 @@ class TestTruncation:
         assert "truncated" not in result and "note" not in result
 
 
+class TestModalityIdentity:
+    """The tool must never claim a syntax world the shell does not speak: the
+    modality names itself (tool_name/shell_note, read structurally -- the
+    LLMPort.model pattern), and the surface follows."""
+
+    class PowershellExecutor(FakeExecutor):
+        tool_name = "powershell"
+        shell_note = "Windows PowerShell 5.1"
+
+    class NotedExecutor(FakeExecutor):
+        shell_note = "the container's /bin/sh (POSIX)"   # a name-less statement
+
+    def test_the_tool_is_named_after_the_modality(self):
+        driver = BashToolDriver(self.PowershellExecutor())
+        [tool] = driver.list_tools()
+        assert tool.name == "powershell"
+        assert "Windows PowerShell 5.1" in tool.description
+        assert driver.execute_tool("powershell", {"command": "dir"})["exit_code"] == 0
+
+    def test_the_old_name_is_gone_with_the_modality(self):
+        """One surface, not two: a powershell modality answers no `bash`."""
+        with pytest.raises(ValueError, match="Unknown tool"):
+            BashToolDriver(self.PowershellExecutor()).execute_tool(
+                "bash", {"command": "x"})
+
+    def test_a_note_without_a_name_keeps_bash_and_gains_the_sentence(self):
+        """The Docker/SSH case: POSIX behind the tool, so `bash` stays -- and
+        the description says which /bin/sh answers."""
+        [tool] = BashToolDriver(self.NotedExecutor()).list_tools()
+        assert tool.name == "bash"
+        assert "the container's /bin/sh (POSIX)" in tool.description
+
+    def test_a_silent_modality_keeps_the_plain_surface(self):
+        [tool] = BashToolDriver(FakeExecutor()).list_tools()
+        assert tool.name == "bash"
+        assert "Commands run in" not in tool.description
+
+
 class TestDriverWrapper:
 
     def test_the_hybrid_driver_delegates(self):

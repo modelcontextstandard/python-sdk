@@ -8,9 +8,10 @@ one binary a test run always has.
 
 from __future__ import annotations
 
+import os
 import sys
 
-from mcs.adapter.local import LocalAdapter
+from mcs.adapter.local import LocalAdapter, ShellSpec, find_shell
 from mcs.driver.bash import ExecutorPort
 
 
@@ -58,6 +59,59 @@ class TestPinnedShell:
                                env={"MCS_TEST_MARKER": "42"})
         r = adapter.exec("import os; print(os.environ['MCS_TEST_MARKER'])")
         assert "42" in r.stdout
+
+
+class TestFindShell:
+    """The measured cascade: bash strongly preferred, PowerShell the declared
+    fallback, cmd the honest last resort no harness *chooses*."""
+
+    def test_this_machine_states_a_shell(self):
+        """Wherever the suite runs, the statement must be usable -- and here
+        (POSIX, or Windows with Git installed) that means bash."""
+        spec = find_shell()
+        assert spec.name == "bash"
+        r = LocalAdapter(shell=spec).exec("echo via-found-shell")
+        assert r.exit_code == 0 and "via-found-shell" in r.stdout
+
+    def test_an_override_wins_and_is_trusted(self):
+        spec = find_shell(r"D:\portable\git\bash.exe")
+        assert spec.argv[0] == r"D:\portable\git\bash.exe"
+        assert spec.name == "bash"
+
+    def test_without_bash_powershell_is_the_declared_fallback(self):
+        spec = find_shell(_which=lambda n: "pwsh.exe" if n == "pwsh" else None,
+                          _exists=lambda p: False)
+        assert spec.name == "powershell"
+        assert "pwsh" in spec.note
+        assert "-NoProfile" in spec.argv          # pi's measured start flags
+
+    def test_a_bare_machine_still_answers(self):
+        spec = find_shell(_which=lambda n: None, _exists=lambda p: False)
+        # On Windows that is cmd -- the last resort no harness chooses; on
+        # POSIX /bin/sh always exists and speaks the bash tool's syntax.
+        assert spec.name == ("cmd" if os.name == "nt" else "bash")
+
+
+class TestModalityIdentity:
+    """tool_name and shell_note are construction facts the driver reads."""
+
+    def test_a_shellspec_names_the_modality(self):
+        adapter = LocalAdapter(shell=ShellSpec(("pwsh", "-Command"),
+                                               "powershell", "PowerShell 7+"))
+        assert adapter.tool_name == "powershell"
+        assert adapter.shell_note == "PowerShell 7+"
+
+    def test_the_platform_default_is_named_honestly(self):
+        adapter = LocalAdapter()
+        assert adapter.tool_name == ("cmd" if os.name == "nt" else "bash")
+        assert adapter.shell_note
+
+    def test_a_bare_argv_names_no_syntax_world(self):
+        """The client pinned a binary without a ShellSpec: the note states at
+        least the binary, but no tool name is claimed."""
+        adapter = _py()
+        assert adapter.tool_name is None
+        assert "python" in adapter.shell_note.lower()
 
 
 class TestTimeout:

@@ -68,6 +68,10 @@ class DockerAdapter:
         Custom Docker daemon URL.  Defaults to the local socket.
     """
 
+    #: Read structurally by the bash driver: exec runs /bin/sh -c
+    #: inside the container, so the tool description can say so.
+    shell_note = "the container's /bin/sh (POSIX)"
+
     def __init__(
         self,
         *,

@@ -61,6 +61,10 @@ class SSHAdapter:
         or ``"warn"`` (log but accept).
     """
 
+    #: Read structurally by the bash driver: exec_command runs in the
+    #: remote user's login shell -- POSIX on any Linux server.
+    shell_note = "the remote user's login shell (POSIX)"
+
     def __init__(
         self,
         *,
