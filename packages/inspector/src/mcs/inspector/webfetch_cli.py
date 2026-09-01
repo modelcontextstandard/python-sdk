@@ -104,8 +104,8 @@ class _GlassLLM:
         u = r.usage
         trunc = "  [red]TRUNCATED[/red]" if r.truncated else ""
         console.print(
-            f"  [dim]llm #{n:<3} {'':<7} <- {u.prompt or '?':>7} in / "
-            f"{u.completion or '?'} out{trunc}[/dim]"
+            f"  [dim]llm #{n:<3} {'':<7} <- {u.input or '?':>7} in / "
+            f"{u.output or '?'} out{trunc}[/dim]"
         )
         return r
 

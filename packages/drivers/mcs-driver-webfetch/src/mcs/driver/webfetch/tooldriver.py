@@ -252,8 +252,10 @@ class WebfetchToolDriver(MCSToolDriver):
             With it, ``fetch_page(url, prompt=...)`` reads the whole page
             server-side -- however long -- and returns only the answer, plus what
             it took (`summary_strategy`, `chunks_read`, `truncated`,
-            `source_chars`). The disposable context lives in the summarizer; the
-            conversation pays for the answer.
+            `source_chars`, and the measured `usage` of the condensation model).
+            The disposable context lives in the summarizer; the conversation pays
+            for the answer -- and the usage block is where a client sees, in
+            numbers, what it did not have to pay.
         """
         chosen = _connector if _connector is not None else connector
         if chosen is None:
@@ -333,6 +335,17 @@ class WebfetchToolDriver(MCSToolDriver):
                 # different question against the same URL re-reads it all.
                 "source_chars": len(content),
             }
+            # What the disposable context cost, measured -- through the normal tool
+            # result, so the CLIENT can track tool-layer tokens without wrapping the
+            # port. `input` here is exactly what the conversation did NOT pay for.
+            # Only reported fields appear: None means unmeasured, not free.
+            usage = {name: value for name, value in (
+                ("input", s.usage.input), ("output", s.usage.output),
+                ("reasoning", s.usage.reasoning),
+                ("cache_read", s.usage.cache_read),
+                ("cache_write", s.usage.cache_write)) if value is not None}
+            if usage:
+                result["usage"] = usage
             if not s.text and not s.truncated:
                 result["note"] = ("The page contains nothing relevant to the "
                                   "prompt. That is the page's answer, not an error.")

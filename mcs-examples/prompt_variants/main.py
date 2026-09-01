@@ -186,7 +186,7 @@ def main() -> None:
             meta = (f"prompts={variant_state(router.model)}  "
                     f"strategy={s.strategy}  chunks={s.chunks}  "
                     f"truncated={s.truncated}  "
-                    f"tokens={s.usage.prompt or '?'}/{s.usage.completion or '?'}")
+                    f"tokens={s.usage.input or '?'}/{s.usage.output or '?'}")
             console.print(Panel(f"{s.text}\n\n[dim]{meta}[/dim]",
                                 title=f"[bold]{name}[/bold]", border_style="cyan"))
 

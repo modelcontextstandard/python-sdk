@@ -53,9 +53,10 @@ What it does instead is report what the backend **measured**:
 ```python
 answer = llm.complete(prompt, system="Answer only from the text.", max_completion_tokens=500)
 
-answer.text, answer.usage.prompt, answer.usage.completion
+answer.text, answer.usage.input, answer.usage.output
 answer.usage.reasoning     # from completion_tokens_details, where a backend sends it
-answer.usage.cached        # from prompt_tokens_details
+answer.usage.cache_read    # from prompt_tokens_details
+answer.usage.cache_write   # gateway top-level field; None on the plain wire
 answer.truncated           # finish_reason == "length"
 answer.meta["usage"]       # the untouched block, so an unanticipated field is not lost
 ```

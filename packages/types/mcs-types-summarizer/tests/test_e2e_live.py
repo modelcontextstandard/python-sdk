@@ -66,7 +66,7 @@ def test_a_buried_fact_survives_chunking_and_merging(llm):
     assert s.strategy == "map_reduce"
     assert s.chunks >= 2, "the budget was meant to force real chunking"
     assert "drei" in s.text.lower() or "3" in s.text, f"got {s.text!r}"
-    assert s.usage.prompt and s.usage.prompt > 0           # measured, summed cost
+    assert s.usage.input and s.usage.input > 0           # measured, summed cost
 
 
 def test_truncation_is_flagged_never_silent(llm):
@@ -81,4 +81,4 @@ def test_truncation_is_flagged_never_silent(llm):
             "'budget swallowed by reasoning' would be indistinguishable"
         )
     else:
-        assert s.usage.completion is None or s.usage.completion <= 24 + 8
+        assert s.usage.output is None or s.usage.output <= 24 + 8

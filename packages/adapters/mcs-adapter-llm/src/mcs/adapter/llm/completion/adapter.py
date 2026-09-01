@@ -646,14 +646,18 @@ class CompletionLLMAdapter:
             if prompt_key not in usage and completion_key not in usage:
                 continue
             return TokenUsage(
-                prompt=_int(usage, prompt_key),
-                completion=_int(usage, completion_key),
+                input=_int(usage, prompt_key),
+                output=_int(usage, completion_key),
                 total=_int(usage, total_key),
                 # The breakdowns are OpenAI's shape and simply absent elsewhere -- which
                 # is why they are Optional rather than defaulted to zero: "not reported"
                 # and "none spent" are different facts.
                 reasoning=_int(usage.get("completion_tokens_details"), "reasoning_tokens"),
-                cached=_int(usage.get("prompt_tokens_details"), "cached_tokens"),
+                cache_read=_int(usage.get("prompt_tokens_details"), "cached_tokens"),
+                # Not a Chat Completions field -- but gateways speaking this wire over
+                # Anthropic models surface the write count top-level (measured:
+                # LiteLLM proxy). Absent stays None: the wire has no such concept.
+                cache_write=_int(usage, "cache_creation_input_tokens"),
             )
         return TokenUsage()
 

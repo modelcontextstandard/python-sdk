@@ -73,8 +73,8 @@ def test_the_backend_measures_what_we_would_have_guessed(llm):
     tokenizer, free with every call. A caller that compares them against
     ``estimate_tokens`` stops guessing after the first round."""
     answer = llm.complete(QUESTION, system=STEERING, max_completion_tokens=2000)
-    assert answer.usage.prompt and answer.usage.prompt > 0
-    assert answer.usage.completion and answer.usage.completion > 0
+    assert answer.usage.input and answer.usage.input > 0
+    assert answer.usage.output and answer.usage.output > 0
     assert answer.model, "a backend should say which model answered"
 
 
@@ -91,7 +91,7 @@ def test_a_thinking_model_can_swallow_the_whole_answer_budget(llm):
     """
     answer = llm.complete(QUESTION, system=STEERING, max_completion_tokens=48)
     if answer.text.strip():
-        assert answer.usage.completion and answer.usage.completion <= 48 + 8
+        assert answer.usage.output and answer.usage.output <= 48 + 8
     else:
         assert answer.truncated, (
             "an empty answer must be explained by finish_reason='length'; otherwise a "

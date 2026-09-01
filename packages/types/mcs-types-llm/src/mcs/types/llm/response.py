@@ -27,32 +27,50 @@ class TokenUsage:
     a caller calibrating its estimate must skip an unreported call, not record it as
     having cost nothing.
 
+    The names follow the **vendor-neutral vocabulary**: the Responses API, the Messages
+    API and OpenTelemetry's GenAI conventions all say input/output, and OTel has
+    deprecated prompt/completion outright -- only the oldest wire (Chat Completions)
+    still spells them the old way. Each adapter translates its wire's spelling here,
+    once, so consumers never meet a dialect.
+
     Attributes
     ----------
-    prompt :
-        Tokens the input occupied. The interesting one for budgeting: it is the true
-        size of what was just sent, against which an estimate can be calibrated.
-    completion :
+    input :
+        Tokens the request occupied -- **everything that went in, cached tokens
+        included**. The semantic is pinned here because the wires disagree: OpenAI's
+        ``prompt_tokens`` includes cached tokens, Anthropic's ``input_tokens`` excludes
+        its cache fields -- an adapter over the latter sums before reporting. The
+        interesting field for budgeting: the true size of what was just sent, against
+        which an estimate can be calibrated.
+    output :
         Tokens the answer occupied -- **including** any the model spent thinking.
     total :
         Both together, as reported. Not derived by MCS -- if a backend states it, it is
         the backend's arithmetic that counts.
     reasoning :
-        Of :attr:`completion`, how many went into reasoning the caller never sees. The
+        Of :attr:`output`, how many went into reasoning the caller never sees. The
         field exists because the gap it measures is a trap: ask a reasoning model for a
         summary with a modest answer budget and the thinking can consume all of it,
         leaving an *empty* answer and ``finish_reason="length"`` -- no error, no text.
         ``None`` where the backend does not break it down (most do not).
-    cached :
-        Of :attr:`prompt`, how many were served from a prompt cache. Cost information
-        rather than budget information: cached tokens still occupy the window.
+    cache_read :
+        Of :attr:`input`, how many were served from a prompt cache (discounted where
+        priced). Cost information rather than budget information: cached tokens still
+        occupy the window.
+    cache_write :
+        Of :attr:`input`, how many were *written* to a prompt cache this call --
+        billed at a premium where the concept exists (Anthropic prices 1.25x/2x by
+        cache TTL), which is why cost accounting needs it separate. The Chat
+        Completions wire has no such field and honestly reports ``None``; gateways
+        that surface it top-level (``cache_creation_input_tokens``) are read.
     """
 
-    prompt: int | None = None
-    completion: int | None = None
+    input: int | None = None
+    output: int | None = None
     total: int | None = None
     reasoning: int | None = None
-    cached: int | None = None
+    cache_read: int | None = None
+    cache_write: int | None = None
 
 
 @dataclass(frozen=True)

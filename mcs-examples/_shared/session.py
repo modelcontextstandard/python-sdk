@@ -212,6 +212,9 @@ class ChatSession:
                 if content.strip():   # the final answer; the driver did not record it
                     self.messages.append({"role": "assistant", "content": content})
                 self.view.answer_ends()
+                # Chat spend from the model port, tool spend the view collected from
+                # the results as they passed -- shown together, once per turn.
+                self.view.usage_footer(self.llm.spent)
                 return
 
             rounds += 1
@@ -260,6 +263,7 @@ class ChatSession:
             content = llm_out.get("content", "") or ""
             self.messages.append({"role": "assistant", "content": content})
             self.view.answer_block(content)
+            self.view.usage_footer(self.llm.spent)
             return
 
         self.view.warn("Max tool rounds reached -- stopping.")

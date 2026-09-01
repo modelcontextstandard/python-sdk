@@ -116,10 +116,11 @@ no such stack — never a silent default when nothing is passed.
 answer = llm.complete(prompt, system="Answer only from the text.", max_completion_tokens=500)
 
 answer.text            # the assistant's text
-answer.usage.prompt    # measured input tokens -- the model's own count
-answer.usage.completion
-answer.usage.reasoning # of the completion, how much went into thinking
-answer.usage.cached    # of the prompt, how much came from a cache
+answer.usage.input      # measured input tokens -- the model's own count, cache included
+answer.usage.output     # answer tokens, thinking included
+answer.usage.reasoning  # of the output, how much went into thinking
+answer.usage.cache_read   # of the input, how much came from a prompt cache
+answer.usage.cache_write  # written to a cache this call -- premium-billed where priced
 answer.truncated       # finish_reason == "length"
 answer.model           # which model actually answered -- a gateway may reroute
 answer.meta            # the untouched usage block, and any reasoning text
@@ -164,7 +165,7 @@ The ~4 figure is also English-prose-specific — German compounds, code, JSON an
 all pack fewer characters per token, and those are exactly what a document summarizer
 meets.
 
-After the first call, stop guessing: `usage.prompt` is the truth for *this* model and
+After the first call, stop guessing: `usage.input` is the truth for *this* model and
 *this* kind of text, and the ratio it implies can be fed back in as `chars_per_token`.
 
 ## Overflow is a type, not a message

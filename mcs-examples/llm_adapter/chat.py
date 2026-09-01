@@ -266,7 +266,7 @@ def main() -> None:
             console.print(Panel(answer.text or "[red](empty -- see TRUNCATED)[/red]",
                                 title="content", expand=False))
             console.print(
-                f"[dim]{answer.model or model_id}  in={u.prompt} out={u.completion}"
+                f"[dim]{answer.model or model_id}  in={u.input} out={u.output}"
                 + (" [red]TRUNCATED[/red]" if answer.truncated else "") + "[/dim]\n")
 
 

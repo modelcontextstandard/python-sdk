@@ -36,6 +36,10 @@ class ChatView:
         self._open = False        # a line was started with end="" and not closed
         self._status: Status | None = None   # live spinner, while nothing can be shown
         self._needs_header = False   # the next text must (re-)print "Assistant:"
+        # What the TOOL layer's own models spent, session-wide -- collected from
+        # tool results that carry a `usage` block (a condensing fetch_page does).
+        self._tool_spent: dict[str, int] = {}
+        self._tool_runs = 0
 
     # -- session framing ------------------------------------------------------
 
@@ -243,6 +247,16 @@ class ChatView:
     def driver_response(self, dr: DriverResponse) -> None:
         """Show the per-call report (debug only). The answer line re-opens itself
         when the next chunk of text arrives."""
+        # Counted regardless of debug: a tool result that carries a `usage` block
+        # is a second model working on the conversation's behalf, and the footer
+        # (see usage_footer) shows that spend beside the chat's own.
+        for rec in dr.executed_calls or []:
+            usage = rec.result.get("usage") if isinstance(rec.result, dict) else None
+            if isinstance(usage, dict):
+                self._tool_runs += 1
+                for name, value in usage.items():
+                    if isinstance(value, int):
+                        self._tool_spent[name] = self._tool_spent.get(name, 0) + value
         if not self.debug:
             return
         self._interrupt()
@@ -259,6 +273,32 @@ class ChatView:
         if dr.retry_prompt:
             parts.append(f"retry_prompt: {dr.retry_prompt}")
         self.console.print(Panel("\n".join(parts), title="DriverResponse", border_style="dim"))
+
+    def usage_footer(self, chat: dict[str, int]) -> None:
+        """One dim line per turn, cumulative: what the conversation's model has
+        measurably cost so far, beside what the tool layer's models spent on its
+        behalf. The contrast is the point -- with a condensing summarizer the big
+        numbers sit in the tools column, and the chat column is what the context
+        actually pays. Backends that report nothing print nothing.
+        """
+        def fmt(spent: dict[str, int]) -> str:
+            main = f"{spent.get('input', 0):,} in / {spent.get('output', 0):,} out"
+            detail = ", ".join(
+                f"{name} {spent[name]:,}"
+                for name in ("reasoning", "cache_read", "cache_write")
+                if spent.get(name))
+            return main + (f" ({detail})" if detail else "")
+
+        parts = []
+        if chat:
+            parts.append(f"chat {fmt(chat)}")
+        if self._tool_spent:
+            runs = self._tool_runs
+            parts.append(f"tools {fmt(self._tool_spent)} "
+                         f"({runs} run{'s' if runs != 1 else ''})")
+        if parts:
+            self._interrupt()
+            self.console.print(f"[dim]tokens  {'  ·  '.join(parts)}[/dim]")
 
     # -- status notes ---------------------------------------------------------
 

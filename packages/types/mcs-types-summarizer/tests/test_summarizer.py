@@ -53,7 +53,7 @@ class FakeLLM:
             text=text,
             # Honest usage, like a real backend: report what the prompt holds. A fixed
             # number would look like silent clipping to the truncation detector.
-            usage=TokenUsage(prompt=estimate_tokens(prompt), completion=7),
+            usage=TokenUsage(input=estimate_tokens(prompt), output=7),
             finish_reason="length" if n in self.truncate else "stop",
         )
 
@@ -241,7 +241,7 @@ class TestSilentTruncation:
                                  max_completion_tokens=max_completion_tokens)
             reported = min(self.effective, estimate_tokens(prompt))
             return LLMResponse(text=r.text, finish_reason=r.finish_reason,
-                               usage=TokenUsage(prompt=reported, completion=7))
+                               usage=TokenUsage(input=reported, output=7))
 
     def test_clipping_is_detected_and_relearned(self):
         """A 100k-window claim against a tiny effective window: the mismatch between
@@ -278,8 +278,8 @@ class TestSilentTruncation:
     def test_usage_is_summed_over_every_call(self):
         llm = FakeLLM()
         s = LLMSummarizer(llm).summarize(BIG, QUERY)
-        assert s.usage.prompt == sum(estimate_tokens(p) for p in llm.calls)
-        assert s.usage.completion == 7 * len(llm.calls)
+        assert s.usage.input == sum(estimate_tokens(p) for p in llm.calls)
+        assert s.usage.output == 7 * len(llm.calls)
         assert s.usage.reasoning is None       # never reported -> stays None, not 0
 
     def test_document_order_survives_chunking_into_the_merge(self):
@@ -438,8 +438,8 @@ class TestCalibration:
             r = super().complete(prompt, system=system,
                                  max_completion_tokens=max_completion_tokens)
             return LLMResponse(text=r.text, finish_reason=r.finish_reason,
-                               usage=TokenUsage(prompt=int(len(prompt) / 1.5),
-                                                completion=7))
+                               usage=TokenUsage(input=int(len(prompt) / 1.5),
+                                                output=7))
 
     class SparseTokenLLM(FakeLLM):
         """Reports usage as if text packed ~5 chars/token (airy English prose)."""
@@ -448,8 +448,8 @@ class TestCalibration:
             r = super().complete(prompt, system=system,
                                  max_completion_tokens=max_completion_tokens)
             return LLMResponse(text=r.text, finish_reason=r.finish_reason,
-                               usage=TokenUsage(prompt=max(1, int(len(prompt) / 5)),
-                                                completion=7))
+                               usage=TokenUsage(input=max(1, int(len(prompt) / 5)),
+                                                output=7))
 
     def test_denser_reality_tightens_the_ratio(self):
         """The dangerous direction -- estimates too low, budgets overflow -- is

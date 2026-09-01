@@ -427,7 +427,7 @@ class LLMSummarizer:
         ignored side. (The denominator also includes system prompt and chat-template
         overhead, biasing measurements slightly conservative -- same direction, fine.)
         """
-        reported = response.usage.prompt
+        reported = response.usage.input
         if reported and reported > 0:
             measured = len(prompt) / reported
             if measured < self._chars_per_token:
@@ -450,7 +450,7 @@ class LLMSummarizer:
         is not detectable by arithmetic and stays the operator's job (set ``num_ctx``
         to match the model card).
         """
-        reported = response.usage.prompt
+        reported = response.usage.input
         if reported is None:
             return
         estimated = estimate_tokens(prompt, self._chars_per_token)
@@ -558,6 +558,7 @@ class LLMSummarizer:
             values = [getattr(r.usage, name) for r in responses
                       if getattr(r.usage, name) is not None]
             return sum(values) if values else None
-        return TokenUsage(prompt=total("prompt"), completion=total("completion"),
+        return TokenUsage(input=total("input"), output=total("output"),
                           total=total("total"), reasoning=total("reasoning"),
-                          cached=total("cached"))
+                          cache_read=total("cache_read"),
+                          cache_write=total("cache_write"))

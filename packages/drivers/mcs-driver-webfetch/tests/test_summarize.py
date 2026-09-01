@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from mcs.driver.webfetch import SummarizerNotConfigured, WebfetchToolDriver
+from mcs.types.llm import TokenUsage
 from mcs.types.summarizer import Summary, SummarizerPort
 from mcs.types.web import WebPage
 
@@ -28,15 +29,17 @@ class FakeConnector:
 class FakeSummarizer:
     """Records the condensation request; answers deterministically."""
 
-    def __init__(self, answer: str = "Drei Monate.", truncated: bool = False):
+    def __init__(self, answer: str = "Drei Monate.", truncated: bool = False,
+                 usage: TokenUsage = TokenUsage()):
         self.seen: list[tuple[str, str]] = []
         self.answer = answer
         self.truncated = truncated
+        self.usage = usage
 
     def summarize(self, text: str, query: str) -> Summary:
         self.seen.append((text, query))
         return Summary(text=self.answer, query=query, strategy="map_reduce",
-                       chunks=3, truncated=self.truncated)
+                       chunks=3, truncated=self.truncated, usage=self.usage)
 
 
 def _driver(**kw) -> WebfetchToolDriver:
@@ -89,6 +92,22 @@ class TestCondensation:
         assert result["truncated"] is False
         assert result["source_chars"] > 0               # the claim check
         assert result["url"] == "https://example.org/doc"
+
+    def test_the_condensers_cost_travels_on_the_result(self):
+        """The client's window into the tool layer: what the disposable context
+        measurably cost rides on the normal tool result -- input being exactly what
+        the conversation did NOT pay for."""
+        fake = FakeSummarizer(usage=TokenUsage(input=8_900, output=120, reasoning=40))
+        result = _driver(summarizer=fake).execute_tool(
+            "fetch_page", {"url": "https://x.org", "prompt": "Frist?"})
+        assert result["usage"] == {"input": 8_900, "output": 120, "reasoning": 40}
+
+    def test_unmeasured_cost_is_absent_not_zero(self):
+        """A summarizer whose backend reported nothing must not put zeros into the
+        result -- absent means unmeasured, and unmeasured is not free."""
+        result = _driver(summarizer=FakeSummarizer()).execute_tool(
+            "fetch_page", {"url": "https://x.org", "prompt": "Frist?"})
+        assert "usage" not in result
 
     def test_a_truncated_summary_is_flagged(self):
         """The measured trap, surfaced at the tool boundary: an incomplete answer

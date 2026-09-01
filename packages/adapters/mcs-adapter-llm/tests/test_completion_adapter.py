@@ -246,27 +246,39 @@ class TestResponse:
         payload = _answer("ok", usage={"prompt_tokens": 52, "completion_tokens": 8,
                                        "total_tokens": 60})
         usage = _adapter(FakeHttp(payload=payload)).complete("q").usage
-        assert (usage.prompt, usage.completion, usage.total) == (52, 8, 60)
+        assert (usage.input, usage.output, usage.total) == (52, 8, 60)
 
     def test_unreported_usage_is_none_not_zero(self):
         """"Not reported" and "none spent" are different facts, and a caller calibrating
         an estimate must skip the first rather than record it as costing nothing."""
         usage = _adapter(FakeHttp(payload=_answer("ok"))).complete("q").usage
-        assert usage.prompt is None and usage.total is None
+        assert usage.input is None and usage.total is None
 
-    def test_reasoning_and_cached_breakdowns_are_read(self):
+    def test_reasoning_and_cache_read_breakdowns_are_read(self):
         payload = _answer("ok", usage={
             "prompt_tokens": 100, "completion_tokens": 319, "total_tokens": 419,
             "completion_tokens_details": {"reasoning_tokens": 300},
             "prompt_tokens_details": {"cached_tokens": 64},
         })
         usage = _adapter(FakeHttp(payload=payload)).complete("q").usage
-        assert usage.reasoning == 300 and usage.cached == 64
+        assert usage.reasoning == 300 and usage.cache_read == 64
+        assert usage.cache_write is None       # no such concept on this wire: not 0
+
+    def test_a_gateway_cache_write_count_is_read(self):
+        """Not a Chat Completions field -- but gateways speaking this wire over
+        Anthropic models surface the write count top-level (LiteLLM proxy), and cost
+        accounting needs it: cache writes bill at a premium."""
+        payload = _answer("ok", usage={
+            "prompt_tokens": 100, "completion_tokens": 8,
+            "cache_creation_input_tokens": 90,
+        })
+        usage = _adapter(FakeHttp(payload=payload)).complete("q").usage
+        assert usage.cache_write == 90
 
     def test_ollama_field_names_are_understood(self):
         payload = _answer("ok", usage={"prompt_eval_count": 52, "eval_count": 8})
         usage = _adapter(FakeHttp(payload=payload)).complete("q").usage
-        assert (usage.prompt, usage.completion, usage.total) == (52, 8, None)
+        assert (usage.input, usage.output, usage.total) == (52, 8, None)
 
     def test_raw_usage_survives_in_meta(self):
         """A breakdown we did not anticipate must not be thrown away."""
